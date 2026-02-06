@@ -4,24 +4,77 @@ Multi-agent orchestration system for [Claude Code](https://docs.anthropic.com/en
 
 Built in Elixir, leveraging OTP supervision trees for process management, Phoenix PubSub for messaging, and SQLite for persistence.
 
-## Quick Start
+## Getting Started
+
+### 1. Install prerequisites
+
+You need three things on your machine:
+
+| Dependency | Version | Install |
+|------------|---------|---------|
+| **Elixir** | 1.15+ | `brew install elixir` or [elixir-lang.org/install](https://elixir-lang.org/install.html) |
+| **Git** | 2.25+ | `brew install git` or [git-scm.com](https://git-scm.com) |
+| **Claude Code** | latest | `npm install -g @anthropic-ai/claude-code` ([docs](https://docs.anthropic.com/en/docs/claude-code)) |
+
+Verify everything is ready:
 
 ```bash
-# Build the CLI
-mix deps.get && mix escript.build
-
-# Initialize a hive workspace (auto-discovers git repos)
-./hive init ~/my-hive --quick
-
-# Add a project manually
-cd ~/my-hive
-./hive comb add /path/to/repo --name myproject
-
-# Start the Queen orchestrator
-./hive queen
+elixir --version   # should print 1.15+
+git --version      # should print 2.25+
+claude --version   # should print a version
 ```
 
-Then tell the Queen what you want built. She'll break it into jobs, spawn worker bees, and coordinate the work.
+### 2. Build the Hive CLI
+
+```bash
+git clone git@github.com:mpurdon/hive.git
+cd hive
+mix deps.get
+mix escript.build
+```
+
+This produces a `./hive` binary. Optionally move it to your PATH:
+
+```bash
+cp hive /usr/local/bin/
+```
+
+### 3. Create a hive workspace
+
+The quickest way -- auto-discovers any git repos in the target directory:
+
+```bash
+hive init ~/my-hive --quick
+```
+
+Or step by step:
+
+```bash
+hive init ~/my-hive
+cd ~/my-hive
+hive comb add /path/to/your/repo --name myproject
+```
+
+### 4. Start the Queen
+
+```bash
+cd ~/my-hive
+hive queen
+```
+
+Tell the Queen what you want built. She'll analyze your request, break it into jobs, spawn worker bees (parallel Claude instances), and coordinate them to completion.
+
+### 5. Monitor progress
+
+```bash
+hive watch              # live terminal progress
+hive quest list         # see active quests
+hive bee list           # see running bees
+hive costs summary      # check token spend
+hive dashboard          # web UI at localhost:4040
+```
+
+Run `hive doctor` at any time to verify your setup is healthy.
 
 ## How It Works
 
@@ -47,28 +100,6 @@ You: "Build user authentication"
 ```
 
 The Queen never writes code herself -- she only delegates. Each bee gets its own git worktree (cell) so multiple agents can work on the same repo without conflicts.
-
-## Prerequisites
-
-- **Elixir** 1.15+
-- **Git** 2.25+ (for worktree support)
-- **Claude Code** CLI (installed and authenticated)
-
-## Installation
-
-Clone the repo and build the escript:
-
-```bash
-git clone <repo-url> && cd hive
-mix deps.get
-mix escript.build
-```
-
-This produces a `./hive` binary. Move it to your PATH:
-
-```bash
-cp hive /usr/local/bin/
-```
 
 ## Core Concepts
 
