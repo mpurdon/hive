@@ -56,7 +56,7 @@ defmodule Hive.Bees do
 
   The wrapper script runs Claude headless, then calls `hive` CLI to
   update the bee/job status when Claude exits. This avoids keeping
-  the escript alive (which would cause CubDB multi-process corruption).
+  the escript alive (which would block the store file).
 
   Returns `{:ok, bee}` or `{:error, reason}`.
   """

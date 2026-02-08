@@ -4,7 +4,7 @@ defmodule Hive.Init do
 
   The initialization pipeline creates the directory structure, writes the
   default configuration, seeds the Queen's instructions, and bootstraps the
-  CubDB store.
+  ETF file store.
 
   ## Directory structure
 
@@ -13,7 +13,7 @@ defmodule Hive.Init do
           +-- config.toml
           +-- queen/
           |   +-- QUEEN.md
-          +-- store/             (CubDB data directory)
+          +-- store/             (ETF file store directory)
   """
 
   alias Hive.Config
@@ -137,7 +137,7 @@ defmodule Hive.Init do
   Initializes a Hive workspace at `path`.
 
   Creates the `.hive/` directory structure, writes the default config,
-  seeds the Queen's instruction file, and starts the CubDB store.
+  seeds the Queen's instruction file, and starts the ETF file store.
 
   ## Options
 

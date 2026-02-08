@@ -40,7 +40,6 @@ defmodule Hive.MixProject do
 
   defp deps do
     [
-      {:cubdb, "~> 2.0"},
       {:phoenix_pubsub, "~> 2.1"},
       {:phoenix, "~> 1.7"},
       {:phoenix_live_view, "~> 1.0"},
