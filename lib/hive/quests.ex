@@ -7,29 +7,48 @@ defmodule Hive.Quests do
   a pure function that maps job statuses to a quest status.
 
   This is a pure context module: no process state, just data transformations
-  against the database.
+  against the store.
   """
 
-  import Ecto.Query
-
-  alias Hive.Repo
-  alias Hive.Schema.{Job, Quest}
+  alias Hive.Store
 
   # -- Public API --------------------------------------------------------------
 
   @doc """
   Creates a new quest.
 
-  Required attrs: `name`.
-  Optional: `comb_id`.
+  Required attrs: `goal`.
+  Optional: `comb_id`, `name` (auto-generated from goal if omitted).
 
-  Returns `{:ok, quest}` or `{:error, changeset}`.
+  Returns `{:ok, quest}` or `{:error, reason}`.
   """
-  @spec create(map()) :: {:ok, Quest.t()} | {:error, Ecto.Changeset.t()}
+  @spec create(map()) :: {:ok, map()} | {:error, term()}
   def create(attrs) do
-    %Quest{}
-    |> Quest.changeset(attrs)
-    |> Repo.insert()
+    goal = attrs[:goal] || attrs["goal"]
+
+    if is_nil(goal) or goal == "" do
+      {:error, {:missing_fields, [:goal]}}
+    else
+      name = attrs[:name] || attrs["name"] || generate_name(goal)
+
+      record = %{
+        name: name,
+        goal: goal,
+        status: attrs[:status] || "pending",
+        comb_id: attrs[:comb_id] || attrs["comb_id"]
+      }
+
+      Store.insert(:quests, record)
+    end
+  end
+
+  defp generate_name(goal) do
+    goal
+    |> String.slice(0, 50)
+    |> String.downcase()
+    |> String.replace(~r/[^a-z0-9\s-]/, "")
+    |> String.trim()
+    |> String.replace(~r/\s+/, "-")
   end
 
   @doc """
@@ -39,24 +58,46 @@ defmodule Hive.Quests do
 
     * `:status` - filter by quest status
   """
-  @spec list(keyword()) :: [Quest.t()]
+  @spec list(keyword()) :: [map()]
   def list(opts \\ []) do
-    Quest
-    |> apply_filter(:status, Keyword.get(opts, :status))
-    |> order_by([q], desc: q.inserted_at)
-    |> Repo.all()
+    quests = Store.all(:quests)
+
+    quests =
+      case Keyword.get(opts, :status) do
+        nil -> quests
+        status -> Enum.filter(quests, &(&1.status == status))
+      end
+
+    Enum.sort_by(quests, & &1.inserted_at, {:desc, DateTime})
   end
 
   @doc """
-  Gets a quest by ID, preloading its jobs.
+  Deletes a quest by ID.
+
+  Returns `:ok` or `{:error, :not_found}`.
+  """
+  @spec delete(String.t()) :: :ok | {:error, :not_found}
+  def delete(quest_id) do
+    case Store.get(:quests, quest_id) do
+      nil -> {:error, :not_found}
+      _quest -> Store.delete(:quests, quest_id)
+    end
+  end
+
+  @doc """
+  Gets a quest by ID, with its jobs attached.
 
   Returns `{:ok, quest}` or `{:error, :not_found}`.
   """
-  @spec get(String.t()) :: {:ok, Quest.t()} | {:error, :not_found}
+  @spec get(String.t()) :: {:ok, map()} | {:error, :not_found}
   def get(quest_id) do
-    case Repo.get(Quest, quest_id) |> maybe_preload() do
-      nil -> {:error, :not_found}
-      quest -> {:ok, quest}
+    case Store.get(:quests, quest_id) do
+      nil ->
+        {:error, :not_found}
+
+      quest ->
+        jobs = Hive.Jobs.list(quest_id: quest_id)
+        {:ok, Map.put(quest, :jobs, jobs)}
     end
   end
 
@@ -64,7 +105,7 @@ defmodule Hive.Quests do
   Computes a quest's status from its jobs' statuses.
 
   This is a pure function -- it takes a list of job status strings and
-  returns the derived quest status. No database access.
+  returns the derived quest status. No store access.
 
   ## Rules
 
@@ -96,23 +137,15 @@ defmodule Hive.Quests do
   @doc """
   Recomputes and persists a quest's status from its current jobs.
 
-  Fetches job statuses from the database, runs `compute_status/1`,
-  and updates the quest record.
-
   Returns `{:ok, quest}` or `{:error, reason}`.
   """
-  @spec update_status!(String.t()) :: {:ok, Quest.t()} | {:error, term()}
+  @spec update_status!(String.t()) :: {:ok, map()} | {:error, term()}
   def update_status!(quest_id) do
     with {:ok, quest} <- get(quest_id) do
-      job_statuses =
-        quest.jobs
-        |> Enum.map(& &1.status)
-
+      job_statuses = Enum.map(quest.jobs, & &1.status)
       new_status = compute_status(job_statuses)
-
-      quest
-      |> Quest.changeset(%{status: new_status})
-      |> Repo.update()
+      updated = %{quest | status: new_status} |> Map.delete(:jobs)
+      Store.put(:quests, updated)
     end
   end
 
@@ -121,20 +154,12 @@ defmodule Hive.Quests do
 
   Merges the quest_id into the job attrs and delegates to `Hive.Jobs.create/1`.
 
-  Returns `{:ok, job}` or `{:error, changeset}`.
+  Returns `{:ok, job}` or `{:error, reason}`.
   """
-  @spec add_job(String.t(), map()) :: {:ok, Job.t()} | {:error, Ecto.Changeset.t()}
+  @spec add_job(String.t(), map()) :: {:ok, map()} | {:error, term()}
   def add_job(quest_id, job_attrs) do
     job_attrs
     |> Map.put(:quest_id, quest_id)
     |> Hive.Jobs.create()
   end
-
-  # -- Private helpers ---------------------------------------------------------
-
-  defp maybe_preload(nil), do: nil
-  defp maybe_preload(quest), do: Repo.preload(quest, :jobs)
-
-  defp apply_filter(query, _field, nil), do: query
-  defp apply_filter(query, :status, value), do: where(query, [q], q.status == ^value)
 end

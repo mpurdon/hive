@@ -15,10 +15,7 @@ defmodule Hive.Handoff do
   a structured handoff document and back.
   """
 
-  import Ecto.Query
-
-  alias Hive.Repo
-  alias Hive.Schema.{Bee, Cell, Job}
+  alias Hive.Store
 
   @handoff_subject "handoff"
 
@@ -32,7 +29,7 @@ defmodule Hive.Handoff do
 
   Returns `{:ok, waggle}` with the handoff content.
   """
-  @spec create(String.t(), keyword()) :: {:ok, Hive.Schema.Waggle.t()} | {:error, term()}
+  @spec create(String.t(), keyword()) :: {:ok, map()} | {:error, term()}
   def create(bee_id, opts \\ []) do
     with {:ok, context} <- build_handoff_context(bee_id, opts) do
       session_id = Keyword.get(opts, :session_id)
@@ -56,7 +53,7 @@ defmodule Hive.Handoff do
   """
   @spec resume(String.t(), String.t()) :: {:ok, String.t()} | {:error, term()}
   def resume(_bee_id, handoff_waggle_id) do
-    case Repo.get(Hive.Schema.Waggle, handoff_waggle_id) do
+    case Store.get(:waggles, handoff_waggle_id) do
       nil ->
         {:error, :handoff_not_found}
 
@@ -72,20 +69,18 @@ defmodule Hive.Handoff do
 
   Returns `{:ok, waggle}` if a handoff exists, `{:error, :no_handoff}` otherwise.
   """
-  @spec detect_handoff(String.t()) :: {:ok, Hive.Schema.Waggle.t()} | {:error, :no_handoff}
+  @spec detect_handoff(String.t()) :: {:ok, map()} | {:error, :no_handoff}
   def detect_handoff(bee_id) do
-    query =
-      from(w in Hive.Schema.Waggle,
-        where: w.to == ^bee_id,
-        where: w.subject == @handoff_subject,
-        where: w.read == false,
-        order_by: [desc: w.inserted_at],
-        limit: 1
-      )
+    waggle =
+      Store.filter(:waggles, fn w ->
+        w.to == bee_id and w.subject == @handoff_subject and w.read == false
+      end)
+      |> Enum.sort_by(& &1.inserted_at, {:desc, DateTime})
+      |> List.first()
 
-    case Repo.one(query) do
+    case waggle do
       nil -> {:error, :no_handoff}
-      waggle -> {:ok, waggle}
+      w -> {:ok, w}
     end
   end
 
@@ -150,7 +145,7 @@ defmodule Hive.Handoff do
   # -- Private: data fetching ------------------------------------------------
 
   defp fetch_bee(bee_id) do
-    case Repo.get(Bee, bee_id) do
+    case Store.get(:bees, bee_id) do
       nil -> {:error, :bee_not_found}
       bee -> {:ok, bee}
     end
@@ -158,17 +153,16 @@ defmodule Hive.Handoff do
 
   defp fetch_job(%{job_id: nil}), do: nil
 
-  defp fetch_job(%{job_id: job_id}) do
-    Repo.get(Job, job_id)
+  defp fetch_job(%{job_id: job_id}) when is_binary(job_id) do
+    Store.get(:jobs, job_id)
   end
 
+  defp fetch_job(_bee), do: nil
+
   defp fetch_cell(bee_id) do
-    from(c in Cell,
-      where: c.bee_id == ^bee_id,
-      order_by: [desc: c.inserted_at],
-      limit: 1
-    )
-    |> Repo.one()
+    Store.filter(:cells, fn c -> c.bee_id == bee_id end)
+    |> Enum.sort_by(& &1.inserted_at, {:desc, DateTime})
+    |> List.first()
   end
 
   # -- Private: formatting ---------------------------------------------------

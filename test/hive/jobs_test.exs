@@ -2,22 +2,23 @@ defmodule Hive.JobsTest do
   use ExUnit.Case, async: false
 
   alias Hive.Jobs
-  alias Hive.Repo
-  alias Hive.Schema.{Bee, Comb, Quest}
+  alias Hive.Store
 
   setup do
-    :ok = Ecto.Adapters.SQL.Sandbox.checkout(Repo)
-    Ecto.Adapters.SQL.Sandbox.mode(Repo, {:shared, self()})
+    tmp_dir = Path.join(System.tmp_dir!(), "hive_test_#{:erlang.unique_integer([:positive])}")
+    File.mkdir_p!(tmp_dir)
+    if Process.whereis(Hive.Store), do: GenServer.stop(Hive.Store)
+    {:ok, _} = Hive.Store.start_link(data_dir: tmp_dir)
+    on_exit(fn -> File.rm_rf!(tmp_dir) end)
 
     {:ok, comb} =
-      %Comb{}
-      |> Comb.changeset(%{name: "jobs-test-comb-#{:erlang.unique_integer([:positive])}"})
-      |> Repo.insert()
+      Store.insert(:combs, %{name: "jobs-test-comb-#{:erlang.unique_integer([:positive])}"})
 
     {:ok, quest} =
-      %Quest{}
-      |> Quest.changeset(%{name: "jobs-test-quest-#{:erlang.unique_integer([:positive])}"})
-      |> Repo.insert()
+      Store.insert(:quests, %{
+        name: "jobs-test-quest-#{:erlang.unique_integer([:positive])}",
+        status: "pending"
+      })
 
     %{comb: comb, quest: quest}
   end
@@ -34,10 +35,8 @@ defmodule Hive.JobsTest do
 
   defp create_bee(name \\ nil) do
     name = name || "test-bee-#{:erlang.unique_integer([:positive])}"
-
-    %Bee{}
-    |> Bee.changeset(%{name: name})
-    |> Repo.insert!()
+    {:ok, bee} = Store.insert(:bees, %{name: name, status: "starting"})
+    bee
   end
 
   describe "create/1" do
@@ -51,10 +50,8 @@ defmodule Hive.JobsTest do
     end
 
     test "requires title", %{quest: quest, comb: comb} do
-      assert {:error, changeset} =
+      assert {:error, {:missing_fields, [:title]}} =
                Jobs.create(%{quest_id: quest.id, comb_id: comb.id})
-
-      assert %{title: _} = errors_on(changeset)
     end
 
     test "accepts optional description", %{quest: quest, comb: comb} do
@@ -90,9 +87,10 @@ defmodule Hive.JobsTest do
       {:ok, _} = create_job(quest, comb)
 
       {:ok, other_quest} =
-        %Quest{}
-        |> Quest.changeset(%{name: "other-quest-#{:erlang.unique_integer([:positive])}"})
-        |> Repo.insert()
+        Store.insert(:quests, %{
+          name: "other-quest-#{:erlang.unique_integer([:positive])}",
+          status: "pending"
+        })
 
       {:ok, _} = create_job(other_quest, comb)
 
@@ -242,11 +240,5 @@ defmodule Hive.JobsTest do
 
       assert {:error, :invalid_transition} = Jobs.reset(job.id)
     end
-  end
-
-  # -- Helpers -----------------------------------------------------------------
-
-  defp errors_on(changeset) do
-    Ecto.Changeset.traverse_errors(changeset, fn {msg, _opts} -> msg end)
   end
 end

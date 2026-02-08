@@ -104,7 +104,7 @@ defmodule Hive.GitHub do
   @doc "Builds a Req client with GitHub auth."
   @spec client(Hive.Schema.Comb.t()) :: {:ok, Req.Request.t()} | {:error, :no_github_config}
   def client(comb) do
-    if comb.github_owner && comb.github_repo do
+    if Map.get(comb, :github_owner) && Map.get(comb, :github_repo) do
       token = github_token()
 
       headers =

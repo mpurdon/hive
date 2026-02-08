@@ -3,51 +3,37 @@ defmodule Hive.Waggle do
   Context module for the waggle messaging system.
 
   Waggles are inter-agent messages that flow between the Queen and her bees.
-  Each waggle is persisted to the database for auditability and also broadcast
+  Each waggle is persisted to the store for auditability and also broadcast
   via PubSub for real-time subscribers.
-
-  This is a context module -- no GenServer, no state. Every function is a
-  data transformation that touches the database and/or PubSub.
-
-  ## Topics
-
-  Subscribers receive messages on named topics:
-
-    * `"waggle:queen"` - messages addressed to the queen
-    * `"waggle:bee:<id>"` - messages addressed to a specific bee
-    * `"waggle:comb:<name>"` - messages related to a specific comb
   """
 
-  import Ecto.Query
-
-  alias Hive.Repo
-  alias Hive.Schema.Waggle, as: WaggleSchema
+  alias Hive.Store
 
   @pubsub Hive.PubSub
 
   # -- Public API ------------------------------------------------------------
 
   @doc """
-  Sends a waggle message, persisting it to the database and broadcasting
+  Sends a waggle message, persisting it to the store and broadcasting
   via PubSub.
 
-  Returns `{:ok, waggle}` or `{:error, changeset}`.
+  Returns `{:ok, waggle}` or `{:error, reason}`.
   """
   @spec send(String.t(), String.t(), String.t(), String.t(), String.t() | nil) ::
-          {:ok, WaggleSchema.t()} | {:error, Ecto.Changeset.t()}
+          {:ok, map()} | {:error, term()}
   def send(from, to, subject, body, metadata \\ nil) do
-    attrs = %{
+    record = %{
       from: from,
       to: to,
       subject: subject,
       body: body,
+      read: false,
       metadata: metadata
     }
 
-    with {:ok, waggle} <- WaggleSchema.changeset(attrs) |> Repo.insert() do
-      broadcast(to, {:waggle_received, waggle})
-      {:ok, waggle}
-    end
+    {:ok, waggle} = Store.insert(:waggles, record)
+    broadcast(to, {:waggle_received, waggle})
+    {:ok, waggle}
   end
 
   @doc """
@@ -59,28 +45,40 @@ defmodule Hive.Waggle do
     * `:from` - filter by sender
     * `:read` - filter by read status (`true` or `false`)
     * `:limit` - maximum number of results (default: 50)
-
-  Returns a list of waggle structs, most recent first.
   """
-  @spec list(keyword()) :: [WaggleSchema.t()]
+  @spec list(keyword()) :: [map()]
   def list(opts \\ []) do
     limit = Keyword.get(opts, :limit, 50)
 
-    WaggleSchema
-    |> apply_filter(:to, Keyword.get(opts, :to))
-    |> apply_filter(:from, Keyword.get(opts, :from))
-    |> apply_filter(:read, Keyword.get(opts, :read))
-    |> order_by([w], desc: w.inserted_at)
-    |> limit(^limit)
-    |> Repo.all()
+    waggles = Store.all(:waggles)
+
+    waggles =
+      case Keyword.get(opts, :to) do
+        nil -> waggles
+        v -> Enum.filter(waggles, &(&1.to == v))
+      end
+
+    waggles =
+      case Keyword.get(opts, :from) do
+        nil -> waggles
+        v -> Enum.filter(waggles, &(&1.from == v))
+      end
+
+    waggles =
+      case Keyword.get(opts, :read) do
+        nil -> waggles
+        v -> Enum.filter(waggles, &(&1.read == v))
+      end
+
+    waggles
+    |> Enum.sort_by(& &1.inserted_at, {:desc, DateTime})
+    |> Enum.take(limit)
   end
 
   @doc """
   Lists unread waggle messages for a given recipient.
-
-  Shorthand for `list(to: recipient, read: false)`.
   """
-  @spec list_unread(String.t()) :: [WaggleSchema.t()]
+  @spec list_unread(String.t()) :: [map()]
   def list_unread(recipient) do
     list(to: recipient, read: false)
   end
@@ -90,24 +88,19 @@ defmodule Hive.Waggle do
 
   Returns `{:ok, waggle}` or `{:error, :not_found}`.
   """
-  @spec mark_read(String.t()) :: {:ok, WaggleSchema.t()} | {:error, :not_found}
+  @spec mark_read(String.t()) :: {:ok, map()} | {:error, :not_found}
   def mark_read(waggle_id) do
-    case Repo.get(WaggleSchema, waggle_id) do
+    case Store.get(:waggles, waggle_id) do
       nil ->
         {:error, :not_found}
 
       waggle ->
-        waggle
-        |> Ecto.Changeset.change(read: true)
-        |> Repo.update()
+        updated = %{waggle | read: true}
+        Store.put(:waggles, updated)
     end
   end
 
-  @doc """
-  Subscribes the calling process to a PubSub topic.
-
-  Messages arrive as `{:waggle_received, %Hive.Schema.Waggle{}}`.
-  """
+  @doc "Subscribes the calling process to a PubSub topic."
   @spec subscribe(String.t()) :: :ok | {:error, term()}
   def subscribe(topic_string) do
     Phoenix.PubSub.subscribe(@pubsub, topic_string)
@@ -115,17 +108,6 @@ defmodule Hive.Waggle do
 
   @doc """
   Builds a canonical topic string for a given entity type and identifier.
-
-  ## Examples
-
-      iex> Hive.Waggle.topic(:queen, nil)
-      "waggle:queen"
-
-      iex> Hive.Waggle.topic(:bee, "bee-abc123")
-      "waggle:bee:bee-abc123"
-
-      iex> Hive.Waggle.topic(:comb, "myproject")
-      "waggle:comb:myproject"
   """
   @spec topic(:queen | :bee | :comb, String.t() | nil) :: String.t()
   def topic(:queen, _), do: "waggle:queen"
@@ -134,17 +116,9 @@ defmodule Hive.Waggle do
 
   # -- Private helpers -------------------------------------------------------
 
-  defp apply_filter(query, _field, nil), do: query
-  defp apply_filter(query, :to, value), do: where(query, [w], w.to == ^value)
-  defp apply_filter(query, :from, value), do: where(query, [w], w.from == ^value)
-  defp apply_filter(query, :read, value), do: where(query, [w], w.read == ^value)
-
   defp broadcast(to, message) do
     Phoenix.PubSub.broadcast(@pubsub, "waggle:#{to}", message)
   rescue
-    # PubSub may not be started in test or escript contexts.
-    # We persist first, broadcast second -- so a failed broadcast
-    # does not lose data.
     _ -> :ok
   end
 end

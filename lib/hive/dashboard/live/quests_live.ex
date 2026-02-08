@@ -150,11 +150,9 @@ defmodule Hive.Dashboard.QuestsLive do
   defp status_badge("pending"), do: "badge-grey"
   defp status_badge(_), do: "badge-grey"
 
-  defp has_jobs?(%{jobs: %Ecto.Association.NotLoaded{}}), do: false
   defp has_jobs?(%{jobs: jobs}) when is_list(jobs), do: jobs != []
   defp has_jobs?(_), do: false
 
-  defp job_count(%{jobs: %Ecto.Association.NotLoaded{}}), do: "-"
   defp job_count(%{jobs: jobs}) when is_list(jobs), do: "#{length(jobs)}"
   defp job_count(_), do: "-"
 end

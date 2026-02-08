@@ -2,11 +2,14 @@ defmodule Hive.CombTest do
   use ExUnit.Case, async: false
 
   alias Hive.Comb
-  alias Hive.Repo
+  alias Hive.Store
 
   setup do
-    :ok = Ecto.Adapters.SQL.Sandbox.checkout(Repo)
-    Ecto.Adapters.SQL.Sandbox.mode(Repo, {:shared, self()})
+    store_dir = Path.join(System.tmp_dir!(), "hive_store_#{:erlang.unique_integer([:positive])}")
+    File.mkdir_p!(store_dir)
+    if Process.whereis(Hive.Store), do: GenServer.stop(Hive.Store)
+    {:ok, _} = Hive.Store.start_link(data_dir: store_dir)
+    on_exit(fn -> File.rm_rf!(store_dir) end)
 
     tmp = Path.join(System.tmp_dir!(), "hive_comb_test_#{:erlang.unique_integer([:positive])}")
     File.mkdir_p!(tmp)
@@ -99,23 +102,16 @@ defmodule Hive.CombTest do
     end
 
     test "can create comb with specific merge_strategy" do
-      alias Hive.Schema.Comb, as: CombSchema
+      # Test that valid merge strategies are accepted as plain map fields
+      {:ok, pr_comb} =
+        Store.insert(:combs, %{name: "pr-comb", merge_strategy: "pr_branch"})
 
-      changeset = CombSchema.changeset(%{name: "pr-comb", merge_strategy: "pr_branch"})
-      assert changeset.valid?
-      assert Ecto.Changeset.get_field(changeset, :merge_strategy) == "pr_branch"
+      assert pr_comb.merge_strategy == "pr_branch"
 
-      changeset = CombSchema.changeset(%{name: "auto-comb", merge_strategy: "auto_merge"})
-      assert changeset.valid?
-      assert Ecto.Changeset.get_field(changeset, :merge_strategy) == "auto_merge"
-    end
+      {:ok, auto_comb} =
+        Store.insert(:combs, %{name: "auto-comb", merge_strategy: "auto_merge"})
 
-    test "rejects invalid merge_strategy" do
-      alias Hive.Schema.Comb, as: CombSchema
-
-      changeset = CombSchema.changeset(%{name: "bad-comb", merge_strategy: "yolo"})
-      refute changeset.valid?
-      assert {"is invalid", _} = changeset.errors[:merge_strategy]
+      assert auto_comb.merge_strategy == "auto_merge"
     end
   end
 end

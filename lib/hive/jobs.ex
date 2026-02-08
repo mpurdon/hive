@@ -14,13 +14,10 @@ defmodule Hive.Jobs do
       running --> blocked
 
   This is a pure context module: no process state, just data transformations
-  against the database.
+  against the store.
   """
 
-  import Ecto.Query
-
-  alias Hive.Repo
-  alias Hive.Schema.{Job, JobDependency}
+  alias Hive.Store
 
   # -- Valid transitions -------------------------------------------------------
 
@@ -41,15 +38,24 @@ defmodule Hive.Jobs do
   Creates a new job.
 
   Required attrs: `title`, `quest_id`, `comb_id`.
-  Optional: `description`.
+  Optional: `description`, `status`, `bee_id`.
 
-  Returns `{:ok, job}` or `{:error, changeset}`.
+  Returns `{:ok, job}` or `{:error, reason}`.
   """
-  @spec create(map()) :: {:ok, Job.t()} | {:error, Ecto.Changeset.t()}
+  @spec create(map()) :: {:ok, map()} | {:error, term()}
   def create(attrs) do
-    %Job{}
-    |> Job.changeset(attrs)
-    |> Repo.insert()
+    with :ok <- validate_required(attrs, [:title, :quest_id, :comb_id]) do
+      record = %{
+        title: attrs[:title] || attrs["title"],
+        description: attrs[:description] || attrs["description"],
+        status: attrs[:status] || attrs["status"] || "pending",
+        quest_id: attrs[:quest_id] || attrs["quest_id"],
+        comb_id: attrs[:comb_id] || attrs["comb_id"],
+        bee_id: attrs[:bee_id] || attrs["bee_id"]
+      }
+
+      Store.insert(:jobs, record)
+    end
   end
 
   @doc """
@@ -57,70 +63,71 @@ defmodule Hive.Jobs do
 
   Transitions: pending -> assigned.
   """
-  @spec assign(String.t(), String.t()) :: {:ok, Job.t()} | {:error, atom() | Ecto.Changeset.t()}
+  @spec assign(String.t(), String.t()) :: {:ok, map()} | {:error, atom()}
   def assign(job_id, bee_id) do
     with {:ok, job} <- get(job_id),
          {:ok, next_status} <- validate_transition(job.status, :assign) do
-      job
-      |> Job.changeset(%{status: next_status, bee_id: bee_id})
-      |> Repo.update()
+      updated = %{job | status: next_status, bee_id: bee_id}
+      Store.put(:jobs, updated)
     end
   end
 
-  @doc """
-  Starts a job. Transitions: assigned -> running.
-  """
-  @spec start(String.t()) :: {:ok, Job.t()} | {:error, atom() | Ecto.Changeset.t()}
-  def start(job_id) do
-    transition(job_id, :start)
-  end
+  @doc "Starts a job. Transitions: assigned -> running."
+  @spec start(String.t()) :: {:ok, map()} | {:error, atom()}
+  def start(job_id), do: transition(job_id, :start)
 
-  @doc """
-  Completes a job. Transitions: running -> done.
-  """
-  @spec complete(String.t()) :: {:ok, Job.t()} | {:error, atom() | Ecto.Changeset.t()}
-  def complete(job_id) do
-    transition(job_id, :complete)
-  end
+  @doc "Completes a job. Transitions: running -> done."
+  @spec complete(String.t()) :: {:ok, map()} | {:error, atom()}
+  def complete(job_id), do: transition(job_id, :complete)
 
-  @doc """
-  Fails a job. Transitions: running -> failed.
-  """
-  @spec fail(String.t()) :: {:ok, Job.t()} | {:error, atom() | Ecto.Changeset.t()}
-  def fail(job_id) do
-    transition(job_id, :fail)
-  end
+  @doc "Fails a job. Transitions: running -> failed."
+  @spec fail(String.t()) :: {:ok, map()} | {:error, atom()}
+  def fail(job_id), do: transition(job_id, :fail)
 
-  @doc """
-  Blocks a job. Transitions: pending | running -> blocked.
-  """
-  @spec block(String.t()) :: {:ok, Job.t()} | {:error, atom() | Ecto.Changeset.t()}
-  def block(job_id) do
-    transition(job_id, :block)
-  end
+  @doc "Blocks a job. Transitions: pending | running -> blocked."
+  @spec block(String.t()) :: {:ok, map()} | {:error, atom()}
+  def block(job_id), do: transition(job_id, :block)
 
-  @doc """
-  Unblocks a job. Transitions: blocked -> pending.
-  """
-  @spec unblock(String.t()) :: {:ok, Job.t()} | {:error, atom() | Ecto.Changeset.t()}
-  def unblock(job_id) do
-    transition(job_id, :unblock)
-  end
+  @doc "Unblocks a job. Transitions: blocked -> pending."
+  @spec unblock(String.t()) :: {:ok, map()} | {:error, atom()}
+  def unblock(job_id), do: transition(job_id, :unblock)
 
   @doc """
   Resets a failed job back to pending so it can be retried.
 
-  Transitions: failed -> pending. Also clears the bee_id assignment
+  Transitions: failed -> pending. Also stops the assigned bee,
+  cleans up its cell/worktree, and clears the bee_id assignment
   so the job can be assigned to a fresh bee.
   """
-  @spec reset(String.t()) :: {:ok, Job.t()} | {:error, atom() | Ecto.Changeset.t()}
+  @spec reset(String.t()) :: {:ok, map()} | {:error, atom()}
   def reset(job_id) do
     with {:ok, job} <- get(job_id),
          {:ok, next_status} <- validate_transition(job.status, :reset) do
-      job
-      |> Job.changeset(%{status: next_status, bee_id: nil})
-      |> Repo.update()
+      cleanup_bee_and_cell(job.bee_id)
+      updated = %{job | status: next_status, bee_id: nil}
+      Store.put(:jobs, updated)
     end
+  end
+
+  defp cleanup_bee_and_cell(nil), do: :ok
+
+  defp cleanup_bee_and_cell(bee_id) do
+    # Stop the bee worker process if running
+    Hive.Bees.stop(bee_id)
+
+    # Find and remove the bee's active cell (worktree + branch)
+    case Store.find_one(:cells, fn c -> c.bee_id == bee_id and c.status == "active" end) do
+      nil -> :ok
+      cell -> Hive.Cell.remove(cell.id, force: true)
+    end
+
+    # Mark bee as stopped
+    case Hive.Bees.get(bee_id) do
+      {:ok, bee} -> Store.put(:bees, %{bee | status: "stopped"})
+      _ -> :ok
+    end
+
+    :ok
   end
 
   @doc """
@@ -132,14 +139,29 @@ defmodule Hive.Jobs do
     * `:status` - filter by status
     * `:bee_id` - filter by assigned bee
   """
-  @spec list(keyword()) :: [Job.t()]
+  @spec list(keyword()) :: [map()]
   def list(opts \\ []) do
-    Job
-    |> apply_filter(:quest_id, Keyword.get(opts, :quest_id))
-    |> apply_filter(:status, Keyword.get(opts, :status))
-    |> apply_filter(:bee_id, Keyword.get(opts, :bee_id))
-    |> order_by([j], desc: j.inserted_at)
-    |> Repo.all()
+    jobs = Store.all(:jobs)
+
+    jobs =
+      case Keyword.get(opts, :quest_id) do
+        nil -> jobs
+        v -> Enum.filter(jobs, &(&1.quest_id == v))
+      end
+
+    jobs =
+      case Keyword.get(opts, :status) do
+        nil -> jobs
+        v -> Enum.filter(jobs, &(&1.status == v))
+      end
+
+    jobs =
+      case Keyword.get(opts, :bee_id) do
+        nil -> jobs
+        v -> Enum.filter(jobs, &(&1.bee_id == v))
+      end
+
+    Enum.sort_by(jobs, & &1.inserted_at, {:desc, DateTime})
   end
 
   @doc """
@@ -147,12 +169,9 @@ defmodule Hive.Jobs do
 
   Returns `{:ok, job}` or `{:error, :not_found}`.
   """
-  @spec get(String.t()) :: {:ok, Job.t()} | {:error, :not_found}
+  @spec get(String.t()) :: {:ok, map()} | {:error, :not_found}
   def get(job_id) do
-    case Repo.get(Job, job_id) do
-      nil -> {:error, :not_found}
-      job -> {:ok, job}
-    end
+    Store.fetch(:jobs, job_id)
   end
 
   # -- Private helpers ---------------------------------------------------------
@@ -160,9 +179,8 @@ defmodule Hive.Jobs do
   defp transition(job_id, action) do
     with {:ok, job} <- get(job_id),
          {:ok, next_status} <- validate_transition(job.status, action) do
-      job
-      |> Job.changeset(%{status: next_status})
-      |> Repo.update()
+      updated = %{job | status: next_status}
+      Store.put(:jobs, updated)
     end
   end
 
@@ -173,6 +191,16 @@ defmodule Hive.Jobs do
     end
   end
 
+  defp validate_required(attrs, keys) do
+    missing =
+      Enum.filter(keys, fn key ->
+        val = attrs[key] || attrs[Atom.to_string(key)]
+        is_nil(val) or val == ""
+      end)
+
+    if missing == [], do: :ok, else: {:error, {:missing_fields, missing}}
+  end
+
   # -- Dependency management ---------------------------------------------------
 
   @doc """
@@ -181,8 +209,7 @@ defmodule Hive.Jobs do
   Validates no self-dependency and no cycles (BFS).
   Returns `{:ok, dep}` or `{:error, reason}`.
   """
-  @spec add_dependency(String.t(), String.t()) ::
-          {:ok, JobDependency.t()} | {:error, term()}
+  @spec add_dependency(String.t(), String.t()) :: {:ok, map()} | {:error, term()}
   def add_dependency(job_id, depends_on_id) do
     cond do
       job_id == depends_on_id ->
@@ -192,60 +219,63 @@ defmodule Hive.Jobs do
         {:error, :cycle_detected}
 
       true ->
-        %JobDependency{}
-        |> JobDependency.changeset(%{job_id: job_id, depends_on_id: depends_on_id})
-        |> Repo.insert()
+        record = %{job_id: job_id, depends_on_id: depends_on_id}
+        Store.insert(:job_dependencies, record)
     end
   end
 
   @doc "Removes a dependency between two jobs."
   @spec remove_dependency(String.t(), String.t()) :: :ok | {:error, :not_found}
   def remove_dependency(job_id, depends_on_id) do
-    case Repo.one(
-           from(d in JobDependency,
-             where: d.job_id == ^job_id and d.depends_on_id == ^depends_on_id
-           )
-         ) do
+    case Store.find_one(:job_dependencies, fn d ->
+           d.job_id == job_id and d.depends_on_id == depends_on_id
+         end) do
       nil -> {:error, :not_found}
-      dep -> Repo.delete(dep) |> then(fn {:ok, _} -> :ok end)
+      dep -> Store.delete(:job_dependencies, dep.id); :ok
     end
   end
 
   @doc "Lists jobs that `job_id` depends on."
-  @spec dependencies(String.t()) :: [Job.t()]
+  @spec dependencies(String.t()) :: [map()]
   def dependencies(job_id) do
-    from(j in Job,
-      join: d in JobDependency,
-      on: d.depends_on_id == j.id,
-      where: d.job_id == ^job_id
-    )
-    |> Repo.all()
+    dep_ids =
+      Store.filter(:job_dependencies, fn d -> d.job_id == job_id end)
+      |> Enum.map(& &1.depends_on_id)
+
+    Enum.flat_map(dep_ids, fn id ->
+      case Store.get(:jobs, id) do
+        nil -> []
+        job -> [job]
+      end
+    end)
   end
 
   @doc "Lists jobs that depend on `job_id`."
-  @spec dependents(String.t()) :: [Job.t()]
+  @spec dependents(String.t()) :: [map()]
   def dependents(job_id) do
-    from(j in Job,
-      join: d in JobDependency,
-      on: d.job_id == j.id,
-      where: d.depends_on_id == ^job_id
-    )
-    |> Repo.all()
+    dep_job_ids =
+      Store.filter(:job_dependencies, fn d -> d.depends_on_id == job_id end)
+      |> Enum.map(& &1.job_id)
+
+    Enum.flat_map(dep_job_ids, fn id ->
+      case Store.get(:jobs, id) do
+        nil -> []
+        job -> [job]
+      end
+    end)
   end
 
   @doc "Returns true if all dependencies of `job_id` are done."
   @spec ready?(String.t()) :: boolean()
   def ready?(job_id) do
-    not_done_count =
-      from(d in JobDependency,
-        join: j in Job,
-        on: j.id == d.depends_on_id,
-        where: d.job_id == ^job_id and j.status != "done",
-        select: count(d.id)
-      )
-      |> Repo.one()
+    deps = Store.filter(:job_dependencies, fn d -> d.job_id == job_id end)
 
-    not_done_count == 0
+    Enum.all?(deps, fn dep ->
+      case Store.get(:jobs, dep.depends_on_id) do
+        nil -> true
+        job -> job.status == "done"
+      end
+    end)
   end
 
   @doc """
@@ -255,11 +285,8 @@ defmodule Hive.Jobs do
   @spec unblock_dependents(String.t()) :: :ok
   def unblock_dependents(job_id) do
     dependent_ids =
-      from(d in JobDependency,
-        where: d.depends_on_id == ^job_id,
-        select: d.job_id
-      )
-      |> Repo.all()
+      Store.filter(:job_dependencies, fn d -> d.depends_on_id == job_id end)
+      |> Enum.map(& &1.job_id)
 
     Enum.each(dependent_ids, fn dep_job_id ->
       if ready?(dep_job_id) do
@@ -291,19 +318,11 @@ defmodule Hive.Jobs do
         visited = MapSet.put(visited, from_id)
 
         deps =
-          from(d in JobDependency,
-            where: d.job_id == ^from_id,
-            select: d.depends_on_id
-          )
-          |> Repo.all()
+          Store.filter(:job_dependencies, fn d -> d.job_id == from_id end)
+          |> Enum.map(& &1.depends_on_id)
 
         Enum.any?(deps, fn dep_id -> bfs_reachable?(dep_id, target_id, visited) end)
       end
     end
   end
-
-  defp apply_filter(query, _field, nil), do: query
-  defp apply_filter(query, :quest_id, value), do: where(query, [j], j.quest_id == ^value)
-  defp apply_filter(query, :status, value), do: where(query, [j], j.status == ^value)
-  defp apply_filter(query, :bee_id, value), do: where(query, [j], j.bee_id == ^value)
 end

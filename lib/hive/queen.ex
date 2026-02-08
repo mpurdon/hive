@@ -72,6 +72,12 @@ defmodule Hive.Queen do
     GenServer.call(@name, :status)
   end
 
+  @doc "Blocks until the Queen's Claude session exits."
+  @spec await_session_end() :: :ok
+  def await_session_end do
+    GenServer.call(@name, :await_session_end, :infinity)
+  end
+
   # -- GenServer callbacks ---------------------------------------------------
 
   @impl true
@@ -127,20 +133,24 @@ defmodule Hive.Queen do
     {:reply, Map.take(state, [:status, :active_bees, :hive_root, :max_bees]), state}
   end
 
+  def handle_call(:await_session_end, from, state) do
+    {:noreply, Map.put(state, :awaiter, from)}
+  end
+
   @impl true
   def handle_info({:waggle_received, waggle}, state) do
     state = handle_waggle(waggle, state)
     {:noreply, state}
   end
 
-  def handle_info({port, {:data, _data}}, %{port: port} = state) when is_port(port) do
-    # Queen's Claude output -- pass through, we don't process it
-    {:noreply, state}
-  end
-
   def handle_info({port, {:exit_status, _status}}, %{port: port} = state) when is_port(port) do
     Logger.info("Queen's Claude session ended")
-    {:noreply, %{state | port: nil, status: :idle}}
+
+    if state[:awaiter] do
+      GenServer.reply(state.awaiter, :ok)
+    end
+
+    {:noreply, %{state | port: nil, status: :idle, awaiter: nil}}
   end
 
   def handle_info(msg, state) do
@@ -186,7 +196,12 @@ defmodule Hive.Queen do
               case check_quest_budget(job.quest_id) do
                 :ok ->
                   Hive.Bees.spawn(job_id, job.comb_id, state.hive_root)
-                  put_in(state.retry_counts[job_id], attempts + 1)
+                  |> case do
+                    {:ok, _bee, _pid} -> put_in(state.retry_counts[job_id], attempts + 1)
+                    {:error, reason} ->
+                      Logger.warning("Retry spawn failed for job #{job_id}: #{inspect(reason)}")
+                      state
+                  end
 
                 {:error, :budget_exceeded} ->
                   Logger.warning("Budget exceeded for quest #{job.quest_id}, skipping retry")

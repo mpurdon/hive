@@ -2,43 +2,49 @@ defmodule Hive.QuestsTest do
   use ExUnit.Case, async: false
 
   alias Hive.Quests
-  alias Hive.Repo
-  alias Hive.Schema.{Comb, Quest}
+  alias Hive.Store
 
   setup do
-    :ok = Ecto.Adapters.SQL.Sandbox.checkout(Repo)
-    Ecto.Adapters.SQL.Sandbox.mode(Repo, {:shared, self()})
+    tmp_dir = Path.join(System.tmp_dir!(), "hive_test_#{:erlang.unique_integer([:positive])}")
+    File.mkdir_p!(tmp_dir)
+    if Process.whereis(Hive.Store), do: GenServer.stop(Hive.Store)
+    {:ok, _} = Hive.Store.start_link(data_dir: tmp_dir)
+    on_exit(fn -> File.rm_rf!(tmp_dir) end)
 
     {:ok, comb} =
-      %Comb{}
-      |> Comb.changeset(%{name: "quests-test-comb-#{:erlang.unique_integer([:positive])}"})
-      |> Repo.insert()
+      Store.insert(:combs, %{name: "quests-test-comb-#{:erlang.unique_integer([:positive])}"})
 
     %{comb: comb}
   end
 
   describe "create/1" do
-    test "creates a quest with a name" do
-      assert {:ok, quest} = Quests.create(%{name: "Refactor auth"})
-      assert quest.name == "Refactor auth"
+    test "creates a quest with a goal and auto-generates name" do
+      assert {:ok, quest} = Quests.create(%{goal: "Refactor the auth module"})
+      assert quest.goal == "Refactor the auth module"
+      assert quest.name == "refactor-the-auth-module"
       assert quest.status == "pending"
       assert String.starts_with?(quest.id, "qst-")
     end
 
     test "accepts optional comb_id", %{comb: comb} do
-      assert {:ok, quest} = Quests.create(%{name: "Build feature", comb_id: comb.id})
+      assert {:ok, quest} = Quests.create(%{goal: "Build feature", comb_id: comb.id})
       assert quest.comb_id == comb.id
     end
 
-    test "requires name" do
-      assert {:error, changeset} = Quests.create(%{})
-      assert %{name: _} = errors_on(changeset)
+    test "accepts explicit name override" do
+      assert {:ok, quest} = Quests.create(%{goal: "Do the thing", name: "custom-name"})
+      assert quest.name == "custom-name"
+      assert quest.goal == "Do the thing"
+    end
+
+    test "requires goal" do
+      assert {:error, {:missing_fields, [:goal]}} = Quests.create(%{})
     end
   end
 
   describe "get/1" do
     test "retrieves a quest by ID and preloads jobs" do
-      {:ok, quest} = Quests.create(%{name: "Find quest"})
+      {:ok, quest} = Quests.create(%{goal: "Find quest"})
 
       assert {:ok, found} = Quests.get(quest.id)
       assert found.id == quest.id
@@ -52,20 +58,18 @@ defmodule Hive.QuestsTest do
 
   describe "list/1" do
     test "returns all quests" do
-      {:ok, _} = Quests.create(%{name: "Quest 1"})
-      {:ok, _} = Quests.create(%{name: "Quest 2"})
+      {:ok, _} = Quests.create(%{goal: "Quest 1"})
+      {:ok, _} = Quests.create(%{goal: "Quest 2"})
 
       quests = Quests.list()
       assert length(quests) >= 2
     end
 
     test "filters by status" do
-      {:ok, _} = Quests.create(%{name: "Pending quest"})
-      {:ok, q} = Quests.create(%{name: "Active quest"})
+      {:ok, _} = Quests.create(%{goal: "Pending quest"})
+      {:ok, q} = Quests.create(%{goal: "Active quest"})
 
-      q
-      |> Quest.changeset(%{status: "active"})
-      |> Repo.update!()
+      Store.put(:quests, %{q | status: "active"})
 
       pending = Quests.list(status: "pending")
       assert Enum.all?(pending, &(&1.status == "pending"))
@@ -111,7 +115,7 @@ defmodule Hive.QuestsTest do
 
   describe "update_status!/1" do
     test "recomputes status from job statuses", %{comb: comb} do
-      {:ok, quest} = Quests.create(%{name: "Update status quest"})
+      {:ok, quest} = Quests.create(%{goal: "Update status quest"})
 
       {:ok, _} =
         Hive.Jobs.create(%{
@@ -134,7 +138,7 @@ defmodule Hive.QuestsTest do
     end
 
     test "sets completed when all jobs done", %{comb: comb} do
-      {:ok, quest} = Quests.create(%{name: "Complete quest"})
+      {:ok, quest} = Quests.create(%{goal: "Complete quest"})
 
       {:ok, _} =
         Hive.Jobs.create(%{
@@ -159,7 +163,7 @@ defmodule Hive.QuestsTest do
 
   describe "add_job/2" do
     test "creates a job linked to the quest", %{comb: comb} do
-      {:ok, quest} = Quests.create(%{name: "Quest with jobs"})
+      {:ok, quest} = Quests.create(%{goal: "Quest with jobs"})
 
       assert {:ok, job} =
                Quests.add_job(quest.id, %{title: "Do something", comb_id: comb.id})
@@ -167,11 +171,5 @@ defmodule Hive.QuestsTest do
       assert job.quest_id == quest.id
       assert job.title == "Do something"
     end
-  end
-
-  # -- Helpers -----------------------------------------------------------------
-
-  defp errors_on(changeset) do
-    Ecto.Changeset.traverse_errors(changeset, fn {msg, _opts} -> msg end)
   end
 end

@@ -2,14 +2,16 @@ defmodule Hive.BeesTest do
   use ExUnit.Case, async: false
 
   alias Hive.Bees
-  alias Hive.Repo
-  alias Hive.Schema.{Bee, Quest}
+  alias Hive.Store
 
   @tmp_dir System.tmp_dir!()
 
   setup do
-    :ok = Ecto.Adapters.SQL.Sandbox.checkout(Repo)
-    Ecto.Adapters.SQL.Sandbox.mode(Repo, {:shared, self()})
+    store_dir = Path.join(@tmp_dir, "hive_store_#{:erlang.unique_integer([:positive])}")
+    File.mkdir_p!(store_dir)
+    if Process.whereis(Hive.Store), do: GenServer.stop(Hive.Store)
+    {:ok, _} = Hive.Store.start_link(data_dir: store_dir)
+    on_exit(fn -> File.rm_rf!(store_dir) end)
 
     repo_path = create_temp_git_repo()
     hive_root = create_hive_workspace()
@@ -18,9 +20,10 @@ defmodule Hive.BeesTest do
       Hive.Comb.add(repo_path, name: "bees-test-comb-#{:erlang.unique_integer([:positive])}")
 
     {:ok, quest} =
-      %Quest{}
-      |> Quest.changeset(%{name: "bees-test-quest-#{:erlang.unique_integer([:positive])}"})
-      |> Repo.insert()
+      Store.insert(:quests, %{
+        name: "bees-test-quest-#{:erlang.unique_integer([:positive])}",
+        status: "pending"
+      })
 
     {:ok, job} =
       Hive.Jobs.create(%{
@@ -40,12 +43,6 @@ defmodule Hive.BeesTest do
                  claude_executable: "/bin/echo",
                  prompt: "hello"
                )
-
-      # Allow the spawned worker process access to the sandbox
-      case Hive.Bee.Worker.lookup(bee.id) do
-        {:ok, pid} -> Ecto.Adapters.SQL.Sandbox.allow(Repo, self(), pid)
-        :error -> :ok
-      end
 
       assert bee.name == "spawned-bee"
       assert String.starts_with?(bee.id, "bee-")
@@ -70,11 +67,6 @@ defmodule Hive.BeesTest do
                  prompt: "auto-name"
                )
 
-      case Hive.Bee.Worker.lookup(bee.id) do
-        {:ok, pid} -> Ecto.Adapters.SQL.Sandbox.allow(Repo, self(), pid)
-        :error -> :ok
-      end
-
       assert is_binary(bee.name)
       assert String.length(bee.name) > 0
 
@@ -85,25 +77,15 @@ defmodule Hive.BeesTest do
 
   describe "list/1" do
     test "lists all bees" do
-      {:ok, _} =
-        %Bee{}
-        |> Bee.changeset(%{name: "listed-bee", status: "idle"})
-        |> Repo.insert()
+      {:ok, _} = Store.insert(:bees, %{name: "listed-bee", status: "idle"})
 
       bees = Bees.list()
       assert length(bees) >= 1
     end
 
     test "filters by status" do
-      {:ok, _} =
-        %Bee{}
-        |> Bee.changeset(%{name: "idle-bee", status: "idle"})
-        |> Repo.insert()
-
-      {:ok, _} =
-        %Bee{}
-        |> Bee.changeset(%{name: "working-bee", status: "working"})
-        |> Repo.insert()
+      {:ok, _} = Store.insert(:bees, %{name: "idle-bee", status: "idle"})
+      {:ok, _} = Store.insert(:bees, %{name: "working-bee", status: "working"})
 
       idle = Bees.list(status: "idle")
       assert Enum.all?(idle, &(&1.status == "idle"))
@@ -115,10 +97,7 @@ defmodule Hive.BeesTest do
 
   describe "get/1" do
     test "retrieves a bee by ID" do
-      {:ok, created} =
-        %Bee{}
-        |> Bee.changeset(%{name: "get-test-bee"})
-        |> Repo.insert()
+      {:ok, created} = Store.insert(:bees, %{name: "get-test-bee", status: "starting"})
 
       assert {:ok, found} = Bees.get(created.id)
       assert found.id == created.id
@@ -137,11 +116,6 @@ defmodule Hive.BeesTest do
           claude_executable: "/bin/sleep",
           prompt: "30"
         )
-
-      case Hive.Bee.Worker.lookup(bee.id) do
-        {:ok, pid} -> Ecto.Adapters.SQL.Sandbox.allow(Repo, self(), pid)
-        :error -> :ok
-      end
 
       Process.sleep(500)
 

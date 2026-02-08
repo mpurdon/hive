@@ -2,13 +2,16 @@ defmodule Hive.QueenTest do
   use ExUnit.Case, async: false
 
   alias Hive.Queen
-  alias Hive.Repo
+  alias Hive.Store
 
   @tmp_dir System.tmp_dir!()
 
   setup do
-    :ok = Ecto.Adapters.SQL.Sandbox.checkout(Repo)
-    Ecto.Adapters.SQL.Sandbox.mode(Repo, {:shared, self()})
+    store_dir = Path.join(@tmp_dir, "hive_store_#{:erlang.unique_integer([:positive])}")
+    File.mkdir_p!(store_dir)
+    if Process.whereis(Hive.Store), do: GenServer.stop(Hive.Store)
+    {:ok, _} = Hive.Store.start_link(data_dir: store_dir)
+    on_exit(fn -> File.rm_rf!(store_dir) end)
 
     hive_root = create_hive_workspace()
 
@@ -95,8 +98,8 @@ defmodule Hive.QueenTest do
     test "handles job_complete waggle by removing bee from active_bees" do
       Queen.start_session()
 
-      # Simulate receiving a waggle message directly
-      waggle = %Hive.Schema.Waggle{
+      # Simulate receiving a waggle message directly (plain map now)
+      waggle = %{
         id: "wag-test1",
         from: "bee-abc123",
         to: "queen",
@@ -117,7 +120,7 @@ defmodule Hive.QueenTest do
     test "handles job_failed waggle" do
       Queen.start_session()
 
-      waggle = %Hive.Schema.Waggle{
+      waggle = %{
         id: "wag-test2",
         from: "bee-def456",
         to: "queen",
@@ -143,14 +146,13 @@ defmodule Hive.QueenTest do
     test "retry logic increments retry count for failed job" do
       # Create the necessary DB records for retry
       {:ok, comb} =
-        %Hive.Schema.Comb{}
-        |> Hive.Schema.Comb.changeset(%{name: "retry-test-comb-#{:erlang.unique_integer([:positive])}"})
-        |> Repo.insert()
+        Store.insert(:combs, %{name: "retry-test-comb-#{:erlang.unique_integer([:positive])}"})
 
       {:ok, quest} =
-        %Hive.Schema.Quest{}
-        |> Hive.Schema.Quest.changeset(%{name: "retry-test-quest-#{:erlang.unique_integer([:positive])}"})
-        |> Repo.insert()
+        Store.insert(:quests, %{
+          name: "retry-test-quest-#{:erlang.unique_integer([:positive])}",
+          status: "pending"
+        })
 
       {:ok, job} =
         Hive.Jobs.create(%{
@@ -160,9 +162,7 @@ defmodule Hive.QueenTest do
         })
 
       {:ok, bee} =
-        %Hive.Schema.Bee{}
-        |> Hive.Schema.Bee.changeset(%{name: "retry-test-bee", job_id: job.id})
-        |> Repo.insert()
+        Store.insert(:bees, %{name: "retry-test-bee", status: "starting", job_id: job.id})
 
       # Move job through states to failed
       {:ok, _} = Hive.Jobs.assign(job.id, bee.id)
@@ -173,7 +173,7 @@ defmodule Hive.QueenTest do
 
       # Simulate the failed waggle -- retry will attempt to spawn a bee
       # which may fail (no worktree), but the retry count should still be tracked
-      waggle = %Hive.Schema.Waggle{
+      waggle = %{
         id: "wag-retry-1",
         from: bee.id,
         to: "queen",

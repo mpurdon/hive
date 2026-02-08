@@ -4,7 +4,7 @@ defmodule Hive.Init do
 
   The initialization pipeline creates the directory structure, writes the
   default configuration, seeds the Queen's instructions, and bootstraps the
-  SQLite database with all migrations applied.
+  CubDB store.
 
   ## Directory structure
 
@@ -13,7 +13,7 @@ defmodule Hive.Init do
           +-- config.toml
           +-- queen/
           |   +-- QUEEN.md
-          +-- hive.db          (created when Repo starts)
+          +-- store/             (CubDB data directory)
   """
 
   alias Hive.Config
@@ -39,17 +39,23 @@ defmodule Hive.Init do
   ## Available Commands
 
   ### Quest & Job Management
-  - `hive quest new "Feature name"` -- Create a new quest
+  - `hive quest new "Feature name"` -- Create a new quest (uses current comb)
+  - `hive quest new "Feature name" -d "Detailed goal description"` -- Create with description
+  - `hive quest new "Feature name" -c <comb-id>` -- Create for a specific comb
   - `hive quest list` -- List all quests
   - `hive quest show <quest-id>` -- Show quest details with jobs
-  - `hive jobs create --quest <quest-id> --title "Task name" --comb <comb-id>` -- Create a job
-  - `hive jobs create --quest <quest-id> --title "Task name" --comb <comb-id> --description "Detailed instructions"` -- Create with description
+  - `hive jobs create --quest <quest-id> --title "Task name"` -- Create a job (uses current comb)
+  - `hive jobs create --quest <quest-id> --title "Task name" --comb <comb-id>` -- Create for specific comb
+  - `hive jobs create --quest <quest-id> --title "Task name" --description "Detailed instructions"` -- Create with description
   - `hive jobs list` -- List all jobs
   - `hive jobs show <job-id>` -- Show job details
+  - `hive jobs deps add --job <job-id> --depends-on <other-job-id>` -- Add dependency between jobs
+  - `hive jobs deps list --job <job-id>` -- List job dependencies
 
   ### Bee Management
-  - `hive bee spawn --job <job-id> --comb <comb-id>` -- Spawn a bee for a job
-  - `hive bee spawn --job <job-id> --comb <comb-id> --name "custom-name"` -- Spawn with custom name
+  - `hive bee spawn --job <job-id>` -- Spawn a bee for a job (uses current comb)
+  - `hive bee spawn --job <job-id> --comb <comb-id>` -- Spawn for specific comb
+  - `hive bee spawn --job <job-id> --name "custom-name"` -- Spawn with custom name
   - `hive bee list` -- List all bees and their status
   - `hive bee stop --id <bee-id>` -- Stop a running bee
 
@@ -66,6 +72,7 @@ defmodule Hive.Init do
   ### Comb Management
   - `hive comb add <path> [--name "name"] [--merge-strategy manual|auto_merge|pr_branch]` -- Register a codebase
   - `hive comb list` -- List registered combs
+  - `hive comb use <name>` -- Set the current working comb
 
   ## Merge Strategies
   When a bee completes its job, its changes can be merged using the comb's strategy:
@@ -80,12 +87,40 @@ defmodule Hive.Init do
 
   ## Workflow
 
-  1. Analyze the user's request
-  2. Create a quest: `hive quest new "Feature name"`
-  3. Create jobs for each piece of work: `hive jobs create --quest <id> --title "..." --comb <id>`
-  4. Spawn bees for each job: `hive bee spawn --job <id> --comb <id>`
-  5. Monitor: `hive bee list` and `hive waggle list --to queen`
-  6. Report: "Quest complete: X/Y jobs done"
+  ### Phase 1: Check for Pending Quests
+  At session start, review the "Pending Quests" section in the hive state below.
+  If a pending quest has a description, use it as your goal and begin planning.
+  If there are no pending quests, wait for the user to provide a request.
+
+  ### Phase 2: Clarify (if needed)
+  If the quest description is vague or missing critical details, ask the user
+  clarifying questions BEFORE creating any jobs. Examples of what to clarify:
+  - Which area of the codebase to focus on
+  - Specific requirements or constraints
+  - Expected behavior or acceptance criteria
+
+  If the quest has no description, ask the user what the goal is.
+  If the goal is clear and specific, skip straight to planning.
+
+  ### Phase 3: Plan and Decompose
+  Break the quest goal into concrete, independent jobs:
+  1. Each job should be a self-contained unit of work for one bee
+  2. Give each job a clear title and detailed description
+  3. Set up dependencies between jobs that must run in order
+  4. Jobs that can run in parallel should have no dependency between them
+
+  ### Phase 4: Execute
+  1. Create jobs: `hive jobs create --quest <id> --title "..." --description "..."`
+  2. Add dependencies: `hive jobs deps add --job <id> --depends-on <id>`
+  3. Spawn bees for all ready (unblocked) jobs: `hive bee spawn --job <id>`
+  4. Do NOT exceed the max_bees limit from the config
+
+  ### Phase 5: Monitor and Report
+  1. Check bee status: `hive bee list`
+  2. Read messages: `hive waggle list --to queen`
+  3. When a bee completes, spawn bees for newly unblocked jobs
+  4. When all jobs for a quest complete, report the result to the user
+  5. If a bee reports being blocked, help unblock it or reassign the work
 
   NEVER write the code yourself. ALWAYS delegate to bees.
   """
@@ -102,7 +137,7 @@ defmodule Hive.Init do
   Initializes a Hive workspace at `path`.
 
   Creates the `.hive/` directory structure, writes the default config,
-  seeds the Queen's instruction file, and runs database migrations.
+  seeds the Queen's instruction file, and starts the CubDB store.
 
   ## Options
 
@@ -122,7 +157,7 @@ defmodule Hive.Init do
          :ok <- create_directories(hive_dir),
          :ok <- write_config(hive_dir),
          :ok <- write_queen_instructions(hive_dir),
-         :ok <- init_database(hive_dir) do
+         :ok <- init_store(hive_dir) do
       {:ok, expanded}
     end
   end
@@ -157,18 +192,14 @@ defmodule Hive.Init do
     File.write(queen_path, @queen_instructions)
   end
 
-  defp init_database(hive_dir) do
-    db_path = Path.join(hive_dir, "hive.db")
+  defp init_store(hive_dir) do
+    store_dir = Path.join(hive_dir, "store")
+    File.mkdir_p(store_dir)
 
-    case Hive.Repo.start_link(database: db_path, pool_size: 1) do
-      {:ok, _pid} ->
-        Hive.Repo.ensure_migrated!()
-
-      {:error, {:already_started, _pid}} ->
-        Hive.Repo.ensure_migrated!()
-
-      {:error, reason} ->
-        {:error, {:database, reason}}
+    case Hive.Store.start_link(data_dir: store_dir) do
+      {:ok, _pid} -> :ok
+      {:error, {:already_started, _pid}} -> :ok
+      {:error, reason} -> {:error, {:store, reason}}
     end
   end
 end

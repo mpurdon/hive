@@ -1,27 +1,27 @@
 defmodule Hive.BudgetTest do
   use ExUnit.Case, async: false
 
-  alias Hive.{Budget, Costs, Jobs, Repo}
-  alias Hive.Schema.{Bee, Comb, Quest}
+  alias Hive.{Budget, Costs, Jobs}
+  alias Hive.Store
 
   setup do
-    :ok = Ecto.Adapters.SQL.Sandbox.checkout(Repo)
-    Ecto.Adapters.SQL.Sandbox.mode(Repo, {:shared, self()})
+    tmp_dir = Path.join(System.tmp_dir!(), "hive_test_#{:erlang.unique_integer([:positive])}")
+    File.mkdir_p!(tmp_dir)
+    if Process.whereis(Hive.Store), do: GenServer.stop(Hive.Store)
+    {:ok, _} = Hive.Store.start_link(data_dir: tmp_dir)
+    on_exit(fn -> File.rm_rf!(tmp_dir) end)
 
     {:ok, comb} =
-      %Comb{}
-      |> Comb.changeset(%{name: "budget-comb-#{:erlang.unique_integer([:positive])}"})
-      |> Repo.insert()
+      Store.insert(:combs, %{name: "budget-comb-#{:erlang.unique_integer([:positive])}"})
 
     {:ok, quest} =
-      %Quest{}
-      |> Quest.changeset(%{name: "budget-quest-#{:erlang.unique_integer([:positive])}"})
-      |> Repo.insert()
+      Store.insert(:quests, %{
+        name: "budget-quest-#{:erlang.unique_integer([:positive])}",
+        status: "pending"
+      })
 
     {:ok, bee} =
-      %Bee{}
-      |> Bee.changeset(%{name: "budget-bee-#{:erlang.unique_integer([:positive])}"})
-      |> Repo.insert()
+      Store.insert(:bees, %{name: "budget-bee-#{:erlang.unique_integer([:positive])}", status: "starting"})
 
     {:ok, job} =
       Jobs.create(%{title: "budget job", quest_id: quest.id, comb_id: comb.id})

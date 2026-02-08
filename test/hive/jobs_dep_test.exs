@@ -2,22 +2,23 @@ defmodule Hive.JobsDepTest do
   use ExUnit.Case, async: false
 
   alias Hive.Jobs
-  alias Hive.Repo
-  alias Hive.Schema.{Bee, Comb, Quest}
+  alias Hive.Store
 
   setup do
-    :ok = Ecto.Adapters.SQL.Sandbox.checkout(Repo)
-    Ecto.Adapters.SQL.Sandbox.mode(Repo, {:shared, self()})
+    tmp_dir = Path.join(System.tmp_dir!(), "hive_test_#{:erlang.unique_integer([:positive])}")
+    File.mkdir_p!(tmp_dir)
+    if Process.whereis(Hive.Store), do: GenServer.stop(Hive.Store)
+    {:ok, _} = Hive.Store.start_link(data_dir: tmp_dir)
+    on_exit(fn -> File.rm_rf!(tmp_dir) end)
 
     {:ok, comb} =
-      %Comb{}
-      |> Comb.changeset(%{name: "dep-test-comb-#{:erlang.unique_integer([:positive])}"})
-      |> Repo.insert()
+      Store.insert(:combs, %{name: "dep-test-comb-#{:erlang.unique_integer([:positive])}"})
 
     {:ok, quest} =
-      %Quest{}
-      |> Quest.changeset(%{name: "dep-test-quest-#{:erlang.unique_integer([:positive])}"})
-      |> Repo.insert()
+      Store.insert(:quests, %{
+        name: "dep-test-quest-#{:erlang.unique_integer([:positive])}",
+        status: "pending"
+      })
 
     %{comb: comb, quest: quest}
   end
@@ -28,9 +29,8 @@ defmodule Hive.JobsDepTest do
   end
 
   defp create_bee do
-    %Bee{}
-    |> Bee.changeset(%{name: "test-bee-#{:erlang.unique_integer([:positive])}"})
-    |> Repo.insert!()
+    {:ok, bee} = Store.insert(:bees, %{name: "test-bee-#{:erlang.unique_integer([:positive])}", status: "starting"})
+    bee
   end
 
   describe "add_dependency/2" do

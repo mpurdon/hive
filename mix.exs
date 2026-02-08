@@ -1,7 +1,7 @@
 defmodule Hive.MixProject do
   use Mix.Project
 
-  @version "0.1.0"
+  @version "0.2.14"
 
   def project do
     [
@@ -25,7 +25,7 @@ defmodule Hive.MixProject do
   defp escript do
     [
       main_module: Hive.CLI,
-      name: :hive
+      name: "hive.escript"
     ]
   end
 
@@ -38,13 +38,9 @@ defmodule Hive.MixProject do
     ]
   end
 
-  def cli do
-    [preferred_envs: ["ecto.migrate": :dev, "ecto.create": :dev]]
-  end
-
   defp deps do
     [
-      {:ecto_sqlite3, "~> 0.17"},
+      {:cubdb, "~> 2.0"},
       {:phoenix_pubsub, "~> 2.1"},
       {:phoenix, "~> 1.7"},
       {:phoenix_live_view, "~> 1.0"},

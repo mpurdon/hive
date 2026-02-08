@@ -52,12 +52,14 @@ defmodule Hive.Runtime.Claude do
          :ok <- validate_directory(working_dir) do
       args = build_interactive_args(opts)
 
+      # Use :nouse_stdio so Claude inherits the real terminal directly.
+      # This gives Claude full control of the TTY (raw mode, escape sequences,
+      # TUI rendering) without needing a PTY wrapper or stdin/stdout relay.
+      # The port communicates on fd 3/4 (unused), we only need :exit_status.
       port =
         Port.open({:spawn_executable, claude_path}, [
-          :binary,
+          :nouse_stdio,
           :exit_status,
-          :use_stdio,
-          :stderr_to_stdout,
           args: args,
           cd: working_dir,
           env: build_env(opts)

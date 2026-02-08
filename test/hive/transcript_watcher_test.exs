@@ -1,20 +1,19 @@
 defmodule Hive.TranscriptWatcherTest do
   use ExUnit.Case, async: false
 
-  alias Hive.Repo
-  alias Hive.Schema.Bee
+  alias Hive.Store
   alias Hive.TranscriptWatcher
 
   @tmp_dir System.tmp_dir!()
 
   setup do
-    :ok = Ecto.Adapters.SQL.Sandbox.checkout(Repo)
-    Ecto.Adapters.SQL.Sandbox.mode(Repo, {:shared, self()})
+    store_dir = Path.join(@tmp_dir, "hive_store_#{:erlang.unique_integer([:positive])}")
+    File.mkdir_p!(store_dir)
+    if Process.whereis(Hive.Store), do: GenServer.stop(Hive.Store)
+    {:ok, _} = Hive.Store.start_link(data_dir: store_dir)
+    on_exit(fn -> File.rm_rf!(store_dir) end)
 
-    {:ok, bee} =
-      %Bee{}
-      |> Bee.changeset(%{name: "watcher-test-bee"})
-      |> Repo.insert()
+    {:ok, bee} = Store.insert(:bees, %{name: "watcher-test-bee", status: "starting"})
 
     # Start watcher with a fast poll interval for testing
     {:ok, pid} = TranscriptWatcher.start_link(poll_interval: 100)

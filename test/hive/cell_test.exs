@@ -2,14 +2,16 @@ defmodule Hive.CellTest do
   use ExUnit.Case, async: false
 
   alias Hive.Cell
-  alias Hive.Repo
-  alias Hive.Schema.{Bee, Comb}
+  alias Hive.Store
 
   @tmp_dir System.tmp_dir!()
 
   setup do
-    :ok = Ecto.Adapters.SQL.Sandbox.checkout(Repo)
-    Ecto.Adapters.SQL.Sandbox.mode(Repo, {:shared, self()})
+    store_dir = Path.join(@tmp_dir, "hive_store_#{:erlang.unique_integer([:positive])}")
+    File.mkdir_p!(store_dir)
+    if Process.whereis(Hive.Store), do: GenServer.stop(Hive.Store)
+    {:ok, _} = Hive.Store.start_link(data_dir: store_dir)
+    on_exit(fn -> File.rm_rf!(store_dir) end)
 
     # Create a temp git repo to serve as a comb
     repo_path = create_temp_git_repo()
@@ -18,10 +20,7 @@ defmodule Hive.CellTest do
     {:ok, comb} = Hive.Comb.add(repo_path, name: "cell-test-comb-#{:erlang.unique_integer([:positive])}")
 
     # Create a bee record
-    {:ok, bee} =
-      %Bee{}
-      |> Bee.changeset(%{name: "test-bee"})
-      |> Repo.insert()
+    {:ok, bee} = Store.insert(:bees, %{name: "test-bee", status: "starting"})
 
     %{comb: comb, bee: bee, repo_path: repo_path}
   end
@@ -80,9 +79,11 @@ defmodule Hive.CellTest do
     test "returns error for comb without a path", %{bee: bee} do
       # Insert a comb with nil path
       {:ok, remote_comb} =
-        %Comb{}
-        |> Comb.changeset(%{name: "remote-only-#{:erlang.unique_integer([:positive])}", repo_url: "https://example.com/repo"})
-        |> Repo.insert()
+        Store.insert(:combs, %{
+          name: "remote-only-#{:erlang.unique_integer([:positive])}",
+          repo_url: "https://example.com/repo",
+          path: nil
+        })
 
       assert {:error, :comb_has_no_path} = Cell.create(remote_comb.id, bee.id)
     end
@@ -147,10 +148,7 @@ defmodule Hive.CellTest do
   describe "cleanup_orphans/0" do
     test "marks cells as removed when bee is stopped", %{comb: comb} do
       # Create a bee that is stopped
-      {:ok, stopped_bee} =
-        %Bee{}
-        |> Bee.changeset(%{name: "stopped-bee", status: "stopped"})
-        |> Repo.insert()
+      {:ok, stopped_bee} = Store.insert(:bees, %{name: "stopped-bee", status: "stopped"})
 
       {:ok, _cell} = Cell.create(comb.id, stopped_bee.id)
 

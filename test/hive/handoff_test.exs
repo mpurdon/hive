@@ -2,23 +2,24 @@ defmodule Hive.HandoffTest do
   use ExUnit.Case, async: false
 
   alias Hive.Handoff
-  alias Hive.Repo
-  alias Hive.Schema.{Bee, Cell, Comb, Quest}
+  alias Hive.Store
 
   setup do
-    :ok = Ecto.Adapters.SQL.Sandbox.checkout(Repo)
-    Ecto.Adapters.SQL.Sandbox.mode(Repo, {:shared, self()})
+    tmp_dir = Path.join(System.tmp_dir!(), "hive_test_#{:erlang.unique_integer([:positive])}")
+    File.mkdir_p!(tmp_dir)
+    if Process.whereis(Hive.Store), do: GenServer.stop(Hive.Store)
+    {:ok, _} = Hive.Store.start_link(data_dir: tmp_dir)
+    on_exit(fn -> File.rm_rf!(tmp_dir) end)
 
     # Set up a full bee with job, cell, and waggles
     {:ok, comb} =
-      %Comb{}
-      |> Comb.changeset(%{name: "handoff-comb-#{:erlang.unique_integer([:positive])}"})
-      |> Repo.insert()
+      Store.insert(:combs, %{name: "handoff-comb-#{:erlang.unique_integer([:positive])}"})
 
     {:ok, quest} =
-      %Quest{}
-      |> Quest.changeset(%{name: "handoff-quest-#{:erlang.unique_integer([:positive])}"})
-      |> Repo.insert()
+      Store.insert(:quests, %{
+        name: "handoff-quest-#{:erlang.unique_integer([:positive])}",
+        status: "pending"
+      })
 
     {:ok, job} =
       Hive.Jobs.create(%{
@@ -29,20 +30,16 @@ defmodule Hive.HandoffTest do
       })
 
     {:ok, bee} =
-      %Bee{}
-      |> Bee.changeset(%{name: "handoff-bee", status: "working", job_id: job.id})
-      |> Repo.insert()
+      Store.insert(:bees, %{name: "handoff-bee", status: "working", job_id: job.id})
 
     {:ok, cell} =
-      %Cell{}
-      |> Cell.changeset(%{
+      Store.insert(:cells, %{
         bee_id: bee.id,
         comb_id: comb.id,
         worktree_path: "/tmp/handoff-worktree",
         branch: "bee/#{bee.id}",
         status: "active"
       })
-      |> Repo.insert()
 
     # Create some waggles to/from this bee
     {:ok, _sent} =
@@ -130,7 +127,7 @@ defmodule Hive.HandoffTest do
 
       {:ok, _briefing} = Handoff.resume(ctx.bee.id, waggle.id)
 
-      updated = Repo.get(Hive.Schema.Waggle, waggle.id)
+      updated = Store.get(:waggles, waggle.id)
       assert updated.read == true
     end
 
@@ -203,20 +200,14 @@ defmodule Hive.HandoffTest do
     end
 
     test "handles bee with no job" do
-      {:ok, bee} =
-        %Bee{}
-        |> Bee.changeset(%{name: "jobless-bee", status: "idle"})
-        |> Repo.insert()
+      {:ok, bee} = Store.insert(:bees, %{name: "jobless-bee", status: "idle"})
 
       assert {:ok, markdown} = Handoff.build_handoff_context(bee.id)
       assert markdown =~ "No job assigned"
     end
 
     test "handles bee with no cell" do
-      {:ok, bee} =
-        %Bee{}
-        |> Bee.changeset(%{name: "cellless-bee", status: "idle"})
-        |> Repo.insert()
+      {:ok, bee} = Store.insert(:bees, %{name: "cellless-bee", status: "idle"})
 
       assert {:ok, markdown} = Handoff.build_handoff_context(bee.id)
       assert markdown =~ "No workspace assigned"

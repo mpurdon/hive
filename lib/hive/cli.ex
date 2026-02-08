@@ -7,6 +7,7 @@ defmodule Hive.CLI do
 
   @spec main([String.t()]) :: no_return()
   def main(argv) do
+    argv = expand_defaults(argv)
     optimus = build_optimus!()
 
     case Optimus.parse(optimus, argv) do
@@ -14,6 +15,7 @@ defmodule Hive.CLI do
         Optimus.Help.help(optimus, [], 80) |> Enum.each(&IO.puts/1)
 
       {:ok, subcommand_path, result} ->
+        maybe_ensure_store(subcommand_path)
         dispatch(subcommand_path, result)
 
       :version ->
@@ -35,6 +37,53 @@ defmodule Hive.CLI do
     end
   end
 
+  # -- Helpers ----------------------------------------------------------------
+
+  # Optimus.ParseResult is a struct that doesn't implement Access, so we
+  # cannot use get_in/2 with atom keys.  This helper uses dot-syntax for
+  # the struct field and bracket-syntax for the inner map key.
+  defp result_get(%Optimus.ParseResult{} = r, section, key) do
+    Map.get(Map.get(r, section, %{}), key)
+  end
+
+  @quest_subcommands ~w(new list show delete merge report)
+
+  defp expand_defaults(["quest" | rest]) when rest != [] do
+    case rest do
+      [sub | _] when sub in @quest_subcommands -> ["quest" | rest]
+      # Don't expand flags like --help into "quest new --help"
+      [<<"-", _::binary>> | _] -> ["quest" | rest]
+      _ -> ["quest", "new" | rest]
+    end
+  end
+
+  defp expand_defaults(argv), do: argv
+
+  # Commands that manage their own store lifecycle or don't need the store.
+  @no_auto_store [[:init], [:version]]
+
+  defp maybe_ensure_store(subcommand_path) do
+    unless subcommand_path in @no_auto_store do
+      ensure_store()
+    end
+  end
+
+  defp ensure_store do
+    case Hive.hive_dir() do
+      {:ok, root} ->
+        store_dir = Path.join([root, ".hive", "store"])
+
+        case Hive.Store.start_link(data_dir: store_dir) do
+          {:ok, _pid} -> :ok
+          {:error, {:already_started, _pid}} -> :ok
+          {:error, reason} -> Format.error("Store error: #{inspect(reason)}")
+        end
+
+      {:error, :not_in_hive} ->
+        :skip
+    end
+  end
+
   # -- Command dispatch -------------------------------------------------------
   #
   # All dispatch/2 clauses are grouped together to satisfy Elixir's
@@ -45,9 +94,10 @@ defmodule Hive.CLI do
   end
 
   defp dispatch([:init], result) do
-    path = get_in(result, [:args, :path]) || "."
-    force? = get_in(result, [:flags, :force]) || false
-    quick? = get_in(result, [:flags, :quick]) || false
+    IO.puts("hive v#{Hive.version()}")
+    path = result_get(result, :args, :path) || "."
+    force? = result_get(result, :flags, :force) || false
+    quick? = result_get(result, :flags, :quick) || false
 
     if quick? do
       do_quick_init(path, force?)
@@ -66,12 +116,46 @@ defmodule Hive.CLI do
   end
 
   defp dispatch([:comb, :add], result) do
-    path = get_in(result, [:args, :path])
-    name = get_in(result, [:options, :name])
-    merge_strategy = get_in(result, [:options, :merge_strategy])
-    validation_command = get_in(result, [:options, :validation_command])
-    github_owner = get_in(result, [:options, :github_owner])
-    github_repo = get_in(result, [:options, :github_repo])
+    path = result_get(result, :args, :path)
+
+    path =
+      if path do
+        path
+      else
+        case discover_nearby_repos() do
+          [] ->
+            Format.error("No git repositories found in the current directory.")
+            System.halt(1)
+
+          repos ->
+            IO.puts("Found git repositories:")
+
+            repos
+            |> Enum.with_index(1)
+            |> Enum.each(fn {{display, _abs_path}, idx} ->
+              IO.puts("  #{idx}) #{display}")
+            end)
+
+            IO.puts("")
+            answer = IO.gets("Select a repo [1-#{length(repos)}]: ") |> String.trim()
+
+            case Integer.parse(answer) do
+              {n, ""} when n >= 1 and n <= length(repos) ->
+                {_display, abs_path} = Enum.at(repos, n - 1)
+                abs_path
+
+              _ ->
+                Format.error("Invalid selection: #{answer}")
+                System.halt(1)
+            end
+        end
+      end
+
+    name = result_get(result, :options, :name)
+    merge_strategy = result_get(result, :options, :merge_strategy)
+    validation_command = result_get(result, :options, :validation_command)
+    github_owner = result_get(result, :options, :github_owner)
+    github_repo = result_get(result, :options, :github_repo)
 
     opts = []
     opts = if name, do: Keyword.put(opts, :name, name), else: opts
@@ -83,10 +167,6 @@ defmodule Hive.CLI do
     case Hive.Comb.add(path, opts) do
       {:ok, comb} ->
         Format.success("Comb \"#{comb.name}\" registered (#{comb.id})")
-
-      {:error, %Ecto.Changeset{} = cs} ->
-        errors = Ecto.Changeset.traverse_errors(cs, fn {msg, _} -> msg end)
-        Format.error("Failed to add comb: #{inspect(errors)}")
 
       {:error, :path_not_found} ->
         Format.error("Path does not exist: #{path}")
@@ -102,11 +182,18 @@ defmodule Hive.CLI do
         Format.info("No combs registered. Use `hive comb add <path>` to register one.")
 
       combs ->
-        headers = ["ID", "Name", "Path"]
+        current_id =
+          case Hive.Comb.current() do
+            {:ok, c} -> c.id
+            _ -> nil
+          end
+
+        headers = ["", "ID", "Name", "Path"]
 
         rows =
           Enum.map(combs, fn c ->
-            [c.id, c.name, c.path || c.repo_url || "-"]
+            marker = if c.id == current_id, do: "*", else: ""
+            [marker, c.id, c.name, c.path || c.repo_url || "-"]
           end)
 
         Format.table(headers, rows)
@@ -114,7 +201,7 @@ defmodule Hive.CLI do
   end
 
   defp dispatch([:comb, :remove], result) do
-    name = get_in(result, [:args, :name])
+    name = result_get(result, :args, :name)
 
     case Hive.Comb.remove(name) do
       {:ok, comb} ->
@@ -126,8 +213,59 @@ defmodule Hive.CLI do
     end
   end
 
+  defp dispatch([:comb, :use], result) do
+    name = result_get(result, :args, :name)
+
+    if name do
+      case Hive.Comb.set_current(name) do
+        {:ok, comb} ->
+          Format.success("Current comb set to \"#{comb.name}\" (#{comb.id})")
+
+        {:error, :not_found} ->
+          Format.error("Comb not found: #{name}")
+          Format.info("Hint: use `hive comb list` to see all combs.")
+
+        {:error, reason} ->
+          Format.error("Failed to set current comb: #{inspect(reason)}")
+      end
+    else
+      case Hive.Comb.list() do
+        [] ->
+          Format.error("No combs registered. Use `hive comb add <path>` to register one.")
+
+        combs ->
+          IO.puts("Registered combs:")
+
+          combs
+          |> Enum.with_index(1)
+          |> Enum.each(fn {c, idx} ->
+            IO.puts("  #{idx}) #{c.name} (#{c.id})")
+          end)
+
+          IO.puts("")
+          answer = IO.gets("Select a comb [1-#{length(combs)}]: ") |> String.trim()
+
+          case Integer.parse(answer) do
+            {n, ""} when n >= 1 and n <= length(combs) ->
+              comb = Enum.at(combs, n - 1)
+
+              case Hive.Comb.set_current(comb.id) do
+                {:ok, c} ->
+                  Format.success("Current comb set to \"#{c.name}\" (#{c.id})")
+
+                {:error, reason} ->
+                  Format.error("Failed: #{inspect(reason)}")
+              end
+
+            _ ->
+              Format.error("Invalid selection: #{answer}")
+          end
+      end
+    end
+  end
+
   defp dispatch([:waggle, :list], result) do
-    to = get_in(result, [:options, :to])
+    to = result_get(result, :options, :to)
     opts = if to, do: [to: to], else: []
 
     case Hive.Waggle.list(opts) do
@@ -147,9 +285,9 @@ defmodule Hive.CLI do
   end
 
   defp dispatch([:waggle, :show], result) do
-    id = get_in(result, [:args, :id])
+    id = result_get(result, :args, :id)
 
-    case Hive.Repo.get(Hive.Schema.Waggle, id) do
+    case Hive.Store.get(:waggles, id) do
       nil ->
         Format.error("Waggle not found: #{id}")
         Format.info("Hint: use `hive waggle list` to see all messages.")
@@ -170,10 +308,10 @@ defmodule Hive.CLI do
   end
 
   defp dispatch([:waggle, :send], result) do
-    from = get_in(result, [:options, :from])
-    to = get_in(result, [:options, :to])
-    subject = get_in(result, [:options, :subject])
-    body = get_in(result, [:options, :body])
+    from = result_get(result, :options, :from)
+    to = result_get(result, :options, :to)
+    subject = result_get(result, :options, :subject)
+    body = result_get(result, :options, :body)
 
     case Hive.Waggle.send(from, to, subject, body) do
       {:ok, waggle} ->
@@ -212,8 +350,8 @@ defmodule Hive.CLI do
   end
 
   defp dispatch([:prime], result) do
-    bee_id = get_in(result, [:options, :bee])
-    queen? = get_in(result, [:flags, :queen]) || false
+    bee_id = result_get(result, :options, :bee)
+    queen? = result_get(result, :flags, :queen) || false
 
     cond do
       queen? ->
@@ -244,7 +382,7 @@ defmodule Hive.CLI do
                 Format.info("Queen running without Claude. Listening for waggles.")
             end
 
-            Process.sleep(:infinity)
+            Hive.Queen.await_session_end()
 
           {:error, {:already_started, _pid}} ->
             Format.warn("Queen is already running.")
@@ -277,35 +415,40 @@ defmodule Hive.CLI do
   end
 
   defp dispatch([:bee, :spawn], result) do
-    job_id = get_in(result, [:options, :job])
-    comb_id = get_in(result, [:options, :comb])
-    name = get_in(result, [:options, :name])
+    job_id = result_get(result, :options, :job)
+    name = result_get(result, :options, :name)
 
-    with {:ok, hive_root} <- Hive.hive_dir(),
-         {:ok, comb} <- Hive.Comb.get(comb_id) do
-      opts = if name, do: [name: name], else: []
+    case resolve_comb_id(result_get(result, :options, :comb)) do
+      {:ok, comb_id} ->
+        with {:ok, hive_root} <- Hive.hive_dir(),
+             {:ok, comb} <- Hive.Comb.get(comb_id) do
+          opts = if name, do: [name: name], else: []
 
-      case Hive.Bees.spawn(job_id, comb.id, hive_root, opts) do
-        {:ok, bee} ->
-          Format.success("Bee \"#{bee.name}\" spawned (#{bee.id})")
+          case Hive.Bees.spawn_detached(job_id, comb.id, hive_root, opts) do
+            {:ok, bee} ->
+              Format.success("Bee \"#{bee.name}\" spawned (#{bee.id})")
 
-        {:error, reason} ->
-          Format.error("Failed to spawn bee: #{inspect(reason)}")
-      end
-    else
-      {:error, :not_in_hive} ->
-        Format.error("Not inside a hive workspace. Run `hive init` first.")
+            {:error, reason} ->
+              Format.error("Failed to spawn bee: #{inspect(reason)}")
+          end
+        else
+          {:error, :not_in_hive} ->
+            Format.error("Not inside a hive workspace. Run `hive init` first.")
 
-      {:error, :not_found} ->
-        Format.error("Comb not found: #{comb_id}")
+          {:error, :not_found} ->
+            Format.error("Comb not found: #{comb_id}")
 
-      {:error, reason} ->
-        Format.error("Failed: #{inspect(reason)}")
+          {:error, reason} ->
+            Format.error("Failed: #{inspect(reason)}")
+        end
+
+      {:error, :no_comb} ->
+        Format.error("No comb specified. Use --comb or set one with `hive comb use`.")
     end
   end
 
   defp dispatch([:bee, :stop], result) do
-    bee_id = get_in(result, [:options, :id])
+    bee_id = result_get(result, :options, :id)
 
     case Hive.Bees.stop(bee_id) do
       :ok ->
@@ -317,33 +460,129 @@ defmodule Hive.CLI do
     end
   end
 
-  defp dispatch([:quest, :new], result) do
-    name = get_in(result, [:args, :name])
+  defp dispatch([:bee, :complete], result) do
+    bee_id = result_get(result, :args, :bee_id)
 
-    case Hive.Quests.create(%{name: name}) do
-      {:ok, quest} ->
-        Format.success("Quest \"#{quest.name}\" created (#{quest.id})")
+    case Hive.Bees.get(bee_id) do
+      {:ok, bee} ->
+        Hive.Store.put(:bees, %{bee | status: "stopped"})
+        if bee.job_id do
+          Hive.Jobs.complete(bee.job_id)
+          Hive.Jobs.unblock_dependents(bee.job_id)
+          Hive.Waggle.send(bee_id, "queen", "job_complete", "Job #{bee.job_id} completed successfully")
+        end
+        Format.success("Bee #{bee_id} marked as completed.")
 
-      {:error, %Ecto.Changeset{} = cs} ->
-        errors = Ecto.Changeset.traverse_errors(cs, fn {msg, _} -> msg end)
-        Format.error("Failed to create quest: #{inspect(errors)}")
+      {:error, _} ->
+        Format.error("Bee not found: #{bee_id}")
+    end
+  end
+
+  defp dispatch([:bee, :fail], result) do
+    bee_id = result_get(result, :args, :bee_id)
+    reason = result_get(result, :options, :reason) || "unknown"
+
+    case Hive.Bees.get(bee_id) do
+      {:ok, bee} ->
+        Hive.Store.put(:bees, %{bee | status: "crashed"})
+        if bee.job_id do
+          Hive.Jobs.fail(bee.job_id)
+          Hive.Waggle.send(bee_id, "queen", "job_failed", "Job #{bee.job_id} failed: #{reason}")
+        end
+        Format.success("Bee #{bee_id} marked as failed: #{reason}")
+
+      {:error, _} ->
+        Format.error("Bee not found: #{bee_id}")
+    end
+  end
+
+  defp dispatch([:quest, :report], result) do
+    id = result_get(result, :args, :id)
+
+    case Hive.Report.generate(id) do
+      {:ok, report} ->
+        IO.puts(Hive.Report.format(report))
+
+      {:error, :not_found} ->
+        Format.error("Quest not found: #{id}")
 
       {:error, reason} ->
-        Format.error("Failed to create quest: #{inspect(reason)}")
+        Format.error("Report failed: #{inspect(reason)}")
+    end
+  end
+
+  defp dispatch([:quest, :merge], result) do
+    id = result_get(result, :args, :id)
+
+    case Hive.Merge.merge_quest(id) do
+      {:ok, branch} ->
+        Format.success("All bee branches merged into #{branch}")
+
+      {:error, :not_found} ->
+        Format.error("Quest not found: #{id}")
+
+      {:error, :no_cells} ->
+        Format.error("No active cells to merge for this quest.")
+
+      {:error, {:merge_conflicts, branch, failed}} ->
+        Format.warn("Merged into #{branch} with conflicts in: #{Enum.join(failed, ", ")}")
+
+      {:error, reason} ->
+        Format.error("Quest merge failed: #{inspect(reason)}")
+    end
+  end
+
+  defp dispatch([:quest, :new], result) do
+    goal = result_get(result, :args, :goal)
+
+    case resolve_comb_id(result_get(result, :options, :comb)) do
+      {:ok, comb_id} ->
+        attrs = %{goal: goal, comb_id: comb_id}
+
+        case Hive.Quests.create(attrs) do
+          {:ok, quest} ->
+            Format.success("Quest \"#{quest.name}\" created (#{quest.id})")
+
+          {:error, reason} ->
+            Format.error("Failed to create quest: #{inspect(reason)}")
+        end
+
+      {:error, :no_comb} ->
+        case Hive.Quests.create(%{goal: goal}) do
+          {:ok, quest} ->
+            Format.success("Quest \"#{quest.name}\" created (#{quest.id})")
+
+          {:error, reason} ->
+            Format.error("Failed to create quest: #{inspect(reason)}")
+        end
+    end
+  end
+
+  defp dispatch([:quest, :delete], result) do
+    id = result_get(result, :args, :id)
+
+    case Hive.Quests.delete(id) do
+      :ok ->
+        Format.success("Quest #{id} deleted.")
+
+      {:error, :not_found} ->
+        Format.error("Quest not found: #{id}")
+        Format.info("Hint: use `hive quest list` to see all quests.")
     end
   end
 
   defp dispatch([:quest, :list], _result) do
     case Hive.Quests.list() do
       [] ->
-        Format.info("No quests. Create one with `hive quest new <name>`.")
+        Format.info("No quests. Create one with `hive quest \"<goal>\"`.")
 
       quests ->
-        headers = ["ID", "Name", "Status"]
+        headers = ["ID", "Name", "Status", "Comb"]
 
         rows =
           Enum.map(quests, fn q ->
-            [q.id, q.name, q.status]
+            comb_name = resolve_comb_name(q[:comb_id])
+            [q.id, q.name, q.status, comb_name]
           end)
 
         Format.table(headers, rows)
@@ -351,13 +590,23 @@ defmodule Hive.CLI do
   end
 
   defp dispatch([:quest, :show], result) do
-    id = get_in(result, [:args, :id])
+    id = result_get(result, :args, :id)
 
     case Hive.Quests.get(id) do
       {:ok, quest} ->
         IO.puts("ID:     #{quest.id}")
         IO.puts("Name:   #{quest.name}")
         IO.puts("Status: #{quest.status}")
+
+        if quest[:comb_id] do
+          comb_name = resolve_comb_name(quest.comb_id)
+          IO.puts("Comb:   #{comb_name}")
+        end
+
+        if quest[:goal] do
+          IO.puts("Goal:   #{quest.goal}")
+        end
+
         IO.puts("")
 
         case quest.jobs do
@@ -399,7 +648,7 @@ defmodule Hive.CLI do
   end
 
   defp dispatch([:jobs, :show], result) do
-    id = get_in(result, [:args, :id])
+    id = result_get(result, :args, :id)
 
     case Hive.Jobs.get(id) do
       {:ok, job} ->
@@ -423,28 +672,47 @@ defmodule Hive.CLI do
   end
 
   defp dispatch([:jobs, :create], result) do
-    quest_id = get_in(result, [:options, :quest])
-    title = get_in(result, [:options, :title])
-    comb_id = get_in(result, [:options, :comb])
-    description = get_in(result, [:options, :description])
+    quest_id = result_get(result, :options, :quest)
+    title = result_get(result, :options, :title)
+    description = result_get(result, :options, :description)
 
-    attrs = %{
-      quest_id: quest_id,
-      title: title,
-      comb_id: comb_id,
-      description: description
-    }
+    case resolve_comb_id(result_get(result, :options, :comb)) do
+      {:ok, comb_id} ->
+        attrs = %{
+          quest_id: quest_id,
+          title: title,
+          comb_id: comb_id,
+          description: description
+        }
 
-    case Hive.Jobs.create(attrs) do
+        case Hive.Jobs.create(attrs) do
+          {:ok, job} ->
+            Format.success("Job \"#{job.title}\" created (#{job.id})")
+
+          {:error, reason} ->
+            Format.error("Failed to create job: #{inspect(reason)}")
+        end
+
+      {:error, :no_comb} ->
+        Format.error("No comb specified. Use --comb or set one with `hive comb use`.")
+    end
+  end
+
+  defp dispatch([:jobs, :reset], result) do
+    job_id = result_get(result, :args, :id)
+
+    case Hive.Jobs.reset(job_id) do
       {:ok, job} ->
-        Format.success("Job \"#{job.title}\" created (#{job.id})")
+        Format.success("Job \"#{job.title}\" reset to #{job.status} (#{job.id})")
 
-      {:error, %Ecto.Changeset{} = cs} ->
-        errors = Ecto.Changeset.traverse_errors(cs, fn {msg, _} -> msg end)
-        Format.error("Failed to create job: #{inspect(errors)}")
+      {:error, :not_found} ->
+        Format.error("Job not found: #{job_id}")
+
+      {:error, :invalid_transition} ->
+        Format.error("Job cannot be reset from its current status.")
 
       {:error, reason} ->
-        Format.error("Failed to create job: #{inspect(reason)}")
+        Format.error("Failed to reset job: #{inspect(reason)}")
     end
   end
 
@@ -483,10 +751,10 @@ defmodule Hive.CLI do
   end
 
   defp dispatch([:costs, :record], result) do
-    bee_id = get_in(result, [:options, :bee])
-    input = get_in(result, [:options, :input])
-    output = get_in(result, [:options, :output])
-    model = get_in(result, [:options, :model])
+    bee_id = result_get(result, :options, :bee)
+    input = result_get(result, :options, :input)
+    output = result_get(result, :options, :output)
+    model = result_get(result, :options, :model)
 
     attrs = %{
       input_tokens: input,
@@ -504,7 +772,7 @@ defmodule Hive.CLI do
   end
 
   defp dispatch([:doctor], result) do
-    fix? = get_in(result, [:flags, :fix]) || false
+    fix? = result_get(result, :flags, :fix) || false
     results = Hive.Doctor.run_all(fix: fix?)
 
     Enum.each(results, fn check ->
@@ -530,7 +798,7 @@ defmodule Hive.CLI do
   end
 
   defp dispatch([:handoff, :create], result) do
-    bee_id = get_in(result, [:options, :bee])
+    bee_id = result_get(result, :options, :bee)
 
     case Hive.Handoff.create(bee_id) do
       {:ok, waggle} ->
@@ -546,7 +814,7 @@ defmodule Hive.CLI do
   end
 
   defp dispatch([:handoff, :show], result) do
-    bee_id = get_in(result, [:options, :bee])
+    bee_id = result_get(result, :options, :bee)
 
     case Hive.Handoff.detect_handoff(bee_id) do
       {:ok, waggle} ->
@@ -561,7 +829,7 @@ defmodule Hive.CLI do
   end
 
   defp dispatch([:drone], result) do
-    no_fix = get_in(result, [:flags, :no_fix]) || false
+    no_fix = result_get(result, :flags, :no_fix) || false
 
     case Hive.Drone.start_link(auto_fix: !no_fix) do
       {:ok, _pid} ->
@@ -583,8 +851,8 @@ defmodule Hive.CLI do
   # -- Phase 1: Job dependencies -----------------------------------------------
 
   defp dispatch([:jobs, :deps, :add], result) do
-    job_id = get_in(result, [:options, :job])
-    depends_on = get_in(result, [:options, :depends_on])
+    job_id = result_get(result, :options, :job)
+    depends_on = result_get(result, :options, :depends_on)
 
     case Hive.Jobs.add_dependency(job_id, depends_on) do
       {:ok, dep} ->
@@ -602,8 +870,8 @@ defmodule Hive.CLI do
   end
 
   defp dispatch([:jobs, :deps, :remove], result) do
-    job_id = get_in(result, [:options, :job])
-    depends_on = get_in(result, [:options, :depends_on])
+    job_id = result_get(result, :options, :job)
+    depends_on = result_get(result, :options, :depends_on)
 
     case Hive.Jobs.remove_dependency(job_id, depends_on) do
       :ok -> Format.success("Dependency removed.")
@@ -612,7 +880,7 @@ defmodule Hive.CLI do
   end
 
   defp dispatch([:jobs, :deps, :list], result) do
-    job_id = get_in(result, [:options, :job])
+    job_id = result_get(result, :options, :job)
 
     deps = Hive.Jobs.dependencies(job_id)
     dependents = Hive.Jobs.dependents(job_id)
@@ -641,7 +909,7 @@ defmodule Hive.CLI do
   # -- Phase 2: Budget ---------------------------------------------------------
 
   defp dispatch([:budget], result) do
-    quest_id = get_in(result, [:options, :quest])
+    quest_id = result_get(result, :options, :quest)
 
     budget = Hive.Budget.budget_for(quest_id)
     spent = Hive.Budget.spent_for(quest_id)
@@ -692,13 +960,12 @@ defmodule Hive.CLI do
   # -- Phase 4: Conflict check ------------------------------------------------
 
   defp dispatch([:conflict, :check], result) do
-    bee_id = get_in(result, [:options, :bee])
+    bee_id = result_get(result, :options, :bee)
 
     if bee_id do
       case Hive.Bees.get(bee_id) do
         {:ok, bee} ->
-          import Ecto.Query
-          cell = Hive.Repo.one(from c in Hive.Schema.Cell, where: c.bee_id == ^bee.id and c.status == "active")
+          cell = Hive.Store.find_one(:cells, fn c -> c.bee_id == bee.id and c.status == "active" end)
 
           if cell do
             case Hive.Conflict.check(cell.id) do
@@ -733,12 +1000,11 @@ defmodule Hive.CLI do
   # -- Phase 5: Validate ------------------------------------------------------
 
   defp dispatch([:validate], result) do
-    bee_id = get_in(result, [:options, :bee])
+    bee_id = result_get(result, :options, :bee)
 
     with {:ok, bee} <- Hive.Bees.get(bee_id),
          {:ok, job} <- Hive.Jobs.get(bee.job_id) do
-      import Ecto.Query
-      cell = Hive.Repo.one(from c in Hive.Schema.Cell, where: c.bee_id == ^bee.id and c.status == "active")
+      cell = Hive.Store.find_one(:cells, fn c -> c.bee_id == bee.id and c.status == "active" end)
 
       if cell do
         Format.info("Running validation for bee #{bee_id}...")
@@ -765,13 +1031,12 @@ defmodule Hive.CLI do
   # -- Phase 6: GitHub ---------------------------------------------------------
 
   defp dispatch([:github, :pr], result) do
-    bee_id = get_in(result, [:options, :bee])
+    bee_id = result_get(result, :options, :bee)
 
     with {:ok, bee} <- Hive.Bees.get(bee_id),
          {:ok, job} <- Hive.Jobs.get(bee.job_id) do
-      import Ecto.Query
-      cell = Hive.Repo.one(from c in Hive.Schema.Cell, where: c.bee_id == ^bee.id)
-      comb = cell && Hive.Repo.get(Hive.Schema.Comb, cell.comb_id)
+      cell = Hive.Store.find_one(:cells, fn c -> c.bee_id == bee.id end)
+      comb = cell && Hive.Store.get(:combs, cell.comb_id)
 
       cond do
         is_nil(cell) ->
@@ -780,7 +1045,7 @@ defmodule Hive.CLI do
         is_nil(comb) ->
           Format.error("Comb not found")
 
-        is_nil(comb.github_owner) || is_nil(comb.github_repo) ->
+        is_nil(Map.get(comb, :github_owner)) || is_nil(Map.get(comb, :github_repo)) ->
           Format.error("Comb #{comb.name} has no GitHub config. Use --github-owner and --github-repo when adding.")
 
         true ->
@@ -796,45 +1061,53 @@ defmodule Hive.CLI do
   end
 
   defp dispatch([:github, :issues], result) do
-    comb_id = get_in(result, [:options, :comb])
+    case resolve_comb_id(result_get(result, :options, :comb)) do
+      {:ok, comb_id} ->
+        case Hive.Comb.get(comb_id) do
+          {:ok, comb} ->
+            case Hive.GitHub.list_issues(comb) do
+              {:ok, issues} ->
+                if issues == [] do
+                  Format.info("No open issues.")
+                else
+                  headers = ["#", "Title", "State"]
+                  rows = Enum.map(issues, fn i -> ["#{i["number"]}", i["title"], i["state"]] end)
+                  Format.table(headers, rows)
+                end
 
-    case Hive.Comb.get(comb_id) do
-      {:ok, comb} ->
-        case Hive.GitHub.list_issues(comb) do
-          {:ok, issues} ->
-            if issues == [] do
-              Format.info("No open issues.")
-            else
-              headers = ["#", "Title", "State"]
-              rows = Enum.map(issues, fn i -> ["#{i["number"]}", i["title"], i["state"]] end)
-              Format.table(headers, rows)
+              {:error, reason} ->
+                Format.error("Failed: #{inspect(reason)}")
             end
 
-          {:error, reason} ->
-            Format.error("Failed: #{inspect(reason)}")
+          {:error, _} ->
+            Format.error("Comb not found: #{comb_id}")
         end
 
-      {:error, _} ->
-        Format.error("Comb not found: #{comb_id}")
+      {:error, :no_comb} ->
+        Format.error("No comb specified. Use --comb or set one with `hive comb use`.")
     end
   end
 
   defp dispatch([:github, :sync], result) do
-    comb_id = get_in(result, [:options, :comb])
+    case resolve_comb_id(result_get(result, :options, :comb)) do
+      {:ok, comb_id} ->
+        case Hive.Comb.get(comb_id) do
+          {:ok, comb} ->
+            case Hive.GitHub.list_issues(comb) do
+              {:ok, issues} ->
+                Format.info("Found #{length(issues)} open issues for #{comb.name}")
+                Enum.each(issues, fn i -> IO.puts("  ##{i["number"]} #{i["title"]}") end)
 
-    case Hive.Comb.get(comb_id) do
-      {:ok, comb} ->
-        case Hive.GitHub.list_issues(comb) do
-          {:ok, issues} ->
-            Format.info("Found #{length(issues)} open issues for #{comb.name}")
-            Enum.each(issues, fn i -> IO.puts("  ##{i["number"]} #{i["title"]}") end)
+              {:error, reason} ->
+                Format.error("Sync failed: #{inspect(reason)}")
+            end
 
-          {:error, reason} ->
-            Format.error("Sync failed: #{inspect(reason)}")
+          {:error, _} ->
+            Format.error("Comb not found: #{comb_id}")
         end
 
-      {:error, _} ->
-        Format.error("Comb not found: #{comb_id}")
+      {:error, :no_comb} ->
+        Format.error("No comb specified. Use --comb or set one with `hive comb use`.")
     end
   end
 
@@ -844,6 +1117,24 @@ defmodule Hive.CLI do
   end
 
   # -- Dispatch helpers (not dispatch/2 clauses) -----------------------------
+
+  defp resolve_comb_id(explicit) when is_binary(explicit), do: {:ok, explicit}
+
+  defp resolve_comb_id(nil) do
+    case Hive.Comb.current() do
+      {:ok, comb} -> {:ok, comb.id}
+      {:error, :no_current_comb} -> {:error, :no_comb}
+    end
+  end
+
+  defp resolve_comb_name(nil), do: "-"
+
+  defp resolve_comb_name(comb_id) do
+    case Hive.Comb.get(comb_id) do
+      {:ok, comb} -> comb.name
+      _ -> comb_id
+    end
+  end
 
   defp do_prime_queen do
     case Hive.hive_dir() do
@@ -923,6 +1214,32 @@ defmodule Hive.CLI do
     end
   end
 
+  defp discover_nearby_repos do
+    cwd = File.cwd!()
+
+    current =
+      if Hive.Git.repo?(cwd),
+        do: [{". (current directory)", cwd}],
+        else: []
+
+    subdirs =
+      case File.ls(cwd) do
+        {:ok, entries} ->
+          entries
+          |> Enum.sort()
+          |> Enum.filter(fn entry ->
+            full = Path.join(cwd, entry)
+            File.dir?(full) and not String.starts_with?(entry, ".") and Hive.Git.repo?(full)
+          end)
+          |> Enum.map(fn entry -> {entry, Path.join(cwd, entry)} end)
+
+        {:error, _} ->
+          []
+      end
+
+    current ++ subdirs
+  end
+
   defp doctor_status_label(:ok), do: IO.ANSI.green() <> "OK" <> IO.ANSI.reset()
   defp doctor_status_label(:warn), do: IO.ANSI.yellow() <> "WARN" <> IO.ANSI.reset()
   defp doctor_status_label(:error), do: IO.ANSI.red() <> "FAIL" <> IO.ANSI.reset()
@@ -981,7 +1298,7 @@ defmodule Hive.CLI do
                 path: [
                   value_name: "PATH",
                   help: "Path to the git repository",
-                  required: true,
+                  required: false,
                   parser: :string
                 ]
               ],
@@ -1034,6 +1351,18 @@ defmodule Hive.CLI do
                   parser: :string
                 ]
               ]
+            ],
+            use: [
+              name: "use",
+              about: "Set the current working comb",
+              args: [
+                name: [
+                  value_name: "NAME",
+                  help: "Name or ID of the comb to set as current",
+                  required: false,
+                  parser: :string
+                ]
+              ]
             ]
           ]
         ],
@@ -1063,9 +1392,9 @@ defmodule Hive.CLI do
                 comb: [
                   short: "-c",
                   long: "--comb",
-                  help: "Comb ID (repository) to work in",
+                  help: "Comb ID (repository) to work in (defaults to current comb)",
                   parser: :string,
-                  required: true
+                  required: false
                 ],
                 name: [
                   short: "-n",
@@ -1087,6 +1416,38 @@ defmodule Hive.CLI do
                   required: true
                 ]
               ]
+            ],
+            complete: [
+              name: "complete",
+              about: "Mark a bee as completed (used by wrapper scripts)",
+              args: [
+                bee_id: [
+                  value_name: "BEE_ID",
+                  help: "Bee ID to mark as completed",
+                  required: true,
+                  parser: :string
+                ]
+              ]
+            ],
+            fail: [
+              name: "fail",
+              about: "Mark a bee as failed (used by wrapper scripts)",
+              args: [
+                bee_id: [
+                  value_name: "BEE_ID",
+                  help: "Bee ID to mark as failed",
+                  required: true,
+                  parser: :string
+                ]
+              ],
+              options: [
+                reason: [
+                  long: "--reason",
+                  help: "Failure reason",
+                  parser: :string,
+                  required: false
+                ]
+              ]
             ]
           ]
         ],
@@ -1098,11 +1459,20 @@ defmodule Hive.CLI do
               name: "new",
               about: "Create a new quest",
               args: [
-                name: [
-                  value_name: "NAME",
-                  help: "Short name for the quest",
+                goal: [
+                  value_name: "GOAL",
+                  help: "The goal for this quest (a short name is auto-generated)",
                   required: true,
                   parser: :string
+                ]
+              ],
+              options: [
+                comb: [
+                  short: "-c",
+                  long: "--comb",
+                  help: "Comb ID (defaults to current comb)",
+                  parser: :string,
+                  required: false
                 ]
               ]
             ],
@@ -1117,6 +1487,42 @@ defmodule Hive.CLI do
                 id: [
                   value_name: "ID",
                   help: "Quest identifier",
+                  required: true,
+                  parser: :string
+                ]
+              ]
+            ],
+            delete: [
+              name: "delete",
+              about: "Delete a quest",
+              args: [
+                id: [
+                  value_name: "ID",
+                  help: "Quest ID to delete",
+                  required: true,
+                  parser: :string
+                ]
+              ]
+            ],
+            merge: [
+              name: "merge",
+              about: "Merge all completed bee branches into a quest branch",
+              args: [
+                id: [
+                  value_name: "ID",
+                  help: "Quest ID to merge",
+                  required: true,
+                  parser: :string
+                ]
+              ]
+            ],
+            report: [
+              name: "report",
+              about: "Show performance report for a quest run",
+              args: [
+                id: [
+                  value_name: "ID",
+                  help: "Quest ID to report on",
                   required: true,
                   parser: :string
                 ]
@@ -1165,9 +1571,9 @@ defmodule Hive.CLI do
                 comb: [
                   short: "-c",
                   long: "--comb",
-                  help: "Comb ID for the job",
+                  help: "Comb ID for the job (defaults to current comb)",
                   parser: :string,
-                  required: true
+                  required: false
                 ],
                 description: [
                   short: "-d",
@@ -1175,6 +1581,18 @@ defmodule Hive.CLI do
                   help: "Detailed job description",
                   parser: :string,
                   required: false
+                ]
+              ]
+            ],
+            reset: [
+              name: "reset",
+              about: "Reset a stuck job back to pending",
+              args: [
+                id: [
+                  value_name: "ID",
+                  help: "Job ID to reset",
+                  required: true,
+                  parser: :string
                 ]
               ]
             ],
@@ -1496,9 +1914,9 @@ defmodule Hive.CLI do
                 comb: [
                   short: "-c",
                   long: "--comb",
-                  help: "Comb ID",
+                  help: "Comb ID (defaults to current comb)",
                   parser: :string,
-                  required: true
+                  required: false
                 ]
               ]
             ],
@@ -1509,9 +1927,9 @@ defmodule Hive.CLI do
                 comb: [
                   short: "-c",
                   long: "--comb",
-                  help: "Comb ID to sync",
+                  help: "Comb ID to sync (defaults to current comb)",
                   parser: :string,
-                  required: true
+                  required: false
                 ]
               ]
             ]

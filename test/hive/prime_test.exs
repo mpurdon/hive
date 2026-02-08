@@ -2,14 +2,16 @@ defmodule Hive.PrimeTest do
   use ExUnit.Case, async: false
 
   alias Hive.Prime
-  alias Hive.Repo
-  alias Hive.Schema.Bee
+  alias Hive.Store
 
   @tmp_dir System.tmp_dir!()
 
   setup do
-    :ok = Ecto.Adapters.SQL.Sandbox.checkout(Repo)
-    Ecto.Adapters.SQL.Sandbox.mode(Repo, {:shared, self()})
+    tmp_dir = Path.join(@tmp_dir, "hive_store_#{:erlang.unique_integer([:positive])}")
+    File.mkdir_p!(tmp_dir)
+    if Process.whereis(Hive.Store), do: GenServer.stop(Hive.Store)
+    {:ok, _} = Hive.Store.start_link(data_dir: tmp_dir)
+    on_exit(fn -> File.rm_rf!(tmp_dir) end)
     :ok
   end
 
@@ -49,10 +51,7 @@ defmodule Hive.PrimeTest do
       hive_root = create_hive_workspace()
 
       # Create a working bee
-      {:ok, _bee} =
-        %Bee{}
-        |> Bee.changeset(%{name: "busy-bee", status: "working"})
-        |> Repo.insert()
+      {:ok, _bee} = Store.insert(:bees, %{name: "busy-bee", status: "working"})
 
       {:ok, markdown} = Prime.prime(:queen, hive_root)
       assert markdown =~ "busy-bee"
@@ -61,10 +60,7 @@ defmodule Hive.PrimeTest do
 
   describe "prime(:bee, bee_id)" do
     test "returns a briefing for an existing bee" do
-      {:ok, bee} =
-        %Bee{}
-        |> Bee.changeset(%{name: "worker-bee"})
-        |> Repo.insert()
+      {:ok, bee} = Store.insert(:bees, %{name: "worker-bee", status: "starting"})
 
       assert {:ok, markdown} = Prime.prime(:bee, bee.id)
       assert markdown =~ "Bee Briefing"
@@ -79,10 +75,7 @@ defmodule Hive.PrimeTest do
     end
 
     test "shows no job when bee has no assignment" do
-      {:ok, bee} =
-        %Bee{}
-        |> Bee.changeset(%{name: "idle-bee"})
-        |> Repo.insert()
+      {:ok, bee} = Store.insert(:bees, %{name: "idle-bee", status: "starting"})
 
       {:ok, markdown} = Prime.prime(:bee, bee.id)
       assert markdown =~ "No job assigned"

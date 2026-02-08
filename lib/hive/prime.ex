@@ -10,10 +10,7 @@ defmodule Hive.Prime do
   Output is Markdown text, ready for Claude to parse.
   """
 
-  import Ecto.Query
-
-  alias Hive.Repo
-  alias Hive.Schema.{Bee, Cell, Job}
+  alias Hive.Store
 
   # -- Public API ------------------------------------------------------------
 
@@ -48,14 +45,18 @@ defmodule Hive.Prime do
   # -- Private: Queen --------------------------------------------------------
 
   defp build_queen_state_summary do
-    bees = Repo.all(Bee)
+    bees = Store.all(:bees)
     active_bees = Enum.filter(bees, &(&1.status in ["working", "idle", "starting"]))
-    pending_jobs = Repo.all(from(j in Job, where: j.status == "pending"))
+    pending_quests = Store.filter(:quests, fn q -> q.status in ["pending", "active"] end)
+    pending_jobs = Store.filter(:jobs, fn j -> j.status == "pending" end)
     recent_waggles = Hive.Waggle.list(to: "queen", limit: 10)
 
     sections = [
       "---",
       "## Current Hive State",
+      "",
+      "### Pending Quests (#{length(pending_quests)})",
+      format_quests(pending_quests),
       "",
       "### Active Bees (#{length(active_bees)})",
       format_bees(active_bees),
@@ -68,6 +69,33 @@ defmodule Hive.Prime do
     ]
 
     Enum.join(sections, "\n")
+  end
+
+  defp format_quests([]), do: "None."
+
+  defp format_quests(quests) do
+    quests
+    |> Enum.map(fn q ->
+      comb_label = resolve_comb_label(q[:comb_id])
+      job_count = Store.count(:jobs, fn j -> j.quest_id == q.id end)
+      line = "- **#{q.name}** (#{q.id}) [#{q.status}] — #{job_count} job(s)#{comb_label}"
+
+      if q[:description] do
+        line <> "\n  > #{q.description}"
+      else
+        line
+      end
+    end)
+    |> Enum.join("\n")
+  end
+
+  defp resolve_comb_label(nil), do: ""
+
+  defp resolve_comb_label(comb_id) do
+    case Store.get(:combs, comb_id) do
+      nil -> " | comb: #{comb_id}"
+      comb -> " | comb: #{comb.name}"
+    end
   end
 
   defp format_bees([]), do: "None."
@@ -100,9 +128,7 @@ defmodule Hive.Prime do
   # -- Private: Bee ----------------------------------------------------------
 
   defp fetch_bee(bee_id) do
-    query = from(b in Bee, where: b.id == ^bee_id, limit: 1)
-
-    case Repo.one(query) do
+    case Store.get(:bees, bee_id) do
       nil -> {:error, :bee_not_found}
       bee -> {:ok, bee}
     end
@@ -140,16 +166,15 @@ defmodule Hive.Prime do
 
   defp fetch_job_for_bee(%{job_id: nil}), do: nil
 
-  defp fetch_job_for_bee(%{job_id: job_id}) do
-    Repo.get(Job, job_id)
+  defp fetch_job_for_bee(%{job_id: job_id}) when is_binary(job_id) do
+    Store.get(:jobs, job_id)
   end
 
+  defp fetch_job_for_bee(_bee), do: nil
+
   defp fetch_cell_for_bee(bee) do
-    from(c in Cell,
-      where: c.bee_id == ^bee.id and c.status == "active",
-      limit: 1
-    )
-    |> Repo.one()
+    Store.filter(:cells, fn c -> c.bee_id == bee.id and c.status == "active" end)
+    |> List.first()
   end
 
   defp format_job_detail(nil), do: "No job assigned."
@@ -202,7 +227,7 @@ defmodule Hive.Prime do
   defp get_comb_path(nil), do: nil
 
   defp get_comb_path(comb_id) do
-    case Repo.get(Hive.Schema.Comb, comb_id) do
+    case Store.get(:combs, comb_id) do
       nil -> nil
       comb -> comb.path
     end

@@ -1,18 +1,14 @@
 defmodule Hive.InitTest do
   use ExUnit.Case, async: false
 
-  # The init module tries to start its own Repo, but in tests the Repo
-  # is already running with the Sandbox pool. Init handles the
-  # {:error, {:already_started, _}} case and calls ensure_migrated!
-  # on the existing Repo -- which needs a sandbox checkout.
-
-  alias Hive.Repo
-
   @tmp_dir System.tmp_dir!()
 
   setup do
-    :ok = Ecto.Adapters.SQL.Sandbox.checkout(Repo)
-    Ecto.Adapters.SQL.Sandbox.mode(Repo, {:shared, self()})
+    tmp_dir = Path.join(@tmp_dir, "hive_store_#{:erlang.unique_integer([:positive])}")
+    File.mkdir_p!(tmp_dir)
+    if Process.whereis(Hive.Store), do: GenServer.stop(Hive.Store)
+    {:ok, _} = Hive.Store.start_link(data_dir: tmp_dir)
+    on_exit(fn -> File.rm_rf!(tmp_dir) end)
     :ok
   end
 

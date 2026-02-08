@@ -8,8 +8,7 @@ defmodule Hive.Conflict do
 
   require Logger
 
-  alias Hive.Repo
-  alias Hive.Schema.Cell
+  alias Hive.Store
 
   @doc """
   Checks a cell's branch for conflicts against the main branch.
@@ -32,10 +31,7 @@ defmodule Hive.Conflict do
   """
   @spec check_all_active() :: [tuple()]
   def check_all_active do
-    import Ecto.Query
-
-    from(c in Cell, where: c.status == "active")
-    |> Repo.all()
+    Store.filter(:cells, fn c -> c.status == "active" end)
     |> Enum.map(fn cell ->
       case check(cell.id) do
         {:ok, :clean} -> {:ok, cell.id, :clean}
@@ -108,14 +104,14 @@ defmodule Hive.Conflict do
   end
 
   defp fetch_cell(cell_id) do
-    case Repo.get(Cell, cell_id) do
+    case Store.get(:cells, cell_id) do
       nil -> {:error, :cell_not_found}
       cell -> {:ok, cell}
     end
   end
 
   defp fetch_comb(comb_id) do
-    case Repo.get(Hive.Schema.Comb, comb_id) do
+    case Store.get(:combs, comb_id) do
       nil -> {:error, :comb_not_found}
       comb -> {:ok, comb}
     end

@@ -9,8 +9,7 @@ defmodule Hive.Validator do
 
   require Logger
 
-  alias Hive.Repo
-  alias Hive.Schema.{Cell, Comb}
+  alias Hive.Store
 
   @doc """
   Validates a completed bee's work.
@@ -20,7 +19,7 @@ defmodule Hive.Validator do
 
   Returns `{:ok, :pass}`, `{:ok, :skip}`, or `{:error, reason, details}`.
   """
-  @spec validate(String.t(), Hive.Schema.Job.t(), String.t()) ::
+  @spec validate(String.t(), map(), String.t()) ::
           {:ok, atom()} | {:error, term()} | {:error, term(), term()}
   def validate(_bee_id, job, cell_id) do
     with {:ok, cell} <- fetch_cell(cell_id),
@@ -55,7 +54,7 @@ defmodule Hive.Validator do
   end
 
   @doc "Runs a custom shell command in the cell worktree."
-  @spec run_custom_validation(Cell.t(), String.t()) :: :ok | {:error, String.t()}
+  @spec run_custom_validation(map(), String.t()) :: :ok | {:error, String.t()}
   def run_custom_validation(cell, command) do
     case System.cmd("sh", ["-c", command],
            cd: cell.worktree_path,
@@ -73,7 +72,7 @@ defmodule Hive.Validator do
   end
 
   @doc "Runs headless Claude to assess whether the diff solves the job."
-  @spec run_claude_validation(Hive.Schema.Job.t(), Cell.t()) ::
+  @spec run_claude_validation(map(), map()) ::
           {:ok, :pass} | {:ok, :skip} | {:error, term(), term()}
   def run_claude_validation(job, cell) do
     case get_diff(cell) do
@@ -100,7 +99,7 @@ defmodule Hive.Validator do
   end
 
   @doc "Builds the validation prompt for Claude."
-  @spec build_validation_prompt(Hive.Schema.Job.t(), String.t()) :: String.t()
+  @spec build_validation_prompt(map(), String.t()) :: String.t()
   def build_validation_prompt(job, diff) do
     description = job.description || ""
 
@@ -124,14 +123,14 @@ defmodule Hive.Validator do
   # -- Private -----------------------------------------------------------------
 
   defp fetch_cell(cell_id) do
-    case Repo.get(Cell, cell_id) do
+    case Store.get(:cells, cell_id) do
       nil -> {:error, :cell_not_found}
       cell -> {:ok, cell}
     end
   end
 
   defp fetch_comb(comb_id) do
-    case Repo.get(Comb, comb_id) do
+    case Store.get(:combs, comb_id) do
       nil -> {:error, :comb_not_found}
       comb -> {:ok, comb}
     end

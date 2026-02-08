@@ -1,12 +1,15 @@
 defmodule Hive.ConflictTest do
   use ExUnit.Case, async: false
 
-  alias Hive.{Conflict, Repo}
-  alias Hive.Schema.{Bee, Cell, Comb}
+  alias Hive.Conflict
+  alias Hive.Store
 
   setup do
-    :ok = Ecto.Adapters.SQL.Sandbox.checkout(Repo)
-    Ecto.Adapters.SQL.Sandbox.mode(Repo, {:shared, self()})
+    store_dir = Path.join(System.tmp_dir!(), "hive_store_#{:erlang.unique_integer([:positive])}")
+    File.mkdir_p!(store_dir)
+    if Process.whereis(Hive.Store), do: GenServer.stop(Hive.Store)
+    {:ok, _} = Hive.Store.start_link(data_dir: store_dir)
+    on_exit(fn -> File.rm_rf!(store_dir) end)
 
     # Create a temporary git repo for testing
     tmp_dir = Path.join(System.tmp_dir!(), "hive_conflict_test_#{:erlang.unique_integer([:positive])}")
@@ -20,14 +23,13 @@ defmodule Hive.ConflictTest do
     System.cmd("git", ["commit", "-m", "initial"], cd: tmp_dir)
 
     {:ok, comb} =
-      %Comb{}
-      |> Comb.changeset(%{name: "conflict-comb-#{:erlang.unique_integer([:positive])}", path: tmp_dir})
-      |> Repo.insert()
+      Store.insert(:combs, %{
+        name: "conflict-comb-#{:erlang.unique_integer([:positive])}",
+        path: tmp_dir
+      })
 
     {:ok, bee} =
-      %Bee{}
-      |> Bee.changeset(%{name: "conflict-bee-#{:erlang.unique_integer([:positive])}"})
-      |> Repo.insert()
+      Store.insert(:bees, %{name: "conflict-bee-#{:erlang.unique_integer([:positive])}", status: "starting"})
 
     on_exit(fn -> File.rm_rf(tmp_dir) end)
 
@@ -44,15 +46,13 @@ defmodule Hive.ConflictTest do
       System.cmd("git", ["checkout", "main"], cd: tmp_dir)
 
       {:ok, cell} =
-        %Cell{}
-        |> Cell.changeset(%{
+        Store.insert(:cells, %{
           comb_id: comb.id,
           bee_id: bee.id,
           branch: "test-branch",
           worktree_path: tmp_dir,
           status: "active"
         })
-        |> Repo.insert()
 
       assert {:ok, :clean} = Conflict.check(cell.id)
     end

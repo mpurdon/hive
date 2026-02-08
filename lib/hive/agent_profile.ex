@@ -119,7 +119,7 @@ defmodule Hive.AgentProfile do
   Uses Claude headless to generate the content, then writes it to the
   comb's `.claude/agents/` directory.
   """
-  @spec generate_agent(String.t(), String.t()) :: {:ok, String.t()} | {:error, term()}
+  @spec generate_agent(String.t(), String.t()) :: {:ok, String.t()}
   def generate_agent(comb_path, technology) do
     agent_name = "#{technology}-expert"
     agents_dir = Path.join(comb_path, @agents_dir)

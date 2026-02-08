@@ -32,6 +32,8 @@ defmodule Hive.Bee.Worker do
   use GenServer
   require Logger
 
+  alias Hive.Store
+
   @registry Hive.Registry
 
   # -- Types -------------------------------------------------------------------
@@ -227,22 +229,14 @@ defmodule Hive.Bee.Worker do
   end
 
   defp update_bee_working(state, cell) do
-    case Hive.Repo.get(Hive.Schema.Bee, state.bee_id) do
+    case Store.get(:bees, state.bee_id) do
       nil ->
         {:error, :bee_not_found}
 
       bee ->
-        bee
-        |> Hive.Schema.Bee.changeset(%{
-          status: "working",
-          cell_path: cell.worktree_path,
-          pid: inspect(self())
-        })
-        |> Hive.Repo.update()
-        |> case do
-          {:ok, _} -> :ok
-          {:error, cs} -> {:error, cs}
-        end
+        updated = Map.merge(bee, %{status: "working", cell_path: cell.worktree_path, pid: inspect(self())})
+        Store.put(:bees, updated)
+        :ok
     end
   end
 
@@ -365,18 +359,13 @@ defmodule Hive.Bee.Worker do
   defp maybe_ensure_agent(state, cell) do
     case Hive.Jobs.get(state.job_id) do
       {:ok, job} ->
-        # Get comb path from the cell's comb
-        case Hive.Repo.get(Hive.Schema.Comb, cell.comb_id) do
+        case Store.get(:combs, cell.comb_id) do
           nil ->
             :ok
 
           comb when comb.path != nil ->
-            case Hive.AgentProfile.ensure_agent(comb.path, %{title: job.title, description: job.description}) do
-              {:ok, _} -> :ok
-              {:error, reason} ->
-                Logger.warning("Agent profile setup failed: #{inspect(reason)}")
-                :ok
-            end
+            Hive.AgentProfile.ensure_agent(comb.path, %{title: job.title, description: job.description})
+            :ok
 
           _comb ->
             :ok
@@ -473,9 +462,9 @@ defmodule Hive.Bee.Worker do
   end
 
   defp update_bee_status(bee_id, status) do
-    case Hive.Repo.get(Hive.Schema.Bee, bee_id) do
+    case Store.get(:bees, bee_id) do
       nil -> :ok
-      bee -> bee |> Hive.Schema.Bee.changeset(%{status: status}) |> Hive.Repo.update()
+      bee -> Store.put(:bees, %{bee | status: status})
     end
   end
 

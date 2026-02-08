@@ -15,10 +15,7 @@ defmodule Hive.Doctor do
   transforms system observations into structured health reports.
   """
 
-  import Ecto.Query
-
-  alias Hive.Repo
-  alias Hive.Schema.{Bee, Cell}
+  alias Hive.Store
 
   @type check_result :: %{
           name: atom(),
@@ -130,11 +127,11 @@ defmodule Hive.Doctor do
   end
 
   defp check_database_ok do
-    Repo.aggregate("bees", :count)
-    result(:database_ok, :ok, "Database is accessible")
+    Store.count(:bees)
+    result(:database_ok, :ok, "Store is accessible")
   rescue
     e ->
-      result(:database_ok, :error, "Database error: #{Exception.message(e)}")
+      result(:database_ok, :error, "Store error: #{Exception.message(e)}")
   end
 
   defp check_config_valid do
@@ -230,13 +227,12 @@ defmodule Hive.Doctor do
   defp fix_stale_bees do
     now = DateTime.utc_now() |> DateTime.truncate(:second)
 
-    stale_query =
-      from(b in Bee,
-        where: b.status in ["starting", "working"],
-        where: b.pid == "" or is_nil(b.pid)
+    count =
+      Store.update_matching(
+        :bees,
+        fn b -> b.status in ["starting", "working"] and (b.pid == "" or is_nil(b.pid)) end,
+        fn b -> %{b | status: "crashed", updated_at: now} end
       )
-
-    {count, _} = Repo.update_all(stale_query, set: [status: "crashed", updated_at: now])
 
     case count do
       0 ->
@@ -293,25 +289,22 @@ defmodule Hive.Doctor do
   # -- Query helpers ---------------------------------------------------------
 
   defp count_orphan_cells do
-    from(c in Cell,
-      left_join: b in Bee,
-      on: c.bee_id == b.id,
-      where: c.status == "active",
-      where: is_nil(b.id) or b.status in ["stopped", "crashed"],
-      select: count(c.id)
-    )
-    |> Repo.one()
+    active_cells = Store.filter(:cells, fn c -> c.status == "active" end)
+
+    Enum.count(active_cells, fn cell ->
+      case Store.get(:bees, cell.bee_id) do
+        nil -> true
+        bee -> bee.status in ["stopped", "crashed"]
+      end
+    end)
   rescue
     _ -> 0
   end
 
   defp count_stale_bees do
-    from(b in Bee,
-      where: b.status in ["starting", "working"],
-      where: b.pid == "" or is_nil(b.pid),
-      select: count(b.id)
-    )
-    |> Repo.one()
+    Store.count(:bees, fn b ->
+      b.status in ["starting", "working"] and (b.pid == "" or is_nil(b.pid))
+    end)
   rescue
     _ -> 0
   end

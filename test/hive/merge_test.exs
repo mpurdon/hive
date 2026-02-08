@@ -2,22 +2,26 @@ defmodule Hive.MergeTest do
   use ExUnit.Case, async: false
 
   alias Hive.Merge
-  alias Hive.Repo
-  alias Hive.Schema.{Bee, Cell, Comb, Quest}
+  alias Hive.Store
 
   setup do
-    :ok = Ecto.Adapters.SQL.Sandbox.checkout(Repo)
-    Ecto.Adapters.SQL.Sandbox.mode(Repo, {:shared, self()})
+    tmp_dir = Path.join(System.tmp_dir!(), "hive_test_#{:erlang.unique_integer([:positive])}")
+    File.mkdir_p!(tmp_dir)
+    if Process.whereis(Hive.Store), do: GenServer.stop(Hive.Store)
+    {:ok, _} = Hive.Store.start_link(data_dir: tmp_dir)
+    on_exit(fn -> File.rm_rf!(tmp_dir) end)
 
     {:ok, comb} =
-      %Comb{}
-      |> Comb.changeset(%{name: "merge-comb-#{:erlang.unique_integer([:positive])}", merge_strategy: "manual"})
-      |> Repo.insert()
+      Store.insert(:combs, %{
+        name: "merge-comb-#{:erlang.unique_integer([:positive])}",
+        merge_strategy: "manual"
+      })
 
     {:ok, quest} =
-      %Quest{}
-      |> Quest.changeset(%{name: "merge-quest-#{:erlang.unique_integer([:positive])}"})
-      |> Repo.insert()
+      Store.insert(:quests, %{
+        name: "merge-quest-#{:erlang.unique_integer([:positive])}",
+        status: "pending"
+      })
 
     {:ok, job} =
       Hive.Jobs.create(%{
@@ -28,20 +32,16 @@ defmodule Hive.MergeTest do
       })
 
     {:ok, bee} =
-      %Bee{}
-      |> Bee.changeset(%{name: "merge-bee", status: "working", job_id: job.id})
-      |> Repo.insert()
+      Store.insert(:bees, %{name: "merge-bee", status: "working", job_id: job.id})
 
     {:ok, cell} =
-      %Cell{}
-      |> Cell.changeset(%{
+      Store.insert(:cells, %{
         bee_id: bee.id,
         comb_id: comb.id,
         worktree_path: "/tmp/merge-worktree",
         branch: "bee/#{bee.id}",
         status: "active"
       })
-      |> Repo.insert()
 
     %{comb: comb, quest: quest, job: job, bee: bee, cell: cell}
   end
@@ -56,24 +56,20 @@ defmodule Hive.MergeTest do
     test "returns {:ok, \"pr_branch\"} for a comb with pr_branch merge_strategy", ctx do
       # Create a comb with pr_branch strategy
       {:ok, pr_comb} =
-        %Comb{}
-        |> Comb.changeset(%{
+        Store.insert(:combs, %{
           name: "pr-comb-#{:erlang.unique_integer([:positive])}",
           merge_strategy: "pr_branch"
         })
-        |> Repo.insert()
 
       # Create a cell pointing to this comb
       {:ok, pr_cell} =
-        %Cell{}
-        |> Cell.changeset(%{
+        Store.insert(:cells, %{
           bee_id: ctx.bee.id,
           comb_id: pr_comb.id,
           worktree_path: "/tmp/pr-worktree",
           branch: "bee/pr-test",
           status: "active"
         })
-        |> Repo.insert()
 
       assert {:ok, "pr_branch"} = Merge.merge_back(pr_cell.id)
     end
@@ -87,13 +83,9 @@ defmodule Hive.MergeTest do
 
   describe "merge_back/1 with nil merge_strategy on comb" do
     test "defaults to manual when comb has nil merge_strategy", ctx do
-      # Set merge_strategy to NULL directly, simulating an older comb record
-      # that predates the merge_strategy column default.
-      Ecto.Adapters.SQL.query!(
-        Repo,
-        "UPDATE combs SET merge_strategy = NULL WHERE id = ?",
-        [ctx.comb.id]
-      )
+      # Set merge_strategy to nil directly, simulating an older comb record
+      updated_comb = %{ctx.comb | merge_strategy: nil}
+      Store.put(:combs, updated_comb)
 
       assert {:ok, "manual"} = Merge.merge_back(ctx.cell.id)
     end

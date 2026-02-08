@@ -2,14 +2,16 @@ defmodule Hive.Bee.WorkerTest do
   use ExUnit.Case, async: false
 
   alias Hive.Bee.Worker
-  alias Hive.Repo
-  alias Hive.Schema.{Bee, Quest}
+  alias Hive.Store
 
   @tmp_dir System.tmp_dir!()
 
   setup do
-    :ok = Ecto.Adapters.SQL.Sandbox.checkout(Repo)
-    Ecto.Adapters.SQL.Sandbox.mode(Repo, {:shared, self()})
+    store_dir = Path.join(@tmp_dir, "hive_store_#{:erlang.unique_integer([:positive])}")
+    File.mkdir_p!(store_dir)
+    if Process.whereis(Hive.Store), do: GenServer.stop(Hive.Store)
+    {:ok, _} = Hive.Store.start_link(data_dir: store_dir)
+    on_exit(fn -> File.rm_rf!(store_dir) end)
 
     # Create a temp git repo to serve as a comb
     repo_path = create_temp_git_repo()
@@ -19,9 +21,10 @@ defmodule Hive.Bee.WorkerTest do
       Hive.Comb.add(repo_path, name: "worker-test-comb-#{:erlang.unique_integer([:positive])}")
 
     {:ok, quest} =
-      %Quest{}
-      |> Quest.changeset(%{name: "worker-test-quest-#{:erlang.unique_integer([:positive])}"})
-      |> Repo.insert()
+      Store.insert(:quests, %{
+        name: "worker-test-quest-#{:erlang.unique_integer([:positive])}",
+        status: "pending"
+      })
 
     {:ok, job} =
       Hive.Jobs.create(%{
@@ -31,10 +34,7 @@ defmodule Hive.Bee.WorkerTest do
         comb_id: comb.id
       })
 
-    {:ok, bee} =
-      %Bee{}
-      |> Bee.changeset(%{name: "test-worker-bee"})
-      |> Repo.insert()
+    {:ok, bee} = Store.insert(:bees, %{name: "test-worker-bee", status: "starting"})
 
     # Assign the job to the bee so the transition pending->assigned works
     {:ok, _} = Hive.Jobs.assign(job.id, bee.id)
@@ -62,16 +62,13 @@ defmodule Hive.Bee.WorkerTest do
           prompt: "hello"
         )
 
-      # Allow the spawned GenServer access to the sandbox
-      Ecto.Adapters.SQL.Sandbox.allow(Repo, self(), pid)
-
       ref = Process.monitor(pid)
 
       # Wait for the process to finish (echo exits quickly)
       assert_receive {:DOWN, ^ref, :process, ^pid, :normal}, 5_000
 
       # Verify DB state: bee should be stopped
-      bee = Repo.get!(Bee, ctx.bee.id)
+      {:ok, bee} = Hive.Bees.get(ctx.bee.id)
       assert bee.status == "stopped"
 
       # Job should be done
@@ -98,13 +95,11 @@ defmodule Hive.Bee.WorkerTest do
           prompt: "fail"
         )
 
-      Ecto.Adapters.SQL.Sandbox.allow(Repo, self(), pid)
-
       ref = Process.monitor(pid)
       assert_receive {:DOWN, ^ref, :process, ^pid, :normal}, 5_000
 
       # Verify DB state: bee should be crashed
-      bee = Repo.get!(Bee, ctx.bee.id)
+      {:ok, bee} = Hive.Bees.get(ctx.bee.id)
       assert bee.status == "crashed"
 
       # Job should be failed
@@ -129,8 +124,6 @@ defmodule Hive.Bee.WorkerTest do
           claude_executable: "/bin/sleep",
           prompt: "30"
         )
-
-      Ecto.Adapters.SQL.Sandbox.allow(Repo, self(), pid)
 
       # Give it a moment to provision
       Process.sleep(500)
@@ -162,14 +155,13 @@ defmodule Hive.Bee.WorkerTest do
           prompt: "30"
         )
 
-      Ecto.Adapters.SQL.Sandbox.allow(Repo, self(), pid)
       Process.sleep(500)
       ref = Process.monitor(pid)
 
       assert :ok = Worker.stop(ctx.bee.id)
       assert_receive {:DOWN, ^ref, :process, ^pid, :normal}, 5_000
 
-      bee = Repo.get!(Bee, ctx.bee.id)
+      {:ok, bee} = Hive.Bees.get(ctx.bee.id)
       assert bee.status == "stopped"
     end
 
@@ -190,7 +182,6 @@ defmodule Hive.Bee.WorkerTest do
           prompt: "30"
         )
 
-      Ecto.Adapters.SQL.Sandbox.allow(Repo, self(), pid)
       Process.sleep(100)
 
       assert {:ok, ^pid} = Worker.lookup(ctx.bee.id)

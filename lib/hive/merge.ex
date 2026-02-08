@@ -14,8 +14,7 @@ defmodule Hive.Merge do
 
   require Logger
 
-  alias Hive.Repo
-  alias Hive.Schema.{Cell, Comb}
+  alias Hive.Store
 
   @doc """
   Merges a bee's worktree branch back according to the comb's merge strategy.
@@ -29,6 +28,26 @@ defmodule Hive.Merge do
          {:ok, comb} <- fetch_comb(cell.comb_id) do
       strategy = comb.merge_strategy || "manual"
       apply_strategy(strategy, cell, comb)
+    end
+  end
+
+  @doc """
+  Merges all completed bee branches for a quest into a single quest branch.
+
+  Creates `quest/<quest-name>` off the main branch, then merges each bee's
+  branch into it sequentially. Returns `{:ok, quest_branch}` with the branch
+  name, or `{:error, reason}` if any merge fails.
+  """
+  @spec merge_quest(String.t()) :: {:ok, String.t()} | {:error, term()}
+  def merge_quest(quest_id) do
+    with {:ok, quest} <- Hive.Quests.get(quest_id),
+         cells <- cells_for_quest(quest),
+         true <- cells != [] || {:error, :no_cells},
+         {:ok, comb} <- fetch_comb_for_cells(cells),
+         {:ok, main_branch} <- detect_main_branch(comb.path),
+         quest_branch = "quest/#{quest.name}",
+         :ok <- create_quest_branch(comb.path, quest_branch, main_branch) do
+      merge_cells_into_quest_branch(comb.path, quest_branch, cells)
     end
   end
 
@@ -68,23 +87,23 @@ defmodule Hive.Merge do
   # -- Private: data fetching --------------------------------------------------
 
   defp fetch_cell(cell_id) do
-    case Repo.get(Cell, cell_id) do
+    case Store.get(:cells, cell_id) do
       nil -> {:error, :cell_not_found}
       cell -> {:ok, cell}
     end
   end
 
   defp fetch_comb(comb_id) do
-    case Repo.get(Comb, comb_id) do
+    case Store.get(:combs, comb_id) do
       nil -> {:error, :comb_not_found}
       comb -> {:ok, comb}
     end
   end
 
   defp maybe_create_github_pr(comb, cell) do
-    if comb.github_owner && comb.github_repo do
+    if Map.get(comb, :github_owner) && Map.get(comb, :github_repo) do
       # Look up the job for this cell's bee
-      case Repo.get_by(Hive.Schema.Job, bee_id: cell.bee_id) do
+      case Store.find_one(:jobs, fn j -> j.bee_id == cell.bee_id end) do
         nil ->
           Logger.debug("No job found for bee #{cell.bee_id}, skipping GitHub PR")
 
@@ -109,6 +128,59 @@ defmodule Hive.Merge do
       Hive.Git.branch_exists?(repo_path, "main") -> {:ok, "main"}
       Hive.Git.branch_exists?(repo_path, "master") -> {:ok, "master"}
       true -> Hive.Git.current_branch(repo_path)
+    end
+  end
+
+  # -- Private: quest merge helpers -------------------------------------------
+
+  defp cells_for_quest(quest) do
+    bee_ids =
+      quest.jobs
+      |> Enum.map(& &1.bee_id)
+      |> Enum.reject(&is_nil/1)
+
+    Store.filter(:cells, fn c ->
+      c.bee_id in bee_ids and c.status == "active"
+    end)
+  end
+
+  defp fetch_comb_for_cells([cell | _]) do
+    fetch_comb(cell.comb_id)
+  end
+
+  defp create_quest_branch(repo_path, quest_branch, main_branch) do
+    if Hive.Git.branch_exists?(repo_path, quest_branch) do
+      # Branch already exists — check it out
+      Hive.Git.checkout(repo_path, quest_branch)
+    else
+      Hive.Git.branch_create(repo_path, quest_branch, main_branch)
+    end
+  end
+
+  defp merge_cells_into_quest_branch(repo_path, quest_branch, cells) do
+    results =
+      Enum.map(cells, fn cell ->
+        case Hive.Git.merge(repo_path, cell.branch, no_ff: true) do
+          :ok ->
+            Logger.info("Merged #{cell.branch} into #{quest_branch}")
+            {:ok, cell.branch}
+
+          {:error, reason} ->
+            Logger.warning("Failed to merge #{cell.branch}: #{inspect(reason)}")
+            # Abort the failed merge so subsequent merges can proceed
+            System.cmd("git", ["merge", "--abort"], cd: repo_path, stderr_to_stdout: true)
+            {:error, cell.branch, reason}
+        end
+      end)
+
+    failures = Enum.filter(results, &match?({:error, _, _}, &1))
+
+    if failures == [] do
+      Logger.info("All bee branches merged into #{quest_branch}")
+      {:ok, quest_branch}
+    else
+      failed_branches = Enum.map(failures, fn {:error, branch, _} -> branch end)
+      {:error, {:merge_conflicts, quest_branch, failed_branches}}
     end
   end
 end

@@ -3,32 +3,20 @@ defmodule Hive.Cell do
   Context module for managing cells -- git worktrees assigned to bees.
 
   A cell provides an isolated working directory for a bee by creating a git
-  worktree from a comb's repository. This keeps each bee's changes on a
-  separate branch without affecting the main worktree.
-
-  This is a pure context module: no process state, just data transformations
-  that coordinate git operations with database records.
+  worktree from a comb's repository.
   """
 
-  import Ecto.Query
-
   alias Hive.Git
-  alias Hive.Repo
-  alias Hive.Schema.Cell, as: CellSchema
+  alias Hive.Store
 
   # -- Public API ------------------------------------------------------------
 
   @doc """
   Creates a new cell (git worktree) for a bee within a comb.
 
-  1. Generates branch name: `bee/<bee_id>`
-  2. Computes worktree path: `<comb.path>/bees/<bee_id>/`
-  3. Runs `git worktree add` to create the worktree
-  4. Inserts a Cell record in the database
-
   Returns `{:ok, cell}` or `{:error, reason}`.
   """
-  @spec create(String.t(), String.t(), keyword()) :: {:ok, CellSchema.t()} | {:error, term()}
+  @spec create(String.t(), String.t(), keyword()) :: {:ok, map()} | {:error, term()}
   def create(comb_id, bee_id, opts \\ []) do
     branch = Keyword.get(opts, :branch, "bee/#{bee_id}")
     hive_root = Keyword.get(opts, :hive_root)
@@ -46,15 +34,9 @@ defmodule Hive.Cell do
   @doc """
   Removes a cell's worktree and marks the record as removed.
 
-  1. Runs `git worktree remove` to clean up the worktree directory
-  2. Deletes the `bee/<bee_id>` branch
-  3. Updates the cell record: status "removed", removed_at set to now
-
-  Pass `force: true` to force-remove dirty worktrees.
-
   Returns `{:ok, cell}` or `{:error, reason}`.
   """
-  @spec remove(String.t(), keyword()) :: {:ok, CellSchema.t()} | {:error, term()}
+  @spec remove(String.t(), keyword()) :: {:ok, map()} | {:error, term()}
   def remove(cell_id, opts \\ []) do
     with {:ok, cell} <- get(cell_id),
          {:ok, comb} <- Hive.Comb.get(cell.comb_id),
@@ -72,16 +54,24 @@ defmodule Hive.Cell do
 
     * `:comb_id` - filter by comb
     * `:status` - filter by status (e.g., "active", "removed")
-
-  Returns a list of cell structs.
   """
-  @spec list(keyword()) :: [CellSchema.t()]
+  @spec list(keyword()) :: [map()]
   def list(opts \\ []) do
-    CellSchema
-    |> apply_filter(:comb_id, Keyword.get(opts, :comb_id))
-    |> apply_filter(:status, Keyword.get(opts, :status))
-    |> order_by([c], desc: c.inserted_at)
-    |> Repo.all()
+    cells = Store.all(:cells)
+
+    cells =
+      case Keyword.get(opts, :comb_id) do
+        nil -> cells
+        v -> Enum.filter(cells, &(&1.comb_id == v))
+      end
+
+    cells =
+      case Keyword.get(opts, :status) do
+        nil -> cells
+        v -> Enum.filter(cells, &(&1.status == v))
+      end
+
+    Enum.sort_by(cells, & &1.inserted_at, {:desc, DateTime})
   end
 
   @doc """
@@ -89,58 +79,64 @@ defmodule Hive.Cell do
 
   Returns `{:ok, cell}` or `{:error, :not_found}`.
   """
-  @spec get(String.t()) :: {:ok, CellSchema.t()} | {:error, :not_found}
+  @spec get(String.t()) :: {:ok, map()} | {:error, :not_found}
   def get(cell_id) do
-    case Repo.get(CellSchema, cell_id) do
-      nil -> {:error, :not_found}
-      cell -> {:ok, cell}
-    end
+    Store.fetch(:cells, cell_id)
   end
 
   @doc """
   Finds cells whose associated bee no longer exists or has stopped.
 
   Returns orphaned cells that are still marked "active" but have no
-  corresponding active bee record. Useful for periodic cleanup.
+  corresponding active bee record.
   """
   @spec cleanup_orphans() :: {:ok, non_neg_integer()}
   def cleanup_orphans do
     now = DateTime.utc_now() |> DateTime.truncate(:second)
 
-    orphan_query =
-      from(c in CellSchema,
-        left_join: b in Hive.Schema.Bee,
-        on: c.bee_id == b.id,
-        where: c.status == "active",
-        where: is_nil(b.id) or b.status in ["stopped", "crashed"]
-      )
+    active_cells = Store.filter(:cells, fn c -> c.status == "active" end)
 
-    {count, _} =
-      Repo.update_all(orphan_query,
-        set: [status: "removed", removed_at: now]
-      )
+    orphan_count =
+      Enum.count(active_cells, fn cell ->
+        case Store.get(:bees, cell.bee_id) do
+          nil ->
+            Store.put(:cells, Map.merge(cell, %{status: "removed", removed_at: now}))
+            true
 
-    {:ok, count}
+          bee ->
+            if bee.status in ["stopped", "crashed"] do
+              Store.put(:cells, Map.merge(cell, %{status: "removed", removed_at: now}))
+              true
+            else
+              false
+            end
+        end
+      end)
+
+    {:ok, orphan_count}
   end
 
   # -- Private helpers -------------------------------------------------------
 
   defp validate_comb_path(%{path: nil}), do: {:error, :comb_has_no_path}
   defp validate_comb_path(%{path: path}) when is_binary(path), do: :ok
+  defp validate_comb_path(_comb), do: {:error, :comb_has_no_path}
 
   defp build_worktree_path(comb_path, bee_id) do
     Path.join([comb_path, "bees", bee_id])
   end
 
   defp insert_cell(comb_id, bee_id, worktree_path, branch) do
-    %CellSchema{}
-    |> CellSchema.changeset(%{
+    record = %{
       comb_id: comb_id,
       bee_id: bee_id,
       worktree_path: worktree_path,
-      branch: branch
-    })
-    |> Repo.insert()
+      branch: branch,
+      status: "active",
+      removed_at: nil
+    }
+
+    Store.insert(:cells, record)
   end
 
   defp remove_worktree(comb_path, worktree_path, opts) do
@@ -153,17 +149,14 @@ defmodule Hive.Cell do
   defp delete_branch(comb_path, branch) do
     case Git.branch_delete(comb_path, branch) do
       :ok -> :ok
-      # Branch may already be gone; treat as success
       {:error, _reason} -> :ok
     end
   end
 
   defp mark_removed(cell) do
     now = DateTime.utc_now() |> DateTime.truncate(:second)
-
-    cell
-    |> Ecto.Changeset.change(status: "removed", removed_at: now)
-    |> Repo.update()
+    updated = %{cell | status: "removed", removed_at: now}
+    Store.put(:cells, updated)
   end
 
   defp maybe_generate_settings(_bee_id, nil, _worktree_path), do: :ok
@@ -171,8 +164,4 @@ defmodule Hive.Cell do
   defp maybe_generate_settings(bee_id, hive_root, worktree_path) do
     Hive.Runtime.Settings.generate(bee_id, hive_root, worktree_path)
   end
-
-  defp apply_filter(query, _field, nil), do: query
-  defp apply_filter(query, :comb_id, value), do: where(query, [c], c.comb_id == ^value)
-  defp apply_filter(query, :status, value), do: where(query, [c], c.status == ^value)
 end

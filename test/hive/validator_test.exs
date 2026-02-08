@@ -5,7 +5,7 @@ defmodule Hive.ValidatorTest do
 
   describe "build_validation_prompt/2" do
     test "builds a prompt with job title and diff" do
-      job = %Hive.Schema.Job{
+      job = %{
         id: "job-123",
         title: "Fix the login bug",
         description: "Users can't log in when password has special chars",
@@ -33,7 +33,7 @@ defmodule Hive.ValidatorTest do
     end
 
     test "handles nil description" do
-      job = %Hive.Schema.Job{
+      job = %{
         id: "job-456",
         title: "Quick fix",
         description: nil,
@@ -54,7 +54,7 @@ defmodule Hive.ValidatorTest do
       File.mkdir_p!(tmp_dir)
       on_exit(fn -> File.rm_rf(tmp_dir) end)
 
-      cell = %Hive.Schema.Cell{
+      cell = %{
         id: "cel-test",
         worktree_path: tmp_dir,
         bee_id: "bee-1",
@@ -71,7 +71,7 @@ defmodule Hive.ValidatorTest do
       File.mkdir_p!(tmp_dir)
       on_exit(fn -> File.rm_rf(tmp_dir) end)
 
-      cell = %Hive.Schema.Cell{
+      cell = %{
         id: "cel-test",
         worktree_path: tmp_dir,
         bee_id: "bee-1",

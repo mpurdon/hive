@@ -10,7 +10,8 @@ defmodule Hive.Config do
     "hive" => %{"version" => Hive.version()},
     "queen" => %{"max_bees" => 5},
     "costs" => %{"warn_threshold_usd" => 5.0, "budget_usd" => 10.0},
-    "github" => %{"token" => ""}
+    "github" => %{"token" => ""},
+    "session" => %{"current_comb" => ""}
   }
 
   @doc """

@@ -4,24 +4,20 @@ defmodule Hive.Bees do
 
   Provides the public API for spawning, listing, and stopping bees. This
   module coordinates between the Bee.Worker GenServer (runtime lifecycle),
-  the Schema.Bee (database persistence), and the CombSupervisor (process
-  supervision).
+  the Store (persistence), and the CombSupervisor (process supervision).
 
-  This is a context module: thin orchestration layer over database records
+  This is a context module: thin orchestration layer over store records
   and supervised processes.
   """
 
-  import Ecto.Query
-
-  alias Hive.Repo
-  alias Hive.Schema.Bee, as: BeeSchema
+  alias Hive.Store
 
   # -- Public API --------------------------------------------------------------
 
   @doc """
   Spawns a new bee to work on a job.
 
-  1. Creates a bee record in the database
+  1. Creates a bee record in the store
   2. Assigns the job to the bee
   3. Starts a Bee.Worker under CombSupervisor
 
@@ -34,14 +30,49 @@ defmodule Hive.Bees do
   Returns `{:ok, bee}` or `{:error, reason}`.
   """
   @spec spawn(String.t(), String.t(), String.t(), keyword()) ::
-          {:ok, BeeSchema.t()} | {:error, term()}
+          {:ok, map()} | {:error, term()}
   def spawn(job_id, comb_id, hive_root, opts \\ []) do
     name = Keyword.get(opts, :name, generate_bee_name())
 
     with :ok <- check_job_ready(job_id),
          {:ok, bee} <- create_bee_record(name, job_id),
          :ok <- assign_job(job_id, bee.id),
-         {:ok, _pid} <- start_worker(bee.id, job_id, comb_id, hive_root, opts) do
+         {:ok, pid} <- start_worker(bee.id, job_id, comb_id, hive_root, opts) do
+      {:ok, bee, pid}
+    else
+      {:error, reason} -> {:error, reason}
+    end
+  end
+
+  @doc """
+  Spawns a bee as a detached OS process (for CLI use).
+
+  Unlike `spawn/4`, this does NOT start a Worker GenServer. Instead it:
+  1. Creates a bee record and assigns the job
+  2. Creates a cell (git worktree) directly
+  3. Updates bee status to "working"
+  4. Generates settings for the bee
+  5. Spawns Claude as a detached OS process via a wrapper script
+
+  The wrapper script runs Claude headless, then calls `hive` CLI to
+  update the bee/job status when Claude exits. This avoids keeping
+  the escript alive (which would cause CubDB multi-process corruption).
+
+  Returns `{:ok, bee}` or `{:error, reason}`.
+  """
+  @spec spawn_detached(String.t(), String.t(), String.t(), keyword()) ::
+          {:ok, map()} | {:error, term()}
+  def spawn_detached(job_id, comb_id, hive_root, opts \\ []) do
+    name = Keyword.get(opts, :name, generate_bee_name())
+
+    with :ok <- check_job_ready(job_id),
+         {:ok, bee} <- create_bee_record(name, job_id),
+         :ok <- assign_job(job_id, bee.id),
+         {:ok, cell} <- Hive.Cell.create(comb_id, bee.id, hive_root: hive_root),
+         :ok <- update_bee_working(bee.id, cell),
+         :ok <- maybe_transition_job(job_id),
+         :ok <- maybe_ensure_agent(job_id, comb_id, cell),
+         {:ok, _os_pid} <- spawn_claude_detached(bee.id, job_id, cell, hive_root) do
       {:ok, bee}
     else
       {:error, reason} -> {:error, reason}
@@ -55,12 +86,17 @@ defmodule Hive.Bees do
 
     * `:status` - filter by status (e.g., "working", "stopped")
   """
-  @spec list(keyword()) :: [BeeSchema.t()]
+  @spec list(keyword()) :: [map()]
   def list(opts \\ []) do
-    BeeSchema
-    |> apply_filter(:status, Keyword.get(opts, :status))
-    |> order_by([b], desc: b.inserted_at)
-    |> Repo.all()
+    bees = Store.all(:bees)
+
+    bees =
+      case Keyword.get(opts, :status) do
+        nil -> bees
+        status -> Enum.filter(bees, &(&1.status == status))
+      end
+
+    Enum.sort_by(bees, & &1.inserted_at, {:desc, DateTime})
   end
 
   @doc """
@@ -68,12 +104,9 @@ defmodule Hive.Bees do
 
   Returns `{:ok, bee}` or `{:error, :not_found}`.
   """
-  @spec get(String.t()) :: {:ok, BeeSchema.t()} | {:error, :not_found}
+  @spec get(String.t()) :: {:ok, map()} | {:error, :not_found}
   def get(bee_id) do
-    case Repo.get(BeeSchema, bee_id) do
-      nil -> {:error, :not_found}
-      bee -> {:ok, bee}
-    end
+    Store.fetch(:bees, bee_id)
   end
 
   @doc """
@@ -93,9 +126,15 @@ defmodule Hive.Bees do
   end
 
   defp create_bee_record(name, job_id) do
-    %BeeSchema{}
-    |> BeeSchema.changeset(%{name: name, status: "starting", job_id: job_id})
-    |> Repo.insert()
+    record = %{
+      name: name,
+      status: "starting",
+      job_id: job_id,
+      cell_path: nil,
+      pid: nil
+    }
+
+    Store.insert(:bees, record)
   end
 
   defp assign_job(job_id, bee_id) do
@@ -128,6 +167,108 @@ defmodule Hive.Bees do
     "#{adj}-#{noun}-#{suffix}"
   end
 
-  defp apply_filter(query, _field, nil), do: query
-  defp apply_filter(query, :status, value), do: where(query, [b], b.status == ^value)
+  defp update_bee_working(bee_id, cell) do
+    case Store.get(:bees, bee_id) do
+      nil -> {:error, :bee_not_found}
+      bee ->
+        updated = Map.merge(bee, %{status: "working", cell_path: cell.worktree_path, pid: nil})
+        Store.put(:bees, updated)
+        :ok
+    end
+  end
+
+  defp maybe_transition_job(job_id) do
+    case Hive.Jobs.get(job_id) do
+      {:ok, %{status: "assigned"}} ->
+        case Hive.Jobs.start(job_id) do
+          {:ok, _} -> :ok
+          {:error, reason} -> {:error, reason}
+        end
+      {:ok, _} -> :ok
+      {:error, reason} -> {:error, reason}
+    end
+  end
+
+  defp maybe_ensure_agent(job_id, _comb_id, cell) do
+    # Best-effort, don't block spawn on agent generation
+    try do
+      case Hive.Jobs.get(job_id) do
+        {:ok, job} ->
+          case Store.get(:combs, cell.comb_id) do
+            nil -> :ok
+            comb when comb.path != nil ->
+              Hive.AgentProfile.ensure_agent(comb.path, %{title: job.title, description: job.description})
+              :ok
+            _comb -> :ok
+          end
+        {:error, _} -> :ok
+      end
+    rescue
+      _ -> :ok
+    catch
+      _, _ -> :ok
+    end
+  end
+
+  defp spawn_claude_detached(bee_id, job_id, cell, hive_root) do
+    with {:ok, claude_path} <- Hive.Runtime.Claude.find_executable(),
+         {:ok, prompt} <- build_job_prompt(job_id) do
+      # Write a wrapper script that runs Claude and updates hive on exit
+      script_dir = Path.join([hive_root, ".hive", "run"])
+      File.mkdir_p!(script_dir)
+      script_path = Path.join(script_dir, "#{bee_id}.sh")
+      log_path = Path.join(script_dir, "#{bee_id}.log")
+
+      hive_path = System.find_executable("hive") || "hive"
+
+      script_content = """
+      #!/bin/bash
+      cd "#{cell.worktree_path}"
+      "#{claude_path}" --print --dangerously-skip-permissions --verbose --output-format stream-json #{escape_shell(prompt)} > "#{log_path}" 2>&1
+      EXIT_CODE=$?
+      if [ $EXIT_CODE -eq 0 ]; then
+        "#{hive_path}" bee complete #{bee_id}
+      else
+        "#{hive_path}" bee fail #{bee_id} --reason "Exit code $EXIT_CODE"
+      fi
+      """
+
+      File.write!(script_path, script_content)
+      File.chmod!(script_path, 0o755)
+
+      # Spawn detached: nohup + redirect + disown via a subshell
+      port = Port.open({:spawn, "nohup #{script_path} >/dev/null 2>&1 & echo $!"}, [:binary, :exit_status])
+
+      os_pid =
+        receive do
+          {^port, {:data, data}} -> String.trim(data)
+          {^port, {:exit_status, _}} -> nil
+        after
+          5_000 -> nil
+        end
+
+      # Drain exit status
+      receive do
+        {^port, {:exit_status, _}} -> :ok
+      after
+        2_000 -> :ok
+      end
+
+      {:ok, os_pid}
+    end
+  end
+
+  defp build_job_prompt(job_id) do
+    case Hive.Jobs.get(job_id) do
+      {:ok, job} ->
+        prompt = if job.description, do: "#{job.title}\n\n#{job.description}", else: job.title
+        {:ok, prompt}
+      {:error, reason} -> {:error, reason}
+    end
+  end
+
+  defp escape_shell(str) do
+    # Single-quote the string, escaping any single quotes within
+    "'" <> String.replace(str, "'", "'\\''") <> "'"
+  end
 end

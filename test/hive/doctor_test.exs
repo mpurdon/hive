@@ -2,12 +2,14 @@ defmodule Hive.DoctorTest do
   use ExUnit.Case, async: false
 
   alias Hive.Doctor
-  alias Hive.Repo
-  alias Hive.Schema.{Bee, Cell, Comb}
+  alias Hive.Store
 
   setup do
-    :ok = Ecto.Adapters.SQL.Sandbox.checkout(Repo)
-    Ecto.Adapters.SQL.Sandbox.mode(Repo, {:shared, self()})
+    tmp_dir = Path.join(System.tmp_dir!(), "hive_test_#{:erlang.unique_integer([:positive])}")
+    File.mkdir_p!(tmp_dir)
+    if Process.whereis(Hive.Store), do: GenServer.stop(Hive.Store)
+    {:ok, _} = Hive.Store.start_link(data_dir: tmp_dir)
+    on_exit(fn -> File.rm_rf!(tmp_dir) end)
     :ok
   end
 
@@ -62,25 +64,19 @@ defmodule Hive.DoctorTest do
     test "reports warn when orphan cells exist" do
       # Create a comb, a stopped bee, and an active cell for that bee
       {:ok, comb} =
-        %Comb{}
-        |> Comb.changeset(%{name: "orphan-test-comb-#{:erlang.unique_integer([:positive])}"})
-        |> Repo.insert()
+        Store.insert(:combs, %{name: "orphan-test-comb-#{:erlang.unique_integer([:positive])}"})
 
       {:ok, bee} =
-        %Bee{}
-        |> Bee.changeset(%{name: "orphan-bee", status: "stopped"})
-        |> Repo.insert()
+        Store.insert(:bees, %{name: "orphan-bee", status: "stopped"})
 
       {:ok, _cell} =
-        %Cell{}
-        |> Cell.changeset(%{
+        Store.insert(:cells, %{
           bee_id: bee.id,
           comb_id: comb.id,
           worktree_path: "/tmp/fake-worktree",
           branch: "bee/#{bee.id}",
           status: "active"
         })
-        |> Repo.insert()
 
       result = Doctor.check(:orphan_cells)
       assert result.name == :orphan_cells
@@ -99,9 +95,7 @@ defmodule Hive.DoctorTest do
 
     test "reports warn when stale bees exist" do
       {:ok, _bee} =
-        %Bee{}
-        |> Bee.changeset(%{name: "stale-bee", status: "starting", pid: nil})
-        |> Repo.insert()
+        Store.insert(:bees, %{name: "stale-bee", status: "starting", pid: nil})
 
       result = Doctor.check(:stale_bees)
       assert result.name == :stale_bees
@@ -114,25 +108,19 @@ defmodule Hive.DoctorTest do
   describe "fix/1 - orphan_cells" do
     test "cleans up orphan cells" do
       {:ok, comb} =
-        %Comb{}
-        |> Comb.changeset(%{name: "fix-orphan-comb-#{:erlang.unique_integer([:positive])}"})
-        |> Repo.insert()
+        Store.insert(:combs, %{name: "fix-orphan-comb-#{:erlang.unique_integer([:positive])}"})
 
       {:ok, bee} =
-        %Bee{}
-        |> Bee.changeset(%{name: "fix-orphan-bee", status: "crashed"})
-        |> Repo.insert()
+        Store.insert(:bees, %{name: "fix-orphan-bee", status: "crashed"})
 
       {:ok, _cell} =
-        %Cell{}
-        |> Cell.changeset(%{
+        Store.insert(:cells, %{
           bee_id: bee.id,
           comb_id: comb.id,
           worktree_path: "/tmp/fake-fix-worktree",
           branch: "bee/#{bee.id}",
           status: "active"
         })
-        |> Repo.insert()
 
       result = Doctor.fix(:orphan_cells)
       assert result.name == :orphan_cells
@@ -144,9 +132,7 @@ defmodule Hive.DoctorTest do
   describe "fix/1 - stale_bees" do
     test "marks stale bees as crashed" do
       {:ok, bee} =
-        %Bee{}
-        |> Bee.changeset(%{name: "fix-stale-bee", status: "working", pid: nil})
-        |> Repo.insert()
+        Store.insert(:bees, %{name: "fix-stale-bee", status: "working", pid: nil})
 
       result = Doctor.fix(:stale_bees)
       assert result.name == :stale_bees
@@ -154,7 +140,7 @@ defmodule Hive.DoctorTest do
       assert result.message =~ "Marked"
 
       # Verify the bee was updated
-      updated = Repo.get(Bee, bee.id)
+      updated = Store.get(:bees, bee.id)
       assert updated.status == "crashed"
     end
   end
@@ -229,9 +215,7 @@ defmodule Hive.DoctorTest do
   describe "run_all/1 with fix: true" do
     test "auto-fixes fixable issues" do
       {:ok, _bee} =
-        %Bee{}
-        |> Bee.changeset(%{name: "autofix-bee", status: "starting", pid: nil})
-        |> Repo.insert()
+        Store.insert(:bees, %{name: "autofix-bee", status: "starting", pid: nil})
 
       results = Doctor.run_all(fix: true)
 
