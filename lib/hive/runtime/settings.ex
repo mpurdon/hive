@@ -50,13 +50,14 @@ defmodule Hive.Runtime.Settings do
       "hooks" => %{
         "SessionStart" => [
           %{
-            "matcher" => "*",
-            "hooks" => [
-              %{
-                "type" => "command",
-                "command" => "#{hive_bin} prime --bee #{bee_id}"
-              }
-            ]
+            "type" => "command",
+            "command" => "#{hive_bin} prime --bee #{bee_id}"
+          }
+        ],
+        "Stop" => [
+          %{
+            "type" => "command",
+            "command" => "#{hive_bin} costs record --bee #{bee_id}"
           }
         ]
       }
@@ -80,13 +81,14 @@ defmodule Hive.Runtime.Settings do
       "hooks" => %{
         "SessionStart" => [
           %{
-            "matcher" => "*",
-            "hooks" => [
-              %{
-                "type" => "command",
-                "command" => "#{hive_bin} prime --queen"
-              }
-            ]
+            "type" => "command",
+            "command" => "#{hive_bin} prime --queen"
+          }
+        ],
+        "Stop" => [
+          %{
+            "type" => "command",
+            "command" => "#{hive_bin} costs record --queen"
           }
         ]
       }

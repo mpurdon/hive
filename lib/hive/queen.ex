@@ -197,7 +197,7 @@ defmodule Hive.Queen do
                 :ok ->
                   Hive.Bees.spawn(job_id, job.comb_id, state.hive_root)
                   |> case do
-                    {:ok, _bee, _pid} -> put_in(state.retry_counts[job_id], attempts + 1)
+                    {:ok, _bee} -> put_in(state.retry_counts[job_id], attempts + 1)
                     {:error, reason} ->
                       Logger.warning("Retry spawn failed for job #{job_id}: #{inspect(reason)}")
                       state

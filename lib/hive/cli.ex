@@ -313,13 +313,8 @@ defmodule Hive.CLI do
     subject = result_get(result, :options, :subject)
     body = result_get(result, :options, :body)
 
-    case Hive.Waggle.send(from, to, subject, body) do
-      {:ok, waggle} ->
-        Format.success("Waggle sent (#{waggle.id})")
-
-      {:error, reason} ->
-        Format.error("Failed to send waggle: #{inspect(reason)}")
-    end
+    {:ok, waggle} = Hive.Waggle.send(from, to, subject, body)
+    Format.success("Waggle sent (#{waggle.id})")
   end
 
   defp dispatch([:cell, :list], _result) do
@@ -762,13 +757,8 @@ defmodule Hive.CLI do
       model: model
     }
 
-    case Hive.Costs.record(bee_id, attrs) do
-      {:ok, cost} ->
-        Format.success("Cost recorded: $#{:erlang.float_to_binary(cost.cost_usd, decimals: 6)} (#{cost.id})")
-
-      {:error, reason} ->
-        Format.error("Failed to record cost: #{inspect(reason)}")
-    end
+    {:ok, cost} = Hive.Costs.record(bee_id, attrs)
+    Format.success("Cost recorded: $#{:erlang.float_to_binary(cost.cost_usd, decimals: 6)} (#{cost.id})")
   end
 
   defp dispatch([:doctor], result) do

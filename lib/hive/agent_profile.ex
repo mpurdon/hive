@@ -15,50 +15,116 @@ defmodule Hive.AgentProfile do
 
   @agents_dir ".claude/agents"
 
-  # Technology keywords mapped to agent names
-  @technology_map %{
-    "elixir" => "elixir",
-    "phoenix" => "elixir",
-    "otp" => "elixir",
-    "genserver" => "elixir",
-    "react" => "react",
-    "nextjs" => "react",
-    "next.js" => "react",
-    "typescript" => "typescript",
-    "javascript" => "javascript",
-    "node" => "javascript",
-    "python" => "python",
-    "django" => "python",
-    "flask" => "python",
-    "fastapi" => "python",
-    "rust" => "rust",
-    "cargo" => "rust",
-    "go" => "go",
-    "golang" => "go",
-    "ruby" => "ruby",
-    "rails" => "ruby",
-    "java" => "java",
-    "kotlin" => "kotlin",
-    "swift" => "swift",
-    "terraform" => "terraform",
-    "docker" => "docker",
-    "kubernetes" => "kubernetes",
-    "k8s" => "kubernetes",
-    "css" => "css",
-    "tailwind" => "css",
-    "sql" => "sql",
-    "postgres" => "sql",
-    "postgresql" => "sql",
-    "mysql" => "sql",
-    "sqlite" => "sql",
-    "graphql" => "graphql",
-    "aws" => "aws",
-    "lambda" => "aws",
-    "vue" => "vue",
-    "angular" => "angular",
-    "svelte" => "svelte",
-    "c++" => "cpp",
-    "cpp" => "cpp"
+  # Tiered detection rules: {priority, keywords, agent_key}
+  # Priority 1 = multi-keyword combos (most specific)
+  # Priority 2 = specific frameworks/SDKs
+  # Priority 3 = base languages (broadest fallback)
+  #
+  # Detection uses AND logic (all keywords must match), then picks the
+  # lowest priority number. Ties broken by keyword count (more = more specific).
+  @detection_rules [
+    # Priority 1: Multi-keyword combos
+    {1, ["strands", "agent"], "strands-sdk"},
+    {1, ["strands", "sdk"], "strands-sdk"},
+    {1, ["cdk", "infrastructure"], "aws-cdk"},
+    {1, ["cdk", "stack"], "aws-cdk"},
+    {1, ["terraform", "module"], "terraform-iac"},
+    {1, ["terraform", "infrastructure"], "terraform-iac"},
+    {1, ["phoenix", "liveview"], "phoenix-liveview"},
+    {1, ["phoenix", "live"], "phoenix-liveview"},
+    {1, ["react", "native"], "react-native"},
+    {1, ["next", "react"], "nextjs"},
+    {1, ["otp", "genserver"], "elixir-otp"},
+    {1, ["otp", "supervisor"], "elixir-otp"},
+    {1, ["otp", "supervision"], "elixir-otp"},
+
+    # Priority 2: Specific frameworks/SDKs
+    {2, ["nextjs"], "nextjs"},
+    {2, ["next.js"], "nextjs"},
+    {2, ["fastapi"], "fastapi"},
+    {2, ["phoenix"], "phoenix"},
+    {2, ["django"], "django"},
+    {2, ["flask"], "flask"},
+    {2, ["rails"], "rails"},
+    {2, ["cdk"], "aws-cdk"},
+    {2, ["strands"], "strands-sdk"},
+    {2, ["genserver"], "elixir-otp"},
+    {2, ["tailwind"], "tailwind"},
+    {2, ["graphql"], "graphql"},
+    {2, ["kubernetes"], "kubernetes"},
+    {2, ["k8s"], "kubernetes"},
+    {2, ["docker"], "docker"},
+    {2, ["terraform"], "terraform"},
+    {2, ["lambda"], "aws-lambda"},
+    {2, ["vue"], "vue"},
+    {2, ["angular"], "angular"},
+    {2, ["svelte"], "svelte"},
+    {2, ["react"], "react"},
+
+    # Priority 3: Base languages
+    {3, ["elixir"], "elixir"},
+    {3, ["otp"], "elixir"},
+    {3, ["python"], "python"},
+    {3, ["typescript"], "typescript"},
+    {3, ["javascript"], "javascript"},
+    {3, ["node"], "javascript"},
+    {3, ["rust"], "rust"},
+    {3, ["cargo"], "rust"},
+    {3, ["go"], "go"},
+    {3, ["golang"], "go"},
+    {3, ["ruby"], "ruby"},
+    {3, ["java"], "java"},
+    {3, ["kotlin"], "kotlin"},
+    {3, ["swift"], "swift"},
+    {3, ["css"], "css"},
+    {3, ["sql"], "sql"},
+    {3, ["postgres"], "sql"},
+    {3, ["postgresql"], "sql"},
+    {3, ["mysql"], "sql"},
+    {3, ["sqlite"], "sql"},
+    {3, ["aws"], "aws"},
+    {3, ["c++"], "cpp"},
+    {3, ["cpp"], "cpp"}
+  ]
+
+  # Maps agent keys to human-readable technology labels
+  @base_technology_map %{
+    "strands-sdk" => "Python/Strands SDK",
+    "aws-cdk" => "AWS CDK",
+    "aws-lambda" => "AWS Lambda",
+    "terraform-iac" => "Terraform IaC",
+    "phoenix-liveview" => "Phoenix LiveView",
+    "phoenix" => "Phoenix/Elixir",
+    "elixir-otp" => "Elixir/OTP",
+    "elixir" => "Elixir",
+    "nextjs" => "Next.js",
+    "react-native" => "React Native",
+    "react" => "React",
+    "fastapi" => "FastAPI",
+    "django" => "Django",
+    "flask" => "Flask",
+    "rails" => "Ruby on Rails",
+    "vue" => "Vue.js",
+    "angular" => "Angular",
+    "svelte" => "Svelte",
+    "tailwind" => "Tailwind CSS",
+    "graphql" => "GraphQL",
+    "kubernetes" => "Kubernetes",
+    "docker" => "Docker",
+    "terraform" => "Terraform",
+    "typescript" => "TypeScript",
+    "javascript" => "JavaScript",
+    "python" => "Python",
+    "rust" => "Rust",
+    "go" => "Go",
+    "ruby" => "Ruby",
+    "java" => "Java",
+    "kotlin" => "Kotlin",
+    "swift" => "Swift",
+    "css" => "CSS",
+    "sql" => "SQL",
+    "aws" => "AWS",
+    "cpp" => "C++"
   }
 
   @doc """
@@ -82,8 +148,8 @@ defmodule Hive.AgentProfile do
       nil ->
         {:ok, :no_agent}
 
-      technology ->
-        agent_name = "#{technology}-expert"
+      agent_key ->
+        agent_name = "#{agent_key}-expert"
         agent_path = Path.join([comb_path, @agents_dir, "#{agent_name}.md"])
 
         if File.exists?(agent_path) do
@@ -91,7 +157,7 @@ defmodule Hive.AgentProfile do
           {:ok, agent_path}
         else
           Logger.info("Generating agent profile: #{agent_name}")
-          generate_agent(comb_path, technology)
+          generate_agent(comb_path, agent_key, title, description)
         end
     end
   end
@@ -99,36 +165,47 @@ defmodule Hive.AgentProfile do
   @doc """
   Detects the primary technology from job title and description.
 
-  Uses keyword matching against a known technology map. Checks the title
-  first (higher signal), then the description. Returns the technology
-  name as a string or nil if no match.
+  Uses tiered keyword matching against detection rules. Rules are prioritized:
+  priority 1 (multi-keyword combos) beats priority 2 (specific frameworks)
+  beats priority 3 (base languages). Within the same priority, rules with
+  more keywords win (more specific). Returns the agent key as a string or
+  nil if no match.
   """
   @spec detect_technology(String.t(), String.t()) :: String.t() | nil
   def detect_technology(title, description) do
     text = String.downcase("#{title} #{description}")
 
-    @technology_map
-    |> Enum.find_value(fn {keyword, tech} ->
-      if String.contains?(text, keyword), do: tech
+    @detection_rules
+    |> Enum.filter(fn {_priority, keywords, _agent_key} ->
+      Enum.all?(keywords, &String.contains?(text, &1))
     end)
+    |> Enum.sort_by(fn {priority, keywords, _agent_key} ->
+      {priority, -length(keywords)}
+    end)
+    |> case do
+      [{_priority, _keywords, agent_key} | _] -> agent_key
+      [] -> nil
+    end
   end
 
   @doc """
   Generates an expert agent file for the given technology.
 
   Uses Claude headless to generate the content, then writes it to the
-  comb's `.claude/agents/` directory.
+  comb's `.claude/agents/` directory. The job title and description are
+  included in the generation prompt so Claude can produce a specific,
+  scenario-aware agent profile.
   """
-  @spec generate_agent(String.t(), String.t()) :: {:ok, String.t()}
-  def generate_agent(comb_path, technology) do
-    agent_name = "#{technology}-expert"
+  @spec generate_agent(String.t(), String.t(), String.t(), String.t()) :: {:ok, String.t()}
+  def generate_agent(comb_path, agent_key, title \\ "", description \\ "") do
+    agent_name = "#{agent_key}-expert"
     agents_dir = Path.join(comb_path, @agents_dir)
     agent_path = Path.join(agents_dir, "#{agent_name}.md")
 
     # Ensure .claude/agents/ directory exists
     File.mkdir_p!(agents_dir)
 
-    prompt = build_generation_prompt(technology, agent_name)
+    prompt = build_generation_prompt(agent_key, agent_name, title, description)
 
     case generate_via_claude(comb_path, prompt) do
       {:ok, content} ->
@@ -139,7 +216,7 @@ defmodule Hive.AgentProfile do
       {:error, reason} ->
         Logger.warning("Failed to generate agent #{agent_name}: #{inspect(reason)}")
         # Write a minimal fallback agent file
-        fallback = build_fallback_agent(technology, agent_name)
+        fallback = build_fallback_agent(agent_key, agent_name)
         File.write!(agent_path, fallback)
         {:ok, agent_path}
     end
@@ -162,30 +239,65 @@ defmodule Hive.AgentProfile do
     end
   end
 
+  # -- Private: helpers --------------------------------------------------------
+
+  defp base_technology(agent_key) do
+    Map.get(@base_technology_map, agent_key, humanize(agent_key))
+  end
+
+  defp humanize(agent_key) do
+    agent_key
+    |> String.replace("-", " ")
+    |> String.split()
+    |> Enum.map_join(" ", &String.capitalize/1)
+  end
+
   # -- Private: generation -----------------------------------------------------
 
-  defp build_generation_prompt(technology, agent_name) do
+  defp build_generation_prompt(agent_key, agent_name, title, description) do
+    tech_label = base_technology(agent_key)
+
+    job_context =
+      case {title, description} do
+        {"", ""} -> ""
+        {t, ""} -> "\nThe job this agent will work on: \"#{t}\"\n"
+        {"", d} -> "\nThe job context: \"#{d}\"\n"
+        {t, d} -> "\nThe job this agent will work on: \"#{t}\"\nJob details: \"#{d}\"\n"
+      end
+
     """
-    Generate a Claude Code agent file for a #{technology} expert. The file must use this exact format:
+    Generate a Claude Code agent file for a #{tech_label} expert. Output ONLY the agent file content with no extra explanation.
+    #{job_context}
+    The file MUST use this exact YAML frontmatter format:
 
     ---
     name: #{agent_name}
-    description: Use this agent when working on #{technology} code.
+    description: Use this agent when working on #{tech_label} code. [Expand with 2-4 specific example usage scenarios showing user messages and agent responses, like the example below.]
     model: sonnet
     color: blue
     ---
 
-    [Expert instructions in markdown]
+    Example description format (adapt for #{tech_label}):
+    ```
+    description: Use this agent when the user needs to write or design #{tech_label} code.\\n\\nExamples:\\n\\n- user: "Example request"\\n  assistant: "I'll use this agent to help."\\n  Commentary: Why this agent is the right choice.
+    ```
 
-    The expert should:
-    - Think pragmatically and favor reduced complexity
-    - Write clean, idiomatic #{technology} code
-    - Follow established conventions and best practices for #{technology}
-    - Prefer simple, composable solutions over complex abstractions
+    After the frontmatter, write a comprehensive #{tech_label} expert agent in markdown with this structure:
+
+    1. **Identity paragraph** (2-3 sentences): Who this expert is, their philosophy, what makes them exceptional at #{tech_label}.
+
+    2. **Core Philosophy** (heading ##): 3-5 numbered subsections (### 1. Title), each a paragraph explaining a fundamental principle. These should be *specific to #{tech_label}* — reference actual patterns, APIs, and idioms by name. Experts have opinions — take strong positions.
+
+    3. **Technical Standards** (heading ##): 4-6 subsections (### Title) with specific bullet points covering code structure, patterns, testing, and error handling. Reference actual #{tech_label} libraries, functions, and conventions by name. Be prescriptive, not generic.
+
+    4. **Working Style** (heading ##): 5-7 numbered items describing how this expert approaches problems, communicates decisions, and challenges assumptions. These should reflect deep #{tech_label} expertise.
+
+    Requirements:
+    - Reference actual APIs, libraries, patterns, and tools by name — not generic "follow best practices"
+    - Take strong, opinionated positions that a real #{tech_label} expert would hold
+    - Target 70-120 lines of markdown after the frontmatter
+    - No generic filler like "write clean code" — every bullet should be specific to #{tech_label}
     - Include only the YAML frontmatter and markdown instructions, nothing else
-    - Be thorough but concise (aim for 50-100 lines of markdown)
-
-    Output ONLY the agent file content with no extra explanation.
     """
   end
 
@@ -259,28 +371,35 @@ defmodule Hive.AgentProfile do
     end
   end
 
-  defp build_fallback_agent(technology, agent_name) do
+  defp build_fallback_agent(agent_key, agent_name) do
+    tech_label = base_technology(agent_key)
+
     """
     ---
     name: #{agent_name}
-    description: Use this agent when working on #{technology} code.
+    description: Use this agent when working on #{tech_label} code.
     model: sonnet
     color: blue
     ---
 
-    # #{String.capitalize(technology)} Expert
+    # #{tech_label} Expert
 
-    You are an expert #{technology} developer. Write clean, idiomatic code following
+    You are an expert #{tech_label} developer. Write clean, idiomatic code following
     established best practices. Favor pragmatic solutions with reduced complexity.
 
-    ## Principles
+    ## Core Principles
 
-    - Write simple, readable code
-    - Follow #{technology} conventions and idioms
-    - Prefer composition over inheritance
-    - Keep functions small and focused
-    - Handle errors explicitly
-    - Write code that is easy to test
+    1. **Deep Knowledge**: Understand #{tech_label} idioms, patterns, and ecosystem conventions thoroughly before writing code.
+    2. **Pragmatic Design**: Favor simple, composable solutions over complex abstractions. The right amount of complexity is the minimum needed.
+    3. **Explicit Over Implicit**: Make intent clear through naming, structure, and documentation. Avoid clever tricks that obscure meaning.
+
+    ## Working Style
+
+    1. **Think before coding**: Articulate the approach before implementation. What goes in? What comes out?
+    2. **Start with the public API**: Define the interface first, then implement. The API tells the story.
+    3. **Explain your reasoning**: When making architectural decisions, explain why. Cite the principle that guides the choice.
+    4. **Challenge assumptions**: If a request doesn't fit #{tech_label} idioms, say so and suggest alternatives.
+    5. **Provide alternatives**: When there are multiple valid approaches, present them with tradeoffs.
     """
   end
 end

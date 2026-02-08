@@ -37,8 +37,8 @@ defmodule Hive.Bees do
     with :ok <- check_job_ready(job_id),
          {:ok, bee} <- create_bee_record(name, job_id),
          :ok <- assign_job(job_id, bee.id),
-         {:ok, pid} <- start_worker(bee.id, job_id, comb_id, hive_root, opts) do
-      {:ok, bee, pid}
+         {:ok, _pid} <- start_worker(bee.id, job_id, comb_id, hive_root, opts) do
+      {:ok, bee}
     else
       {:error, reason} -> {:error, reason}
     end

@@ -155,9 +155,7 @@ defmodule Hive.TranscriptWatcher do
   end
 
   defp record_cost(bee_id, cost_data) do
-    case Hive.Costs.record(bee_id, cost_data) do
-      {:ok, _cost} -> :ok
-      {:error, _reason} -> :ok
-    end
+    {:ok, _cost} = Hive.Costs.record(bee_id, cost_data)
+    :ok
   end
 end

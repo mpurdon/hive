@@ -8,16 +8,20 @@ defmodule Hive.AgentProfileTest do
       assert AgentProfile.detect_technology("Build an Elixir API", "") == "elixir"
     end
 
-    test "identifies Elixir from Phoenix keyword" do
-      assert AgentProfile.detect_technology("Phoenix web app", "") == "elixir"
+    test "identifies Phoenix from keyword (framework-specific)" do
+      assert AgentProfile.detect_technology("Phoenix web app", "") == "phoenix"
     end
 
-    test "identifies Elixir from OTP keyword" do
-      assert AgentProfile.detect_technology("OTP supervisor tree", "") == "elixir"
+    test "identifies Elixir/OTP from OTP + supervisor combo" do
+      assert AgentProfile.detect_technology("OTP supervisor tree", "") == "elixir-otp"
     end
 
-    test "identifies Python from description" do
-      assert AgentProfile.detect_technology("Build API", "Use Django for the backend") == "python"
+    test "identifies bare OTP as elixir fallback" do
+      assert AgentProfile.detect_technology("OTP application", "") == "elixir"
+    end
+
+    test "identifies Django from description (framework-specific)" do
+      assert AgentProfile.detect_technology("Build API", "Use Django for the backend") == "django"
     end
 
     test "identifies Rust from title" do
@@ -32,8 +36,8 @@ defmodule Hive.AgentProfileTest do
       assert AgentProfile.detect_technology("Deploy with k8s", "") == "kubernetes"
     end
 
-    test "identifies Ruby from Rails keyword" do
-      assert AgentProfile.detect_technology("Rails application", "") == "ruby"
+    test "identifies Rails from keyword (framework-specific)" do
+      assert AgentProfile.detect_technology("Rails application", "") == "rails"
     end
 
     test "returns nil for unrecognized text" do
@@ -47,6 +51,75 @@ defmodule Hive.AgentProfileTest do
     test "is case-insensitive" do
       assert AgentProfile.detect_technology("ELIXIR project", "") == "elixir"
       assert AgentProfile.detect_technology("React Component", "") == "react"
+    end
+
+    # Tiered priority tests
+
+    test "Strands SDK multi-keyword combo wins over base python" do
+      assert AgentProfile.detect_technology("Build a Strands SDK agent", "") == "strands-sdk"
+    end
+
+    test "single Strands keyword detects strands-sdk at priority 2" do
+      assert AgentProfile.detect_technology("Use Strands for the project", "") == "strands-sdk"
+    end
+
+    test "CDK infrastructure combo wins over bare aws" do
+      assert AgentProfile.detect_technology("CDK infrastructure deployment", "") == "aws-cdk"
+    end
+
+    test "bare CDK detects aws-cdk at priority 2" do
+      assert AgentProfile.detect_technology("Deploy with CDK", "") == "aws-cdk"
+    end
+
+    test "Next.js keyword detects nextjs" do
+      assert AgentProfile.detect_technology("Build a Next.js app", "") == "nextjs"
+    end
+
+    test "nextjs keyword detects nextjs" do
+      assert AgentProfile.detect_technology("Use nextjs for frontend", "") == "nextjs"
+    end
+
+    test "FastAPI detects fastapi" do
+      assert AgentProfile.detect_technology("FastAPI backend service", "") == "fastapi"
+    end
+
+    test "Flask detects flask" do
+      assert AgentProfile.detect_technology("Flask web application", "") == "flask"
+    end
+
+    test "Python falls back to base python when no framework keyword" do
+      assert AgentProfile.detect_technology("Python script", "") == "python"
+    end
+
+    test "Phoenix LiveView combo wins over bare phoenix" do
+      assert AgentProfile.detect_technology("Phoenix LiveView dashboard", "") == "phoenix-liveview"
+    end
+
+    test "GenServer keyword detects elixir-otp" do
+      assert AgentProfile.detect_technology("Build a GenServer", "") == "elixir-otp"
+    end
+
+    test "Terraform module combo detects terraform-iac" do
+      assert AgentProfile.detect_technology("Terraform module for VPC", "") == "terraform-iac"
+    end
+
+    test "bare Terraform detects terraform at priority 2" do
+      assert AgentProfile.detect_technology("Terraform config", "") == "terraform"
+    end
+
+    test "React Native combo detects react-native" do
+      assert AgentProfile.detect_technology("React Native mobile app", "") == "react-native"
+    end
+
+    test "priority 1 beats priority 2 when both match" do
+      # "OTP supervisor" matches priority 1 {otp, supervisor} -> elixir-otp
+      # and priority 3 {otp} -> elixir. Priority 1 wins.
+      assert AgentProfile.detect_technology("Build OTP supervisor", "") == "elixir-otp"
+    end
+
+    test "framework beats language when both present" do
+      # Django (priority 2) beats Python (priority 3)
+      assert AgentProfile.detect_technology("Python Django app", "") == "django"
     end
   end
 
@@ -68,6 +141,21 @@ defmodule Hive.AgentProfileTest do
       on_exit(fn -> File.rm_rf!(tmp) end)
 
       job = %{title: "Build Elixir API", description: ""}
+
+      assert {:ok, ^agent_path} = AgentProfile.ensure_agent(tmp, job)
+    end
+
+    test "returns {:ok, path} when framework-specific agent file already exists" do
+      tmp = Path.join(System.tmp_dir!(), "hive_agent_test_#{:erlang.unique_integer([:positive])}")
+      agents_dir = Path.join(tmp, ".claude/agents")
+      File.mkdir_p!(agents_dir)
+
+      agent_path = Path.join(agents_dir, "phoenix-expert.md")
+      File.write!(agent_path, "# Phoenix Expert\nPre-existing agent file.")
+
+      on_exit(fn -> File.rm_rf!(tmp) end)
+
+      job = %{title: "Phoenix web app", description: ""}
 
       assert {:ok, ^agent_path} = AgentProfile.ensure_agent(tmp, job)
     end
