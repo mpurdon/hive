@@ -52,6 +52,14 @@ defmodule Hive.Runtime.Claude do
          :ok <- validate_directory(working_dir) do
       args = build_interactive_args(opts)
 
+      # Hand the terminal to Claude cleanly:
+      # 1. Flush any pending BEAM output so it doesn't interleave with Claude's TUI
+      # 2. Reset terminal to sane defaults (the BEAM may have altered settings)
+      # 3. Restore default OS signal handling so Claude gets SIGINT/SIGWINCH directly
+      :io.put_chars(:standard_io, "")
+      reset_terminal()
+      restore_default_signals()
+
       # Use :nouse_stdio so Claude inherits the real terminal directly.
       # This gives Claude full control of the TTY (raw mode, escape sequences,
       # TUI rendering) without needing a PTY wrapper or stdin/stdout relay.
@@ -176,5 +184,30 @@ defmodule Hive.Runtime.Claude do
   defp build_env(opts) do
     Keyword.get(opts, :env, [])
     |> Enum.map(fn {k, v} -> {to_charlist(k), to_charlist(v)} end)
+  end
+
+  # Reset terminal to sane defaults before handing it to an interactive child.
+  # The BEAM may have altered terminal settings (echo, buffering, etc.) during
+  # startup that would interfere with Claude's raw-mode TUI.
+  defp reset_terminal do
+    System.cmd("stty", ["sane"], stderr_to_stdout: true)
+    :ok
+  rescue
+    _ -> :ok
+  end
+
+  # Restore default OS signal handling so the interactive child process
+  # receives SIGINT (Ctrl+C) and SIGWINCH (resize) directly, instead of
+  # the BEAM intercepting them.
+  defp restore_default_signals do
+    for sig <- [:sigint, :sigwinch, :sigtstp] do
+      try do
+        :os.set_signal(sig, :default)
+      rescue
+        _ -> :ok
+      end
+    end
+
+    :ok
   end
 end

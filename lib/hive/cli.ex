@@ -367,10 +367,14 @@ defmodule Hive.CLI do
           {:ok, _pid} ->
             Hive.Queen.start_session()
 
+            # Print messages BEFORE launching Claude, not after.
+            # Once Claude starts, it takes full control of the terminal --
+            # any BEAM writes to stdout would corrupt Claude's TUI rendering.
+            Format.success("Queen is active at #{hive_root}")
+
             case Hive.Queen.launch() do
               :ok ->
-                Format.success("Queen is active at #{hive_root}")
-                Format.info("Claude session started. Press Ctrl+C to stop.")
+                :ok
 
               {:error, reason} ->
                 Format.warn("Could not launch Claude: #{inspect(reason)}")
