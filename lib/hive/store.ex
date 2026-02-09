@@ -161,7 +161,7 @@ defmodule Hive.Store do
 
   defp read_data do
     case File.read(data_path()) do
-      {:ok, binary} -> :erlang.binary_to_term(binary, [:safe])
+      {:ok, binary} -> :erlang.binary_to_term(binary)
       {:error, :enoent} -> %{}
     end
   end

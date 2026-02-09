@@ -15,6 +15,38 @@ defmodule Hive.AgentProfile do
 
   @agents_dir ".claude/agents"
 
+  # Comb-level dependency detection: {pattern, agent_key}
+  # Used by detect_from_comb/1 to scan project manifest files.
+  @pyproject_deps [
+    {"strands-agents", "strands-sdk"},
+    {"strands-agents-builder", "strands-sdk"},
+    {"fastapi", "fastapi"},
+    {"django", "django"},
+    {"flask", "flask"},
+    {"boto3", "aws"},
+    {"sagemaker", "aws"},
+    {"pulumi", "python"}
+  ]
+
+  @package_json_deps [
+    {"react-native", "react-native"},
+    {"next", "nextjs"},
+    {"@angular/core", "angular"},
+    {"vue", "vue"},
+    {"svelte", "svelte"},
+    {"react", "react"},
+    {"express", "javascript"},
+    {"fastify", "javascript"}
+  ]
+
+  @mix_deps [
+    {":phoenix_live_view", "phoenix-liveview"},
+    {":phoenix", "phoenix"},
+    {":ecto", "elixir"},
+    {":nerves", "elixir"},
+    {":nx", "elixir"}
+  ]
+
   # Tiered detection rules: {priority, keywords, agent_key}
   # Priority 1 = multi-keyword combos (most specific)
   # Priority 2 = specific frameworks/SDKs
@@ -144,20 +176,23 @@ defmodule Hive.AgentProfile do
     title = Map.get(job, :title, "") || ""
     description = Map.get(job, :description, "") || ""
 
-    case detect_technology(title, description) do
-      nil ->
-        {:ok, :no_agent}
+    # Early exit: if any agent already exists for this comb, reuse it (one agent per comb)
+    case existing_agent(comb_path) do
+      {:ok, path} ->
+        Logger.info("Agent profile already exists: #{Path.basename(path)}")
+        {:ok, path}
 
-      agent_key ->
-        agent_name = "#{agent_key}-expert"
-        agent_path = Path.join([comb_path, @agents_dir, "#{agent_name}.md"])
+      :none ->
+        # Comb-level detection first, then fall back to job-level
+        agent_key = detect_from_comb(comb_path) || detect_technology(title, description)
 
-        if File.exists?(agent_path) do
-          Logger.info("Agent profile found: #{agent_name}")
-          {:ok, agent_path}
-        else
-          Logger.info("Generating agent profile: #{agent_name}")
-          generate_agent(comb_path, agent_key, title, description)
+        case agent_key do
+          nil ->
+            {:ok, :no_agent}
+
+          key ->
+            Logger.info("Generating agent profile: #{key}-expert")
+            generate_agent(comb_path, key, title, description)
         end
     end
   end
@@ -189,6 +224,38 @@ defmodule Hive.AgentProfile do
   end
 
   @doc """
+  Detects the primary technology from the comb's project manifest files.
+
+  Scans `pyproject.toml`, `package.json`, and `mix.exs` at the comb root
+  for known dependency packages. Returns the most specific agent_key found
+  (frameworks beat languages), or nil if nothing is detected.
+  """
+  @spec detect_from_comb(String.t()) :: String.t() | nil
+  def detect_from_comb(comb_path) do
+    detections =
+      [
+        detect_pyproject(comb_path),
+        detect_package_json(comb_path),
+        detect_mix_exs(comb_path)
+      ]
+      |> List.flatten()
+      |> Enum.reject(&is_nil/1)
+
+    # Pick the most specific: use the detection_rules priority to rank
+    # agent_keys (lower priority number = more specific)
+    priority_for = fn agent_key ->
+      case Enum.find(@detection_rules, fn {_p, _kw, key} -> key == agent_key end) do
+        {priority, _kw, _key} -> priority
+        nil -> 99
+      end
+    end
+
+    detections
+    |> Enum.sort_by(priority_for)
+    |> List.first()
+  end
+
+  @doc """
   Generates an expert agent file for the given technology.
 
   Uses Claude headless to generate the content, then writes it to the
@@ -215,8 +282,8 @@ defmodule Hive.AgentProfile do
 
       {:error, reason} ->
         Logger.warning("Failed to generate agent #{agent_name}: #{inspect(reason)}")
-        # Write a minimal fallback agent file
-        fallback = build_fallback_agent(agent_key, agent_name)
+        # Write a fallback agent file with job context
+        fallback = build_fallback_agent(agent_key, agent_name, title, description)
         File.write!(agent_path, fallback)
         {:ok, agent_path}
     end
@@ -371,8 +438,43 @@ defmodule Hive.AgentProfile do
     end
   end
 
-  defp build_fallback_agent(agent_key, agent_name) do
+  defp build_fallback_agent(agent_key, agent_name, title, description) do
     tech_label = base_technology(agent_key)
+
+    job_context =
+      case {title, description} do
+        {"", ""} ->
+          ""
+
+        {t, ""} ->
+          """
+
+          ## Job Context
+
+          This agent was generated for a specific task: **#{t}**
+          Adapt your expertise to this context when providing guidance.
+          """
+
+        {"", d} ->
+          """
+
+          ## Job Context
+
+          This agent was generated for the following work:
+          #{d}
+          Adapt your expertise to this context when providing guidance.
+          """
+
+        {t, d} ->
+          """
+
+          ## Job Context
+
+          This agent was generated for: **#{t}**
+          #{d}
+          Adapt your expertise to this context when providing guidance.
+          """
+      end
 
     """
     ---
@@ -400,6 +502,74 @@ defmodule Hive.AgentProfile do
     3. **Explain your reasoning**: When making architectural decisions, explain why. Cite the principle that guides the choice.
     4. **Challenge assumptions**: If a request doesn't fit #{tech_label} idioms, say so and suggest alternatives.
     5. **Provide alternatives**: When there are multiple valid approaches, present them with tradeoffs.
+    #{job_context}\
     """
+  end
+
+  # Returns {:ok, path} if any .md agent file exists in the comb's agents dir, :none otherwise.
+  defp existing_agent(comb_path) do
+    agents_dir = Path.join(comb_path, @agents_dir)
+
+    if File.dir?(agents_dir) do
+      case File.ls!(agents_dir) |> Enum.filter(&String.ends_with?(&1, ".md")) |> Enum.sort() do
+        [first | _] -> {:ok, Path.join(agents_dir, first)}
+        [] -> :none
+      end
+    else
+      :none
+    end
+  end
+
+  # -- Private: comb-level detection ------------------------------------------
+
+  defp detect_pyproject(comb_path) do
+    path = Path.join(comb_path, "pyproject.toml")
+
+    if File.exists?(path) do
+      content = File.read!(path)
+
+      @pyproject_deps
+      |> Enum.find_value(fn {pkg, agent_key} ->
+        if String.contains?(content, pkg), do: agent_key
+      end)
+    end
+  end
+
+  defp detect_package_json(comb_path) do
+    path = Path.join(comb_path, "package.json")
+
+    if File.exists?(path) do
+      case File.read!(path) |> Jason.decode() do
+        {:ok, json} ->
+          deps =
+            Map.merge(
+              Map.get(json, "dependencies", %{}),
+              Map.get(json, "devDependencies", %{})
+            )
+
+          dep_keys = Map.keys(deps)
+
+          @package_json_deps
+          |> Enum.find_value(fn {pkg, agent_key} ->
+            if pkg in dep_keys, do: agent_key
+          end)
+
+        _ ->
+          nil
+      end
+    end
+  end
+
+  defp detect_mix_exs(comb_path) do
+    path = Path.join(comb_path, "mix.exs")
+
+    if File.exists?(path) do
+      content = File.read!(path)
+
+      @mix_deps
+      |> Enum.find_value(fn {pattern, agent_key} ->
+        if String.contains?(content, pattern), do: agent_key
+      end)
+    end
   end
 end

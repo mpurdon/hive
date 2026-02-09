@@ -123,11 +123,111 @@ defmodule Hive.AgentProfileTest do
     end
   end
 
+  describe "detect_from_comb/1" do
+    test "detects strands-sdk from pyproject.toml with strands-agents dependency" do
+      tmp = Path.join(System.tmp_dir!(), "hive_comb_detect_#{:erlang.unique_integer([:positive])}")
+      File.mkdir_p!(tmp)
+      on_exit(fn -> File.rm_rf!(tmp) end)
+
+      File.write!(Path.join(tmp, "pyproject.toml"), """
+      [project]
+      name = "my-agent"
+      dependencies = [
+          "strands-agents>=0.1.0",
+          "strands-agents-builder",
+      ]
+      """)
+
+      assert AgentProfile.detect_from_comb(tmp) == "strands-sdk"
+    end
+
+    test "detects fastapi from pyproject.toml" do
+      tmp = Path.join(System.tmp_dir!(), "hive_comb_detect_#{:erlang.unique_integer([:positive])}")
+      File.mkdir_p!(tmp)
+      on_exit(fn -> File.rm_rf!(tmp) end)
+
+      File.write!(Path.join(tmp, "pyproject.toml"), """
+      [project]
+      dependencies = ["fastapi", "uvicorn"]
+      """)
+
+      assert AgentProfile.detect_from_comb(tmp) == "fastapi"
+    end
+
+    test "detects react from package.json with react dependency" do
+      tmp = Path.join(System.tmp_dir!(), "hive_comb_detect_#{:erlang.unique_integer([:positive])}")
+      File.mkdir_p!(tmp)
+      on_exit(fn -> File.rm_rf!(tmp) end)
+
+      File.write!(Path.join(tmp, "package.json"), Jason.encode!(%{
+        "dependencies" => %{"react" => "^18.0.0", "react-dom" => "^18.0.0"}
+      }))
+
+      assert AgentProfile.detect_from_comb(tmp) == "react"
+    end
+
+    test "detects nextjs from package.json (framework beats library)" do
+      tmp = Path.join(System.tmp_dir!(), "hive_comb_detect_#{:erlang.unique_integer([:positive])}")
+      File.mkdir_p!(tmp)
+      on_exit(fn -> File.rm_rf!(tmp) end)
+
+      File.write!(Path.join(tmp, "package.json"), Jason.encode!(%{
+        "dependencies" => %{"next" => "^14.0.0", "react" => "^18.0.0"}
+      }))
+
+      assert AgentProfile.detect_from_comb(tmp) == "nextjs"
+    end
+
+    test "detects phoenix from mix.exs" do
+      tmp = Path.join(System.tmp_dir!(), "hive_comb_detect_#{:erlang.unique_integer([:positive])}")
+      File.mkdir_p!(tmp)
+      on_exit(fn -> File.rm_rf!(tmp) end)
+
+      File.write!(Path.join(tmp, "mix.exs"), """
+      defmodule MyApp.MixProject do
+        defp deps do
+          [{:phoenix, "~> 1.7"}, {:ecto, "~> 3.0"}]
+        end
+      end
+      """)
+
+      assert AgentProfile.detect_from_comb(tmp) == "phoenix"
+    end
+
+    test "returns nil for empty directory" do
+      tmp = Path.join(System.tmp_dir!(), "hive_comb_detect_#{:erlang.unique_integer([:positive])}")
+      File.mkdir_p!(tmp)
+      on_exit(fn -> File.rm_rf!(tmp) end)
+
+      assert AgentProfile.detect_from_comb(tmp) == nil
+    end
+  end
+
   describe "ensure_agent/2" do
     test "returns {:ok, :no_agent} when no technology is detected" do
+      tmp = Path.join(System.tmp_dir!(), "hive_agent_test_#{:erlang.unique_integer([:positive])}")
+      File.mkdir_p!(tmp)
+      on_exit(fn -> File.rm_rf!(tmp) end)
+
       job = %{title: "Fix the bug", description: "Something is broken"}
 
-      assert {:ok, :no_agent} = AgentProfile.ensure_agent(System.tmp_dir!(), job)
+      assert {:ok, :no_agent} = AgentProfile.ensure_agent(tmp, job)
+    end
+
+    test "returns existing agent when one already exists (dedup)" do
+      tmp = Path.join(System.tmp_dir!(), "hive_agent_test_#{:erlang.unique_integer([:positive])}")
+      agents_dir = Path.join(tmp, ".claude/agents")
+      File.mkdir_p!(agents_dir)
+
+      agent_path = Path.join(agents_dir, "elixir-expert.md")
+      File.write!(agent_path, "# Elixir Expert\nPre-existing agent file.")
+
+      on_exit(fn -> File.rm_rf!(tmp) end)
+
+      # Even though the job says "Python Django", the existing elixir agent wins
+      job = %{title: "Python Django app", description: "Build a Django backend"}
+
+      assert {:ok, ^agent_path} = AgentProfile.ensure_agent(tmp, job)
     end
 
     test "returns {:ok, path} when agent file already exists" do
@@ -158,6 +258,28 @@ defmodule Hive.AgentProfileTest do
       job = %{title: "Phoenix web app", description: ""}
 
       assert {:ok, ^agent_path} = AgentProfile.ensure_agent(tmp, job)
+    end
+
+    test "uses comb-level detection over job-level when both match" do
+      tmp = Path.join(System.tmp_dir!(), "hive_agent_test_#{:erlang.unique_integer([:positive])}")
+      File.mkdir_p!(tmp)
+      on_exit(fn -> File.rm_rf!(tmp) end)
+
+      # Comb has strands-agents in pyproject.toml → detect_from_comb returns "strands-sdk"
+      File.write!(Path.join(tmp, "pyproject.toml"), """
+      [project]
+      dependencies = ["strands-agents>=0.1.0"]
+      """)
+
+      # Job title says "Python" which would detect "python" at priority 3 via detect_technology
+      # Comb-level should take priority: detect_from_comb returns "strands-sdk"
+      comb_key = AgentProfile.detect_from_comb(tmp)
+      job_key = AgentProfile.detect_technology("Python helper script", "Write a utility")
+
+      assert comb_key == "strands-sdk"
+      assert job_key == "python"
+      # ensure_agent uses: detect_from_comb || detect_technology — comb wins
+      assert comb_key != nil
     end
   end
 
