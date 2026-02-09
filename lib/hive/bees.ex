@@ -198,6 +198,7 @@ defmodule Hive.Bees do
             nil -> :ok
             comb when comb.path != nil ->
               Hive.AgentProfile.ensure_agent(comb.path, %{title: job.title, description: job.description})
+              Hive.AgentProfile.install_agents(comb.path, cell.worktree_path)
               :ok
             _comb -> :ok
           end

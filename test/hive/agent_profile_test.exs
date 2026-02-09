@@ -283,6 +283,55 @@ defmodule Hive.AgentProfileTest do
     end
   end
 
+  describe "install_agents/2" do
+    test "copies agent files from comb to worktree" do
+      comb = Path.join(System.tmp_dir!(), "hive_install_agents_#{:erlang.unique_integer([:positive])}")
+      worktree = Path.join(System.tmp_dir!(), "hive_install_wt_#{:erlang.unique_integer([:positive])}")
+      comb_agents = Path.join(comb, ".claude/agents")
+      File.mkdir_p!(comb_agents)
+      File.mkdir_p!(worktree)
+      on_exit(fn -> File.rm_rf!(comb); File.rm_rf!(worktree) end)
+
+      File.write!(Path.join(comb_agents, "elixir-expert.md"), "# Elixir Expert")
+      File.write!(Path.join(comb_agents, "rust-expert.md"), "# Rust Expert")
+
+      assert :ok = AgentProfile.install_agents(comb, worktree)
+
+      wt_agents = Path.join(worktree, ".claude/agents")
+      assert File.read!(Path.join(wt_agents, "elixir-expert.md")) == "# Elixir Expert"
+      assert File.read!(Path.join(wt_agents, "rust-expert.md")) == "# Rust Expert"
+    end
+
+    test "does not overwrite existing agents in worktree" do
+      comb = Path.join(System.tmp_dir!(), "hive_install_noover_#{:erlang.unique_integer([:positive])}")
+      worktree = Path.join(System.tmp_dir!(), "hive_install_noover_wt_#{:erlang.unique_integer([:positive])}")
+      comb_agents = Path.join(comb, ".claude/agents")
+      wt_agents = Path.join(worktree, ".claude/agents")
+      File.mkdir_p!(comb_agents)
+      File.mkdir_p!(wt_agents)
+      on_exit(fn -> File.rm_rf!(comb); File.rm_rf!(worktree) end)
+
+      File.write!(Path.join(comb_agents, "elixir-expert.md"), "# Comb Version")
+      File.write!(Path.join(wt_agents, "elixir-expert.md"), "# Worktree Version")
+
+      assert :ok = AgentProfile.install_agents(comb, worktree)
+
+      assert File.read!(Path.join(wt_agents, "elixir-expert.md")) == "# Worktree Version"
+    end
+
+    test "is a no-op when comb has no agents dir" do
+      comb = Path.join(System.tmp_dir!(), "hive_install_noop_#{:erlang.unique_integer([:positive])}")
+      worktree = Path.join(System.tmp_dir!(), "hive_install_noop_wt_#{:erlang.unique_integer([:positive])}")
+      File.mkdir_p!(comb)
+      File.mkdir_p!(worktree)
+      on_exit(fn -> File.rm_rf!(comb); File.rm_rf!(worktree) end)
+
+      assert :ok = AgentProfile.install_agents(comb, worktree)
+
+      refute File.dir?(Path.join(worktree, ".claude/agents"))
+    end
+  end
+
   describe "list_agents/1" do
     test "returns empty list for directory without agents" do
       tmp = Path.join(System.tmp_dir!(), "hive_agent_list_empty_#{:erlang.unique_integer([:positive])}")

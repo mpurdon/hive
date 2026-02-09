@@ -290,6 +290,37 @@ defmodule Hive.AgentProfile do
   end
 
   @doc """
+  Copies all agent profiles from a comb's agents directory into a worktree.
+
+  Claude Code discovers agents from `.claude/agents/` relative to the git root.
+  Since bee worktrees have their own git root, agents generated at the comb level
+  must be copied into each worktree for Claude to discover them.
+  """
+  @spec install_agents(String.t(), String.t()) :: :ok
+  def install_agents(comb_path, worktree_path) do
+    src_dir = Path.join(comb_path, @agents_dir)
+    dst_dir = Path.join(worktree_path, @agents_dir)
+
+    if File.dir?(src_dir) do
+      File.mkdir_p!(dst_dir)
+
+      src_dir
+      |> File.ls!()
+      |> Enum.filter(&String.ends_with?(&1, ".md"))
+      |> Enum.each(fn filename ->
+        src = Path.join(src_dir, filename)
+        dst = Path.join(dst_dir, filename)
+
+        unless File.exists?(dst) do
+          File.cp!(src, dst)
+        end
+      end)
+    end
+
+    :ok
+  end
+
+  @doc """
   Lists all agent profiles available in a comb's agents directory.
   """
   @spec list_agents(String.t()) :: [String.t()]
