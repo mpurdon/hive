@@ -1,6 +1,8 @@
 # The Hive
 
-Multi-agent orchestration system for [Claude Code](https://docs.anthropic.com/en/docs/claude-code). Coordinate multiple Claude instances working on a shared codebase with automatic task delegation, isolated git worktrees, inter-agent messaging, cost tracking, and a real-time web dashboard.
+Multi-agent orchestration system for AI coding assistants. Coordinate multiple AI instances working on a shared codebase with automatic task delegation, isolated git worktrees, inter-agent messaging, cost tracking, and a real-time web dashboard.
+
+Supports multiple model providers through a plugin system: Claude Code, GitHub Copilot CLI, Kimi CLI, and any future provider via the `Hive.Plugin.Model` behaviour.
 
 Built in Elixir, leveraging OTP supervision trees for process management, Phoenix PubSub for messaging, and SQLite for persistence.
 
@@ -14,14 +16,18 @@ You need three things on your machine:
 |------------|---------|---------|
 | **Elixir** | 1.15+ | `brew install elixir` or [elixir-lang.org/install](https://elixir-lang.org/install.html) |
 | **Git** | 2.25+ | `brew install git` or [git-scm.com](https://git-scm.com) |
-| **Claude Code** | latest | `npm install -g @anthropic-ai/claude-code` ([docs](https://docs.anthropic.com/en/docs/claude-code)) |
+| **AI CLI** | latest | At least one: `claude`, `copilot`, or `kimi` |
 
 Verify everything is ready:
 
 ```bash
 elixir --version   # should print 1.15+
 git --version      # should print 2.25+
-claude --version   # should print a version
+
+# At least one of these:
+claude --version   # Claude Code CLI
+copilot --version  # GitHub Copilot CLI
+kimi --version     # Kimi CLI
 ```
 
 ### 2. Build the Hive CLI
@@ -62,7 +68,7 @@ cd ~/my-hive
 hive queen
 ```
 
-Tell the Queen what you want built. She'll analyze your request, break it into jobs, spawn worker bees (parallel Claude instances), and coordinate them to completion.
+Tell the Queen what you want built. She'll analyze your request, break it into jobs, spawn worker bees (parallel AI instances), and coordinate them to completion.
 
 ### 5. Monitor progress
 
@@ -89,7 +95,7 @@ You: "Build user authentication"
      - "Add session management"
         |
         v
-   Spawns 3 bees (parallel Claude instances)
+   Spawns 3 bees (parallel AI instances)
    Each bee works in an isolated git worktree
         |
         v
@@ -101,6 +107,33 @@ You: "Build user authentication"
 
 The Queen never writes code herself -- she only delegates. Each bee gets its own git worktree (cell) so multiple agents can work on the same repo without conflicts.
 
+## Model Providers
+
+The Hive uses a plugin system to support multiple AI model providers. The active provider is resolved per-session via config or CLI flags.
+
+| Provider | Binary | Streaming | Cost Tracking | Session Resume |
+|----------|--------|-----------|---------------|----------------|
+| **Claude Code** | `claude` | JSONL | Yes | Yes |
+| **Copilot CLI** | `copilot` | Plain text | No (subscription) | No |
+| **Kimi CLI** | `kimi` | JSONL | Yes | Yes |
+
+Set the default provider in `.hive/config.toml`:
+
+```toml
+[plugins.models]
+default = "claude"   # or "copilot" or "kimi"
+```
+
+Or pass it per-command:
+
+```bash
+hive queen --model-plugin copilot
+```
+
+### Writing a custom provider
+
+Implement the `Hive.Plugin.Model` behaviour and register it with the Plugin Manager. See `lib/hive/plugin/builtin/models/` for examples. Use `mix hive.gen.plugin model my_provider` to scaffold.
+
 ## Core Concepts
 
 | Concept | Name | Description |
@@ -108,7 +141,7 @@ The Queen never writes code herself -- she only delegates. Each bee gets its own
 | Workspace | **Hive** | Root directory containing projects, config, and database |
 | Coordinator | **Queen** | AI agent that plans and delegates (never codes directly) |
 | Project | **Comb** | A git repository registered with the hive |
-| Worker | **Bee** | Ephemeral Claude instance that executes a single job |
+| Worker | **Bee** | Ephemeral AI instance that executes a single job |
 | Work unit | **Job** | A discrete task assigned to a bee |
 | Work bundle | **Quest** | A group of related jobs forming a larger objective |
 | Messages | **Waggle** | Inter-agent communication (named after the bee waggle dance) |
@@ -137,6 +170,7 @@ hive comb add <path> [--name NAME]      # Register a git repo
   [--github-owner OWNER] [--github-repo REPO]
 hive comb list                          # List registered projects
 hive comb remove <name>                 # Unregister a project
+hive comb rename <old> <new>            # Rename a comb
 ```
 
 ### Orchestration
@@ -146,6 +180,9 @@ hive queen                              # Start Queen coordinator session
 hive bee list                           # List all bees
 hive bee spawn --job ID --comb ID       # Spawn a worker bee
 hive bee stop --id ID                   # Stop a running bee
+hive bee revive --id ID                 # Revive a dead bee's worktree
+hive bee done --id ID                   # Mark a bee as completed
+hive bee fail --id ID --reason "..."    # Mark a bee as failed
 ```
 
 ### Work Tracking
@@ -203,6 +240,15 @@ hive validate --bee ID                  # Validate a bee's completed work
 hive drone [--no-fix]                   # Start health patrol
 ```
 
+### Plugins
+
+```bash
+hive plugin list                        # List loaded plugins
+hive plugin load <path>                 # Load a plugin from file
+hive plugin unload <type> <name>        # Unload a plugin
+hive plugin reload <type> <name>        # Hot-reload a plugin
+```
+
 ### GitHub Integration
 
 ```bash
@@ -226,6 +272,9 @@ max_bees = 5
 warn_threshold_usd = 5.0
 budget_usd = 10.0
 
+[plugins.models]
+default = "claude"
+
 [github]
 token = ""
 ```
@@ -244,8 +293,6 @@ You can also set the `HIVE_PATH` environment variable to point to your hive work
 │   ├── .git/
 │   └── bees/                  # Bee worktrees
 │       ├── bee-abc123/        # Cell with isolated working copy
-│       │   └── .claude/
-│       │       └── settings.json
 │       └── bee-def456/
 └── another-project/           # Another comb
 ```
@@ -256,6 +303,10 @@ You can also set the `HIVE_PATH` environment variable to point to your hive work
 Hive.Application (OTP Supervisor)
 ├── Phoenix.PubSub (inter-agent messaging)
 ├── Registry (process registry)
+├── Hive.Plugin.Manager (plugin lifecycle + hot reload)
+│   ├── Hive.Plugin.Registry (ETS-backed plugin lookup)
+│   ├── Hive.Plugin.MCPSupervisor (MCP plugin children)
+│   └── Hive.Plugin.ChannelSupervisor (channel plugin children)
 ├── Hive.CombSupervisor (DynamicSupervisor)
 │   └── Hive.Comb (per-project supervisor)
 │       ├── Hive.Bee.Worker (GenServer per worker)
@@ -265,11 +316,36 @@ Hive.Application (OTP Supervisor)
 └── Hive.Dashboard.Endpoint (Phoenix - web UI)
 ```
 
-Key design decisions:
+### Plugin System
+
+The plugin architecture provides six extension points:
+
+| Type | Behaviour | Purpose |
+|------|-----------|---------|
+| **Model** | `Hive.Plugin.Model` | AI provider integration (spawn, parse, costs) |
+| **Command** | `Hive.Plugin.Command` | TUI slash commands |
+| **Theme** | `Hive.Plugin.Theme` | Color palettes for the TUI |
+| **LSP** | `Hive.Plugin.LSP` | Language server integration |
+| **MCP** | `Hive.Plugin.MCP` | Model Context Protocol servers |
+| **Channel** | `Hive.Plugin.Channel` | External notification channels |
+
+Plugins are discovered at startup and can be hot-reloaded at runtime via `Hive.Plugin.Manager`.
+
+### Runtime Modules
+
+| Module | Purpose |
+|--------|---------|
+| `Hive.Runtime.Models` | Central facade -- resolves active plugin, delegates all model operations |
+| `Hive.Runtime.Terminal` | Shared terminal handoff utilities for interactive TUI providers |
+| `Hive.Runtime.StreamParser` | JSONL stream parsing (used by providers with JSON output) |
+| `Hive.Runtime.Settings` | Generates provider-specific workspace configuration |
+
+### Key Design Decisions
 
 - **Elixir/OTP** -- Supervision trees handle crash recovery, GenServers manage per-agent state, PubSub enables real-time messaging, Ports provide native process spawning
 - **SQLite** -- Zero-config, single-file persistence with full Ecto query support
 - **Git worktrees** -- Each bee gets an isolated working directory while sharing git objects, with sparse checkout excluding `.hive/` from bee view
+- **Provider-neutral plugin system** -- All model-specific logic lives behind the `Hive.Plugin.Model` behaviour; the core orchestration is provider-agnostic
 - **No tmux** -- Native Elixir processes are first-class citizens, giving better monitoring and cross-platform support
 
 For detailed architecture docs, see [`specs/ARCHITECTURE.md`](specs/ARCHITECTURE.md).
@@ -279,6 +355,9 @@ For detailed architecture docs, see [`specs/ARCHITECTURE.md`](specs/ARCHITECTURE
 ```bash
 # Run tests
 mix test
+
+# Run tests (excluding e2e)
+mix test --exclude e2e
 
 # Format code
 mix format

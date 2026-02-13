@@ -89,28 +89,30 @@
 - `Hive.Queen` GenServer with state: active jobs, bees, quests
 - Handle messages: `:create_job`, `:assign_job`, `:job_complete`
 - Subscribe to `waggle:queen` topic
-- `hive queen` - starts interactive Queen session (spawns Claude)
+- `hive queen` - starts interactive Queen session (spawns AI session)
 
 **Test:** Queen starts, handles job creation message
 
-**Demo:** `hive queen` starts Claude session with Queen context injected
+**Demo:** `hive queen` starts AI session with Queen context injected
 
 ---
 
-## Task 7: Claude Runtime Integration
+## Task 7: Model Provider Runtime Integration
 
-**Objective:** Spawn and monitor Claude processes
+**Objective:** Spawn and monitor AI CLI processes via plugin system
 
 **Implementation:**
-- `Hive.Runtime.Claude` module - spawn via Port
-- Generate `.claude/settings.json` with hooks pointing to `hive` CLI
-- Hooks: SessionStart → `hive prime`, Stop → `hive costs record`
-- `hive prime` - outputs context to stdout for Claude to capture
+- `Hive.Runtime.Models` facade - resolves active plugin, delegates spawn/parse/costs
+- `Hive.Plugin.Model` behaviour - provider-neutral contract for all model plugins
+- Built-in plugins: Claude, Copilot, Kimi (each with Runtime + Plugin module)
+- `Hive.Runtime.Terminal` - shared terminal handoff for interactive TUI providers
+- Provider-specific workspace setup via `workspace_setup/2` callback
+- `hive prime` - outputs context to stdout for the AI to capture
 - Monitor Port for exit, emit events
 
-**Test:** Spawn Claude, verify hooks file created, prime outputs context
+**Test:** Spawn AI, verify workspace config created, prime outputs context
 
-**Demo:** Spawn Claude process, show hooks file, demonstrate prime output
+**Demo:** Spawn AI process, show workspace config, demonstrate prime output
 
 ---
 
@@ -119,7 +121,7 @@
 **Objective:** Implement worker agents that execute jobs
 
 **Implementation:**
-- `Hive.Bee` GenServer - manages single Claude instance
+- `Hive.Bee` GenServer - manages single AI instance
 - Create git worktree (cell) for isolation
 - Inject job context via `hive prime`
 - Track state: `:starting`, `:working`, `:complete`, `:failed`
@@ -127,7 +129,7 @@
 
 **Test:** Spawn bee, verify worktree created, job context injected
 
-**Demo:** Queen creates job, bee spawns, show worktree and Claude working
+**Demo:** Queen creates job, bee spawns, show worktree and AI working
 
 ---
 
@@ -150,7 +152,7 @@
 
 ## Task 10: Transcript Watching & Cost Tracking
 
-**Objective:** Monitor Claude transcripts for token usage
+**Objective:** Monitor AI transcripts for token usage
 
 **Implementation:**
 - `Hive.TranscriptWatcher` GenServer using `:fs` library

@@ -23,7 +23,7 @@ Your workspace directory (e.g., `~/my-hive/`). Contains all projects, the Queen,
 
 ### Queen 👑
 
-The coordinator AI agent. A Claude Code instance with full context about your workspace. Start here - tell the Queen what you want to accomplish and she'll create jobs and spawn bees.
+The coordinator AI agent. An AI instance with full context about your workspace. Start here - tell the Queen what you want to accomplish and she'll create jobs and spawn bees.
 
 ### Comb 🍯
 
@@ -57,7 +57,7 @@ A patrol agent that monitors hive health. Checks for stuck bees, orphaned cells,
 
 ### Prime
 
-The context injection that happens when a Claude session starts. The `hive prime` command outputs role-specific context that Claude captures.
+The context injection that happens when an AI session starts. The `hive prime` command outputs role-specific context that the AI captures.
 
 ### Handoff
 
@@ -65,7 +65,7 @@ When a bee's context window fills up, it can "hand off" to a fresh session. Stat
 
 ### Transcript
 
-Claude's conversation log at `~/.claude/projects/*/transcript.jsonl`. The Hive watches this file to track token usage and costs.
+The AI's conversation log. The Hive watches transcript files to track token usage and costs.
 
 ## CLI Commands
 
@@ -82,3 +82,7 @@ Claude's conversation log at `~/.claude/projects/*/transcript.jsonl`. The Hive w
 | `hive costs` | Token costs |
 | `hive doctor` | Health checks |
 | `hive dashboard` | Web UI |
+| `hive plugin list` | List plugins |
+| `hive bee revive` | Revive a dead bee |
+| `hive comb rename` | Rename a comb |
+| `hive watch` | Live progress |
