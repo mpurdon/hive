@@ -8,12 +8,20 @@ defmodule Hive.MixProject do
       app: :hive,
       version: @version,
       elixir: "~> 1.15",
+      elixirc_paths: elixirc_paths(Mix.env()),
       start_permanent: Mix.env() == :prod,
       deps: deps(),
       escript: escript(),
       releases: releases()
     ]
   end
+
+  def cli do
+    [preferred_envs: ["hive.test.e2e": :test]]
+  end
+
+  defp elixirc_paths(:test), do: ["lib", "test/support"]
+  defp elixirc_paths(_), do: ["lib"]
 
   def application do
     [
@@ -49,6 +57,9 @@ defmodule Hive.MixProject do
       {:optimus, "~> 0.5"},
       {:toml, "~> 0.7"},
       {:req, "~> 0.5"},
+      {:term_ui, "~> 0.2.0"},
+      {:telemetry, "~> 1.2"},
+      {:gen_stage, "~> 1.2"},
       {:mox, "~> 1.1", only: :test}
     ]
   end

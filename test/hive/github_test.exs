@@ -30,7 +30,16 @@ defmodule Hive.GitHubTest do
   describe "create_pr/3" do
     test "returns error when comb has no github config" do
       comb = %{id: "cmb-1", name: "t", github_owner: nil, github_repo: nil}
-      cell = %{id: "cel-1", branch: "b", bee_id: "bee-1", comb_id: "cmb-1", worktree_path: "/tmp", status: "active"}
+
+      cell = %{
+        id: "cel-1",
+        branch: "b",
+        bee_id: "bee-1",
+        comb_id: "cmb-1",
+        worktree_path: "/tmp",
+        status: "active"
+      }
+
       job = %{id: "job-1", title: "t", status: "done", quest_id: "q", comb_id: "cmb-1"}
 
       assert {:error, :no_github_config} = GitHub.create_pr(comb, cell, job)

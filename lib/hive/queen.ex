@@ -204,7 +204,9 @@ defmodule Hive.Queen do
                 :ok ->
                   Hive.Bees.spawn(job_id, job.comb_id, state.hive_root)
                   |> case do
-                    {:ok, _bee} -> put_in(state.retry_counts[job_id], attempts + 1)
+                    {:ok, _bee} ->
+                      put_in(state.retry_counts[job_id], attempts + 1)
+
                     {:error, reason} ->
                       Logger.warning("Retry spawn failed for job #{job_id}: #{inspect(reason)}")
                       state
@@ -212,8 +214,14 @@ defmodule Hive.Queen do
 
                 {:error, :budget_exceeded} ->
                   Logger.warning("Budget exceeded for quest #{job.quest_id}, skipping retry")
-                  Hive.Waggle.send("queen", "queen", "budget_exceeded",
-                    "Quest #{job.quest_id} budget exceeded, job #{job_id} retry skipped")
+
+                  Hive.Waggle.send(
+                    "queen",
+                    "queen",
+                    "budget_exceeded",
+                    "Quest #{job.quest_id} budget exceeded, job #{job_id} retry skipped"
+                  )
+
                   state
               end
 
@@ -244,8 +252,14 @@ defmodule Hive.Queen do
       case Hive.Quests.get(quest_id) do
         {:ok, %{status: "completed"} = quest} ->
           Logger.info("Quest completed: #{quest.name} (#{quest_id})")
-          Hive.Waggle.send("system", "queen", "quest_completed",
-            "Quest \"#{quest.name}\" (#{quest_id}) — all jobs done")
+
+          Hive.Waggle.send(
+            "system",
+            "queen",
+            "quest_completed",
+            "Quest \"#{quest.name}\" (#{quest_id}) — all jobs done"
+          )
+
           state
 
         {:ok, quest} ->
@@ -266,6 +280,8 @@ defmodule Hive.Queen do
   rescue
     _ -> :ok
   end
+
+  defp spawn_ready_jobs(%{status: "planning"}, state), do: state
 
   defp spawn_ready_jobs(quest, state) do
     pending_jobs =
@@ -307,8 +323,8 @@ defmodule Hive.Queen do
 
     with :ok <- File.mkdir_p(queen_workspace),
          :ok <- setup_sparse_checkout(queen_workspace, state.hive_root),
-         :ok <- Hive.Runtime.Settings.generate_queen(state.hive_root, queen_workspace) do
-      Hive.Runtime.Claude.spawn_interactive(queen_workspace)
+         :ok <- maybe_generate_settings(:queen, state.hive_root, queen_workspace) do
+      Hive.Runtime.Models.spawn_interactive(queen_workspace)
     end
   end
 
@@ -317,7 +333,9 @@ defmodule Hive.Queen do
       case Hive.Git.sparse_checkout_init(queen_workspace) do
         :ok ->
           case Hive.Git.sparse_checkout_set(queen_workspace, [".hive"]) do
-            :ok -> :ok
+            :ok ->
+              :ok
+
             {:error, reason} ->
               Logger.warning("Sparse checkout set failed: #{reason}")
               :ok
@@ -334,6 +352,23 @@ defmodule Hive.Queen do
 
   defp queen_workspace_path(hive_root) do
     Path.join([hive_root, ".hive", "queen"])
+  end
+
+  defp maybe_generate_settings(:queen, hive_root, workspace) do
+    case Hive.Runtime.Models.workspace_setup("queen", hive_root) do
+      nil ->
+        :ok
+
+      settings ->
+        claude_dir = Path.join(workspace, ".claude")
+        settings_path = Path.join(claude_dir, "settings.json")
+
+        with :ok <- File.mkdir_p(claude_dir),
+             json = Jason.encode!(settings, pretty: true),
+             :ok <- File.write(settings_path, json) do
+          :ok
+        end
+    end
   end
 
   defp read_max_bees(hive_root) do

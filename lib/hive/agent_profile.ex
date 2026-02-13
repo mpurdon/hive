@@ -274,7 +274,7 @@ defmodule Hive.AgentProfile do
 
     prompt = build_generation_prompt(agent_key, agent_name, title, description)
 
-    case generate_via_claude(comb_path, prompt) do
+    case generate_via_model(comb_path, prompt) do
       {:ok, content} ->
         File.write!(agent_path, content)
         Logger.info("Agent profile generated: #{agent_path}")
@@ -399,10 +399,10 @@ defmodule Hive.AgentProfile do
     """
   end
 
-  defp generate_via_claude(comb_path, prompt) do
-    case Hive.Runtime.Claude.find_executable() do
+  defp generate_via_model(comb_path, prompt) do
+    case Hive.Runtime.Models.find_executable() do
       {:ok, _} ->
-        case Hive.Runtime.Claude.spawn_headless(comb_path, prompt, output_format: :text) do
+        case Hive.Runtime.Models.spawn_headless(prompt, comb_path, output_format: :text) do
           {:ok, port} ->
             collect_port_output(port)
 
@@ -411,7 +411,7 @@ defmodule Hive.AgentProfile do
         end
 
       {:error, :not_found} ->
-        {:error, :claude_not_found}
+        {:error, :model_not_found}
     end
   end
 

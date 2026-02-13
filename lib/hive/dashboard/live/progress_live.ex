@@ -12,7 +12,12 @@ defmodule Hive.Dashboard.ProgressLive do
       Process.send_after(self(), :refresh, @refresh_interval)
     end
 
-    {:ok, assign(socket, page_title: "Progress", current_path: "/progress", entries: Hive.Progress.all())}
+    {:ok,
+     assign(socket,
+       page_title: "Progress",
+       current_path: "/progress",
+       entries: Hive.Progress.all()
+     )}
   end
 
   @impl true

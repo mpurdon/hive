@@ -140,7 +140,10 @@ defmodule Hive.Dashboard.CostsLive do
   end
 
   defp format_cost(cost) when is_float(cost), do: "$#{:erlang.float_to_binary(cost, decimals: 4)}"
-  defp format_cost(cost) when is_integer(cost), do: "$#{:erlang.float_to_binary(cost * 1.0, decimals: 4)}"
+
+  defp format_cost(cost) when is_integer(cost),
+    do: "$#{:erlang.float_to_binary(cost * 1.0, decimals: 4)}"
+
   defp format_cost(_), do: "$0.0000"
 
   defp format_tokens(count) when count >= 1_000_000, do: "#{Float.round(count / 1_000_000, 1)}M"

@@ -165,12 +165,16 @@ defmodule Hive.BeesTest do
     end
 
     test "fails for active bee", ctx do
-      {:ok, bee} = Store.insert(:bees, %{name: "active-bee", status: "working", job_id: ctx.job.id})
+      {:ok, bee} =
+        Store.insert(:bees, %{name: "active-bee", status: "working", job_id: ctx.job.id})
+
       assert {:error, :bee_still_active} = Bees.revive(bee.id, ctx.hive_root)
     end
 
     test "fails with no cell", ctx do
-      {:ok, bee} = Store.insert(:bees, %{name: "no-cell-bee", status: "crashed", job_id: ctx.job.id})
+      {:ok, bee} =
+        Store.insert(:bees, %{name: "no-cell-bee", status: "crashed", job_id: ctx.job.id})
+
       assert {:error, :no_active_cell} = Bees.revive(bee.id, ctx.hive_root)
     end
 

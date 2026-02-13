@@ -157,7 +157,31 @@ defmodule Hive.Quests do
   end
 
   @doc """
+  Transitions a quest from "pending" to "planning" status.
+
+  Returns `{:ok, quest}` or `{:error, :not_found | :invalid_transition}`.
+  """
+  @spec set_planning(String.t()) :: {:ok, map()} | {:error, term()}
+  def set_planning(quest_id) do
+    case Store.get(:quests, quest_id) do
+      nil ->
+        {:error, :not_found}
+
+      %{status: "pending"} = quest ->
+        updated = %{quest | status: "planning"}
+        Store.put(:quests, updated)
+
+      _quest ->
+        {:error, :invalid_transition}
+    end
+  end
+
+  @doc """
   Recomputes and persists a quest's status from its current jobs.
+
+  If the quest is in "planning" status and has no jobs yet, the status is
+  preserved (not downgraded to "pending"). Once jobs exist, normal
+  computation resumes.
 
   Returns `{:ok, quest}` or `{:error, reason}`.
   """
@@ -165,9 +189,14 @@ defmodule Hive.Quests do
   def update_status!(quest_id) do
     with {:ok, quest} <- get(quest_id) do
       job_statuses = Enum.map(quest.jobs, & &1.status)
-      new_status = compute_status(job_statuses)
-      updated = %{quest | status: new_status} |> Map.delete(:jobs)
-      Store.put(:quests, updated)
+
+      if quest.status == "planning" and job_statuses == [] do
+        {:ok, quest |> Map.delete(:jobs)}
+      else
+        new_status = compute_status(job_statuses)
+        updated = %{quest | status: new_status} |> Map.delete(:jobs)
+        Store.put(:quests, updated)
+      end
     end
   end
 

@@ -47,9 +47,15 @@ defmodule Hive.Prime do
   defp build_queen_state_summary do
     bees = Store.all(:bees)
     active_bees = Enum.filter(bees, &(&1.status in ["working", "idle", "starting"]))
-    pending_quests = Store.filter(:quests, fn q -> q.status in ["pending", "active"] end)
+
+    pending_quests =
+      Store.filter(:quests, fn q -> q.status in ["pending", "active", "planning"] end)
+
     pending_jobs = Store.filter(:jobs, fn j -> j.status == "pending" end)
     recent_waggles = Hive.Waggle.list(to: "queen", limit: 10)
+
+    planning_quests = Enum.filter(pending_quests, &(&1.status == "planning"))
+    quest_specs_section = format_quest_specs(planning_quests)
 
     sections = [
       "---",
@@ -58,6 +64,7 @@ defmodule Hive.Prime do
       "### Pending Quests (#{length(pending_quests)})",
       format_quests(pending_quests),
       "",
+      quest_specs_section,
       "### Active Bees (#{length(active_bees)})",
       format_bees(active_bees),
       "",
@@ -123,6 +130,52 @@ defmodule Hive.Prime do
       "- #{read_marker} From #{w.from}: #{w.subject || "(no subject)"}"
     end)
     |> Enum.join("\n")
+  end
+
+  # -- Private: Quest Specs --------------------------------------------------
+
+  defp format_quest_specs([]), do: ""
+
+  defp format_quest_specs(planning_quests) do
+    sections =
+      Enum.flat_map(planning_quests, fn quest ->
+        phases = Hive.Specs.list_phases(quest.id)
+
+        if phases == [] do
+          []
+        else
+          phase_sections =
+            Enum.flat_map(phases, fn phase ->
+              case Hive.Specs.read(quest.id, phase) do
+                {:ok, content} ->
+                  truncated = truncate_spec(content, 100)
+                  ["#### #{String.capitalize(phase)}", "", truncated, ""]
+
+                {:error, _} ->
+                  []
+              end
+            end)
+
+          ["### Planning Specs: #{quest.name} (#{quest.id})", "" | phase_sections]
+        end
+      end)
+
+    case sections do
+      [] -> ""
+      _ -> Enum.join(sections, "\n") <> "\n"
+    end
+  end
+
+  defp truncate_spec(content, max_lines) do
+    lines = String.split(content, "\n")
+
+    if length(lines) > max_lines do
+      Enum.take(lines, max_lines)
+      |> Enum.join("\n")
+      |> Kernel.<>("\n\n(truncated — #{length(lines) - max_lines} more lines)")
+    else
+      content
+    end
   end
 
   # -- Private: Bee ----------------------------------------------------------

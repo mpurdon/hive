@@ -17,7 +17,8 @@ defmodule Hive.CellTest do
     repo_path = create_temp_git_repo()
 
     # Register the comb in the database
-    {:ok, comb} = Hive.Comb.add(repo_path, name: "cell-test-comb-#{:erlang.unique_integer([:positive])}")
+    {:ok, comb} =
+      Hive.Comb.add(repo_path, name: "cell-test-comb-#{:erlang.unique_integer([:positive])}")
 
     # Create a bee record
     {:ok, bee} = Store.insert(:bees, %{name: "test-bee", status: "starting"})

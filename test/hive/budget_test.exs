@@ -21,7 +21,10 @@ defmodule Hive.BudgetTest do
       })
 
     {:ok, bee} =
-      Store.insert(:bees, %{name: "budget-bee-#{:erlang.unique_integer([:positive])}", status: "starting"})
+      Store.insert(:bees, %{
+        name: "budget-bee-#{:erlang.unique_integer([:positive])}",
+        status: "starting"
+      })
 
     {:ok, job} =
       Jobs.create(%{title: "budget job", quest_id: quest.id, comb_id: comb.id})
@@ -37,7 +40,12 @@ defmodule Hive.BudgetTest do
     end
 
     test "sums costs for quest's bees", %{quest: quest, bee: bee} do
-      {:ok, _} = Costs.record(bee.id, %{input_tokens: 1000, output_tokens: 500, model: "claude-sonnet-4-20250514"})
+      {:ok, _} =
+        Costs.record(bee.id, %{
+          input_tokens: 1000,
+          output_tokens: 500,
+          model: "claude-sonnet-4-20250514"
+        })
 
       spent = Budget.spent_for(quest.id)
       assert spent > 0.0

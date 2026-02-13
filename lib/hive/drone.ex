@@ -144,11 +144,23 @@ defmodule Hive.Drone do
 
       cond do
         remaining < 0 ->
-          [%{name: "budget_check", status: :error,
-             message: "Quest #{quest.id} exceeded budget ($#{Float.round(-remaining, 2)} over)"}]
+          [
+            %{
+              name: "budget_check",
+              status: :error,
+              message: "Quest #{quest.id} exceeded budget ($#{Float.round(-remaining, 2)} over)"
+            }
+          ]
+
         pct_used > 80 ->
-          [%{name: "budget_check", status: :warn,
-             message: "Quest #{quest.id} at #{Float.round(pct_used, 0)}% of budget"}]
+          [
+            %{
+              name: "budget_check",
+              status: :warn,
+              message: "Quest #{quest.id} at #{Float.round(pct_used, 0)}% of budget"
+            }
+          ]
+
         true ->
           []
       end
@@ -162,9 +174,16 @@ defmodule Hive.Drone do
     |> Enum.flat_map(fn
       {:ok, _cell_id, :clean} ->
         []
+
       {:error, cell_id, :conflicts, files} ->
-        [%{name: "merge_conflicts", status: :warn,
-           message: "Cell #{cell_id} has conflicts in: #{Enum.join(files, ", ")}"}]
+        [
+          %{
+            name: "merge_conflicts",
+            status: :warn,
+            message: "Cell #{cell_id} has conflicts in: #{Enum.join(files, ", ")}"
+          }
+        ]
+
       _ ->
         []
     end)

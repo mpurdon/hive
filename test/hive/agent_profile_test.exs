@@ -92,7 +92,8 @@ defmodule Hive.AgentProfileTest do
     end
 
     test "Phoenix LiveView combo wins over bare phoenix" do
-      assert AgentProfile.detect_technology("Phoenix LiveView dashboard", "") == "phoenix-liveview"
+      assert AgentProfile.detect_technology("Phoenix LiveView dashboard", "") ==
+               "phoenix-liveview"
     end
 
     test "GenServer keyword detects elixir-otp" do
@@ -125,7 +126,9 @@ defmodule Hive.AgentProfileTest do
 
   describe "detect_from_comb/1" do
     test "detects strands-sdk from pyproject.toml with strands-agents dependency" do
-      tmp = Path.join(System.tmp_dir!(), "hive_comb_detect_#{:erlang.unique_integer([:positive])}")
+      tmp =
+        Path.join(System.tmp_dir!(), "hive_comb_detect_#{:erlang.unique_integer([:positive])}")
+
       File.mkdir_p!(tmp)
       on_exit(fn -> File.rm_rf!(tmp) end)
 
@@ -142,7 +145,9 @@ defmodule Hive.AgentProfileTest do
     end
 
     test "detects fastapi from pyproject.toml" do
-      tmp = Path.join(System.tmp_dir!(), "hive_comb_detect_#{:erlang.unique_integer([:positive])}")
+      tmp =
+        Path.join(System.tmp_dir!(), "hive_comb_detect_#{:erlang.unique_integer([:positive])}")
+
       File.mkdir_p!(tmp)
       on_exit(fn -> File.rm_rf!(tmp) end)
 
@@ -155,31 +160,43 @@ defmodule Hive.AgentProfileTest do
     end
 
     test "detects react from package.json with react dependency" do
-      tmp = Path.join(System.tmp_dir!(), "hive_comb_detect_#{:erlang.unique_integer([:positive])}")
+      tmp =
+        Path.join(System.tmp_dir!(), "hive_comb_detect_#{:erlang.unique_integer([:positive])}")
+
       File.mkdir_p!(tmp)
       on_exit(fn -> File.rm_rf!(tmp) end)
 
-      File.write!(Path.join(tmp, "package.json"), Jason.encode!(%{
-        "dependencies" => %{"react" => "^18.0.0", "react-dom" => "^18.0.0"}
-      }))
+      File.write!(
+        Path.join(tmp, "package.json"),
+        Jason.encode!(%{
+          "dependencies" => %{"react" => "^18.0.0", "react-dom" => "^18.0.0"}
+        })
+      )
 
       assert AgentProfile.detect_from_comb(tmp) == "react"
     end
 
     test "detects nextjs from package.json (framework beats library)" do
-      tmp = Path.join(System.tmp_dir!(), "hive_comb_detect_#{:erlang.unique_integer([:positive])}")
+      tmp =
+        Path.join(System.tmp_dir!(), "hive_comb_detect_#{:erlang.unique_integer([:positive])}")
+
       File.mkdir_p!(tmp)
       on_exit(fn -> File.rm_rf!(tmp) end)
 
-      File.write!(Path.join(tmp, "package.json"), Jason.encode!(%{
-        "dependencies" => %{"next" => "^14.0.0", "react" => "^18.0.0"}
-      }))
+      File.write!(
+        Path.join(tmp, "package.json"),
+        Jason.encode!(%{
+          "dependencies" => %{"next" => "^14.0.0", "react" => "^18.0.0"}
+        })
+      )
 
       assert AgentProfile.detect_from_comb(tmp) == "nextjs"
     end
 
     test "detects phoenix from mix.exs" do
-      tmp = Path.join(System.tmp_dir!(), "hive_comb_detect_#{:erlang.unique_integer([:positive])}")
+      tmp =
+        Path.join(System.tmp_dir!(), "hive_comb_detect_#{:erlang.unique_integer([:positive])}")
+
       File.mkdir_p!(tmp)
       on_exit(fn -> File.rm_rf!(tmp) end)
 
@@ -195,7 +212,9 @@ defmodule Hive.AgentProfileTest do
     end
 
     test "returns nil for empty directory" do
-      tmp = Path.join(System.tmp_dir!(), "hive_comb_detect_#{:erlang.unique_integer([:positive])}")
+      tmp =
+        Path.join(System.tmp_dir!(), "hive_comb_detect_#{:erlang.unique_integer([:positive])}")
+
       File.mkdir_p!(tmp)
       on_exit(fn -> File.rm_rf!(tmp) end)
 
@@ -285,12 +304,20 @@ defmodule Hive.AgentProfileTest do
 
   describe "install_agents/2" do
     test "copies agent files from comb to worktree" do
-      comb = Path.join(System.tmp_dir!(), "hive_install_agents_#{:erlang.unique_integer([:positive])}")
-      worktree = Path.join(System.tmp_dir!(), "hive_install_wt_#{:erlang.unique_integer([:positive])}")
+      comb =
+        Path.join(System.tmp_dir!(), "hive_install_agents_#{:erlang.unique_integer([:positive])}")
+
+      worktree =
+        Path.join(System.tmp_dir!(), "hive_install_wt_#{:erlang.unique_integer([:positive])}")
+
       comb_agents = Path.join(comb, ".claude/agents")
       File.mkdir_p!(comb_agents)
       File.mkdir_p!(worktree)
-      on_exit(fn -> File.rm_rf!(comb); File.rm_rf!(worktree) end)
+
+      on_exit(fn ->
+        File.rm_rf!(comb)
+        File.rm_rf!(worktree)
+      end)
 
       File.write!(Path.join(comb_agents, "elixir-expert.md"), "# Elixir Expert")
       File.write!(Path.join(comb_agents, "rust-expert.md"), "# Rust Expert")
@@ -303,13 +330,24 @@ defmodule Hive.AgentProfileTest do
     end
 
     test "does not overwrite existing agents in worktree" do
-      comb = Path.join(System.tmp_dir!(), "hive_install_noover_#{:erlang.unique_integer([:positive])}")
-      worktree = Path.join(System.tmp_dir!(), "hive_install_noover_wt_#{:erlang.unique_integer([:positive])}")
+      comb =
+        Path.join(System.tmp_dir!(), "hive_install_noover_#{:erlang.unique_integer([:positive])}")
+
+      worktree =
+        Path.join(
+          System.tmp_dir!(),
+          "hive_install_noover_wt_#{:erlang.unique_integer([:positive])}"
+        )
+
       comb_agents = Path.join(comb, ".claude/agents")
       wt_agents = Path.join(worktree, ".claude/agents")
       File.mkdir_p!(comb_agents)
       File.mkdir_p!(wt_agents)
-      on_exit(fn -> File.rm_rf!(comb); File.rm_rf!(worktree) end)
+
+      on_exit(fn ->
+        File.rm_rf!(comb)
+        File.rm_rf!(worktree)
+      end)
 
       File.write!(Path.join(comb_agents, "elixir-expert.md"), "# Comb Version")
       File.write!(Path.join(wt_agents, "elixir-expert.md"), "# Worktree Version")
@@ -320,11 +358,22 @@ defmodule Hive.AgentProfileTest do
     end
 
     test "is a no-op when comb has no agents dir" do
-      comb = Path.join(System.tmp_dir!(), "hive_install_noop_#{:erlang.unique_integer([:positive])}")
-      worktree = Path.join(System.tmp_dir!(), "hive_install_noop_wt_#{:erlang.unique_integer([:positive])}")
+      comb =
+        Path.join(System.tmp_dir!(), "hive_install_noop_#{:erlang.unique_integer([:positive])}")
+
+      worktree =
+        Path.join(
+          System.tmp_dir!(),
+          "hive_install_noop_wt_#{:erlang.unique_integer([:positive])}"
+        )
+
       File.mkdir_p!(comb)
       File.mkdir_p!(worktree)
-      on_exit(fn -> File.rm_rf!(comb); File.rm_rf!(worktree) end)
+
+      on_exit(fn ->
+        File.rm_rf!(comb)
+        File.rm_rf!(worktree)
+      end)
 
       assert :ok = AgentProfile.install_agents(comb, worktree)
 
@@ -334,7 +383,12 @@ defmodule Hive.AgentProfileTest do
 
   describe "list_agents/1" do
     test "returns empty list for directory without agents" do
-      tmp = Path.join(System.tmp_dir!(), "hive_agent_list_empty_#{:erlang.unique_integer([:positive])}")
+      tmp =
+        Path.join(
+          System.tmp_dir!(),
+          "hive_agent_list_empty_#{:erlang.unique_integer([:positive])}"
+        )
+
       File.mkdir_p!(tmp)
       on_exit(fn -> File.rm_rf!(tmp) end)
 
@@ -342,7 +396,9 @@ defmodule Hive.AgentProfileTest do
     end
 
     test "returns agent names from populated directory" do
-      tmp = Path.join(System.tmp_dir!(), "hive_agent_list_pop_#{:erlang.unique_integer([:positive])}")
+      tmp =
+        Path.join(System.tmp_dir!(), "hive_agent_list_pop_#{:erlang.unique_integer([:positive])}")
+
       agents_dir = Path.join(tmp, ".claude/agents")
       File.mkdir_p!(agents_dir)
 
@@ -357,7 +413,12 @@ defmodule Hive.AgentProfileTest do
     end
 
     test "ignores non-markdown files" do
-      tmp = Path.join(System.tmp_dir!(), "hive_agent_list_nomd_#{:erlang.unique_integer([:positive])}")
+      tmp =
+        Path.join(
+          System.tmp_dir!(),
+          "hive_agent_list_nomd_#{:erlang.unique_integer([:positive])}"
+        )
+
       agents_dir = Path.join(tmp, ".claude/agents")
       File.mkdir_p!(agents_dir)
 

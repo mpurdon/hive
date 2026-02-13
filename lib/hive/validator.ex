@@ -82,7 +82,7 @@ defmodule Hive.Validator do
       {:ok, diff} ->
         prompt = build_validation_prompt(job, diff)
 
-        case Hive.Runtime.Claude.spawn_headless(cell.worktree_path, prompt) do
+        case Hive.Runtime.Models.spawn_headless(prompt, cell.worktree_path) do
           {:ok, port} ->
             collect_validation_result(port)
 
@@ -138,8 +138,12 @@ defmodule Hive.Validator do
 
   defp get_diff(cell) do
     case System.cmd("git", ["diff", "HEAD~1..HEAD"],
-           cd: cell.worktree_path, stderr_to_stdout: true) do
-      {output, 0} -> {:ok, output}
+           cd: cell.worktree_path,
+           stderr_to_stdout: true
+         ) do
+      {output, 0} ->
+        {:ok, output}
+
       {_, _} ->
         # Fallback: diff against the working tree
         case System.cmd("git", ["diff"], cd: cell.worktree_path, stderr_to_stdout: true) do
@@ -176,11 +180,14 @@ defmodule Hive.Validator do
   defp parse_verdict(output) do
     # Try to extract JSON from the output
     case extract_json(output) do
-      {:ok, %{"verdict" => "pass"}} -> {:ok, :pass}
+      {:ok, %{"verdict" => "pass"}} ->
+        {:ok, :pass}
+
       {:ok, %{"verdict" => "fail"} = json} ->
         issues = Map.get(json, "issues", [])
         reasoning = Map.get(json, "reasoning", "")
         {:error, :validation_failed, %{reasoning: reasoning, issues: issues}}
+
       _ ->
         {:ok, :skip}
     end

@@ -7,6 +7,36 @@ defmodule Hive.CLI do
 
   @spec main([String.t()]) :: no_return()
   def main(argv) do
+    case extract_cmd_flag(argv) do
+      {:cmd, cmd_argv} ->
+        # Non-interactive mode: `hive -c <cmd>` or `hive --cmd <cmd>`
+        run_cli(cmd_argv)
+
+      :tui ->
+        # Interactive mode: launch TUI
+        launch_tui()
+
+      {:cli, argv} ->
+        # Has subcommands, run classic CLI
+        run_cli(argv)
+    end
+  end
+
+  defp extract_cmd_flag(argv) do
+    case argv do
+      ["-c" | rest] when rest != [] -> {:cmd, rest}
+      ["--cmd" | rest] when rest != [] -> {:cmd, rest}
+      [] -> :tui
+      _ -> {:cli, argv}
+    end
+  end
+
+  defp launch_tui do
+    ensure_store()
+    TermUI.Runtime.run(root: Hive.TUI.App)
+  end
+
+  defp run_cli(argv) do
     argv = expand_defaults(argv)
     optimus = build_optimus!()
 
@@ -46,7 +76,7 @@ defmodule Hive.CLI do
     Map.get(Map.get(r, section, %{}), key)
   end
 
-  @quest_subcommands ~w(new list show delete merge report close)
+  @quest_subcommands ~w(new list show delete merge report close spec)
 
   defp expand_defaults(["quest" | rest]) when rest != [] do
     case rest do
@@ -160,7 +190,12 @@ defmodule Hive.CLI do
     opts = []
     opts = if name, do: Keyword.put(opts, :name, name), else: opts
     opts = if merge_strategy, do: Keyword.put(opts, :merge_strategy, merge_strategy), else: opts
-    opts = if validation_command, do: Keyword.put(opts, :validation_command, validation_command), else: opts
+
+    opts =
+      if validation_command,
+        do: Keyword.put(opts, :validation_command, validation_command),
+        else: opts
+
     opts = if github_owner, do: Keyword.put(opts, :github_owner, github_owner), else: opts
     opts = if github_repo, do: Keyword.put(opts, :github_repo, github_repo), else: opts
 
@@ -488,11 +523,19 @@ defmodule Hive.CLI do
     case Hive.Bees.get(bee_id) do
       {:ok, bee} ->
         Hive.Store.put(:bees, %{bee | status: "stopped"})
+
         if bee.job_id do
           Hive.Jobs.complete(bee.job_id)
           Hive.Jobs.unblock_dependents(bee.job_id)
-          Hive.Waggle.send(bee_id, "queen", "job_complete", "Job #{bee.job_id} completed successfully")
+
+          Hive.Waggle.send(
+            bee_id,
+            "queen",
+            "job_complete",
+            "Job #{bee.job_id} completed successfully"
+          )
         end
+
         Format.success("Bee #{bee_id} marked as completed.")
 
       {:error, _} ->
@@ -507,10 +550,12 @@ defmodule Hive.CLI do
     case Hive.Bees.get(bee_id) do
       {:ok, bee} ->
         Hive.Store.put(:bees, %{bee | status: "crashed"})
+
         if bee.job_id do
           Hive.Jobs.fail(bee.job_id)
           Hive.Waggle.send(bee_id, "queen", "job_failed", "Job #{bee.job_id} failed: #{reason}")
         end
+
         Format.success("Bee #{bee_id} marked as failed: #{reason}")
 
       {:error, _} ->
@@ -524,7 +569,9 @@ defmodule Hive.CLI do
     with {:ok, hive_root} <- Hive.hive_dir() do
       case Hive.Bees.revive(dead_bee_id, hive_root) do
         {:ok, bee} ->
-          Format.success("Revived into bee \"#{bee.name}\" (#{bee.id}) using #{dead_bee_id}'s worktree")
+          Format.success(
+            "Revived into bee \"#{bee.name}\" (#{bee.id}) using #{dead_bee_id}'s worktree"
+          )
 
         {:error, reason} ->
           Format.error("Failed to revive: #{inspect(reason)}")
@@ -661,6 +708,13 @@ defmodule Hive.CLI do
 
         IO.puts("")
 
+        spec_phases = Hive.Specs.list_phases(id)
+
+        if spec_phases != [] do
+          IO.puts("Specs:  #{Enum.join(spec_phases, ", ")}")
+          IO.puts("")
+        end
+
         case quest.jobs do
           [] ->
             Format.info("No jobs in this quest.")
@@ -782,7 +836,12 @@ defmodule Hive.CLI do
 
       rows =
         Enum.map(summary.by_model, fn {model, data} ->
-          [model, "$#{:erlang.float_to_binary(data.cost, decimals: 4)}", "#{data.input_tokens}", "#{data.output_tokens}"]
+          [
+            model,
+            "$#{:erlang.float_to_binary(data.cost, decimals: 4)}",
+            "#{data.input_tokens}",
+            "#{data.output_tokens}"
+          ]
         end)
 
       Format.table(headers, rows)
@@ -795,7 +854,12 @@ defmodule Hive.CLI do
 
       rows =
         Enum.map(summary.by_bee, fn {bee_id, data} ->
-          [bee_id, "$#{:erlang.float_to_binary(data.cost, decimals: 4)}", "#{data.input_tokens}", "#{data.output_tokens}"]
+          [
+            bee_id,
+            "$#{:erlang.float_to_binary(data.cost, decimals: 4)}",
+            "#{data.input_tokens}",
+            "#{data.output_tokens}"
+          ]
         end)
 
       Format.table(headers, rows)
@@ -815,7 +879,10 @@ defmodule Hive.CLI do
     }
 
     {:ok, cost} = Hive.Costs.record(bee_id, attrs)
-    Format.success("Cost recorded: $#{:erlang.float_to_binary(cost.cost_usd, decimals: 6)} (#{cost.id})")
+
+    Format.success(
+      "Cost recorded: $#{:erlang.float_to_binary(cost.cost_usd, decimals: 6)} (#{cost.id})"
+    )
   end
 
   defp dispatch([:doctor], result) do
@@ -1012,11 +1079,14 @@ defmodule Hive.CLI do
     if bee_id do
       case Hive.Bees.get(bee_id) do
         {:ok, bee} ->
-          cell = Hive.Store.find_one(:cells, fn c -> c.bee_id == bee.id and c.status == "active" end)
+          cell =
+            Hive.Store.find_one(:cells, fn c -> c.bee_id == bee.id and c.status == "active" end)
 
           if cell do
             case Hive.Conflict.check(cell.id) do
-              {:ok, :clean} -> Format.success("No conflicts detected.")
+              {:ok, :clean} ->
+                Format.success("No conflicts detected.")
+
               {:error, :conflicts, files} ->
                 Format.warn("Conflicts detected in #{length(files)} file(s):")
                 Enum.each(files, fn f -> IO.puts("  #{f}") end)
@@ -1037,6 +1107,7 @@ defmodule Hive.CLI do
         Enum.each(results, fn
           {:ok, cell_id, :clean} ->
             IO.puts("#{cell_id}: clean")
+
           {:error, cell_id, :conflicts, files} ->
             Format.warn("#{cell_id}: conflicts in #{Enum.join(files, ", ")}")
         end)
@@ -1057,10 +1128,15 @@ defmodule Hive.CLI do
         Format.info("Running validation for bee #{bee_id}...")
 
         case Hive.Validator.validate(bee_id, job, cell.id) do
-          {:ok, :pass} -> Format.success("Validation passed.")
-          {:ok, :skip} -> Format.info("Validation skipped (no diff or Claude unavailable).")
+          {:ok, :pass} ->
+            Format.success("Validation passed.")
+
+          {:ok, :skip} ->
+            Format.info("Validation skipped (no diff or Claude unavailable).")
+
           {:error, reason, details} ->
             Format.error("Validation failed: #{inspect(reason)}")
+
             if is_map(details) do
               if details[:reasoning], do: IO.puts("Reasoning: #{details.reasoning}")
               if details[:issues], do: Enum.each(details.issues, fn i -> IO.puts("  - #{i}") end)
@@ -1093,7 +1169,9 @@ defmodule Hive.CLI do
           Format.error("Comb not found")
 
         is_nil(Map.get(comb, :github_owner)) || is_nil(Map.get(comb, :github_repo)) ->
-          Format.error("Comb #{comb.name} has no GitHub config. Use --github-owner and --github-repo when adding.")
+          Format.error(
+            "Comb #{comb.name} has no GitHub config. Use --github-owner and --github-repo when adding."
+          )
 
         true ->
           case Hive.GitHub.create_pr(comb, cell, job) do
@@ -1155,6 +1233,46 @@ defmodule Hive.CLI do
 
       {:error, :no_comb} ->
         Format.error("No comb specified. Use --comb or set one with `hive comb use`.")
+    end
+  end
+
+  defp dispatch([:quest, :spec, :write], result) do
+    quest_id = result_get(result, :args, :quest_id)
+    phase = result_get(result, :options, :phase)
+    content = result_get(result, :options, :content)
+
+    content =
+      if content do
+        content
+      else
+        IO.read(:stdio, :eof)
+      end
+
+    case Hive.Specs.write(quest_id, phase, content) do
+      {:ok, path} ->
+        Format.success("Spec written: #{path}")
+
+      {:error, {:invalid_phase, p}} ->
+        Format.error("Invalid phase: #{p}. Valid phases: #{Enum.join(Hive.Specs.phases(), ", ")}")
+
+      {:error, reason} ->
+        Format.error("Failed to write spec: #{inspect(reason)}")
+    end
+  end
+
+  defp dispatch([:quest, :spec, :show], result) do
+    quest_id = result_get(result, :args, :quest_id)
+    phase = result_get(result, :options, :phase)
+
+    case Hive.Specs.read(quest_id, phase) do
+      {:ok, content} ->
+        IO.puts(content)
+
+      {:error, :not_found} ->
+        Format.error("No #{phase} spec found for quest #{quest_id}")
+
+      {:error, {:invalid_phase, p}} ->
+        Format.error("Invalid phase: #{p}. Valid phases: #{Enum.join(Hive.Specs.phases(), ", ")}")
     end
   end
 
@@ -1516,7 +1634,8 @@ defmodule Hive.CLI do
             ],
             revive: [
               name: "revive",
-              about: "Revive a dead bee — spawn a new bee into its existing worktree to finish the work",
+              about:
+                "Revive a dead bee — spawn a new bee into its existing worktree to finish the work",
               args: [
                 bee_id: [
                   value_name: "BEE_ID",
@@ -1614,6 +1733,61 @@ defmodule Hive.CLI do
                   help: "Quest ID to close",
                   required: true,
                   parser: :string
+                ]
+              ]
+            ],
+            spec: [
+              name: "spec",
+              about: "Manage quest planning specs (requirements, design, tasks)",
+              subcommands: [
+                write: [
+                  name: "write",
+                  about: "Write a spec phase for a quest",
+                  args: [
+                    quest_id: [
+                      value_name: "QUEST_ID",
+                      help: "Quest identifier",
+                      required: true,
+                      parser: :string
+                    ]
+                  ],
+                  options: [
+                    phase: [
+                      short: "-p",
+                      long: "--phase",
+                      help: "Spec phase: requirements, design, or tasks",
+                      parser: :string,
+                      required: true
+                    ],
+                    content: [
+                      short: "-c",
+                      long: "--content",
+                      help: "Spec content (reads stdin if omitted)",
+                      parser: :string,
+                      required: false
+                    ]
+                  ]
+                ],
+                show: [
+                  name: "show",
+                  about: "Show a spec phase for a quest",
+                  args: [
+                    quest_id: [
+                      value_name: "QUEST_ID",
+                      help: "Quest identifier",
+                      required: true,
+                      parser: :string
+                    ]
+                  ],
+                  options: [
+                    phase: [
+                      short: "-p",
+                      long: "--phase",
+                      help: "Spec phase: requirements, design, or tasks",
+                      parser: :string,
+                      required: true
+                    ]
+                  ]
                 ]
               ]
             ]

@@ -172,9 +172,11 @@ defmodule Hive.Bee.Worker do
 
   @impl true
   def handle_info({port, {:data, data}}, %{port: port} = state) do
-    events = Hive.Runtime.StreamParser.parse_chunk(data)
+    events = Hive.Runtime.Models.parse_output(data)
     update_progress(state.bee_id, events)
-    {:noreply, %{state | output: [state.output, data], parsed_events: state.parsed_events ++ events}}
+
+    {:noreply,
+     %{state | output: [state.output, data], parsed_events: state.parsed_events ++ events}}
   end
 
   def handle_info({port, {:exit_status, 0}}, %{port: port} = state) do
@@ -252,7 +254,9 @@ defmodule Hive.Bee.Worker do
         {:error, :bee_not_found}
 
       bee ->
-        updated = Map.merge(bee, %{status: "working", cell_path: cell.worktree_path, pid: inspect(self())})
+        updated =
+          Map.merge(bee, %{status: "working", cell_path: cell.worktree_path, pid: inspect(self())})
+
         Store.put(:bees, updated)
         :ok
     end
@@ -281,7 +285,7 @@ defmodule Hive.Bee.Worker do
     case executable do
       nil ->
         # Settings are generated during cell creation (Hive.Cell.create/3)
-        Hive.Runtime.Claude.spawn_headless(cell.worktree_path, prompt)
+        Hive.Runtime.Models.spawn_headless(prompt, cell.worktree_path)
 
       exe_path ->
         # Testing path: use provided executable instead of Claude
@@ -328,7 +332,9 @@ defmodule Hive.Bee.Worker do
     update_bee_status(state.bee_id, "stopped")
 
     case Hive.Jobs.get(state.job_id) do
-      {:ok, %{status: "done"}} -> :ok
+      {:ok, %{status: "done"}} ->
+        :ok
+
       _ ->
         Hive.Jobs.complete(state.job_id)
         Hive.Jobs.unblock_dependents(state.job_id)
@@ -342,7 +348,7 @@ defmodule Hive.Bee.Worker do
         maybe_check_conflicts(state)
         maybe_merge_back(state)
 
-        session_id = Hive.Runtime.StreamParser.extract_session_id(state.parsed_events)
+        session_id = Hive.Runtime.Models.extract_session_id(state.parsed_events)
         body = "Job #{state.job_id} completed successfully"
         body = if session_id, do: body <> "\nSession ID: #{session_id}", else: body
 
@@ -351,8 +357,13 @@ defmodule Hive.Bee.Worker do
       {:error, reason} ->
         Logger.warning("Validation failed for bee #{state.bee_id}: #{inspect(reason)}")
         Hive.Jobs.fail(state.job_id)
-        Hive.Waggle.send(state.bee_id, "queen", "validation_failed",
-          "Job #{state.job_id} failed validation: #{inspect(reason)}")
+
+        Hive.Waggle.send(
+          state.bee_id,
+          "queen",
+          "validation_failed",
+          "Job #{state.job_id} failed validation: #{inspect(reason)}"
+        )
     end
 
     Hive.Progress.clear(state.bee_id)
@@ -374,7 +385,7 @@ defmodule Hive.Bee.Worker do
 
   defp record_costs_from_events(state) do
     state.parsed_events
-    |> Hive.Runtime.StreamParser.extract_costs()
+    |> Hive.Runtime.Models.extract_costs()
     |> Enum.each(fn cost_data ->
       Hive.Costs.record(state.bee_id, cost_data)
     end)
@@ -388,7 +399,11 @@ defmodule Hive.Bee.Worker do
             :ok
 
           comb when comb.path != nil ->
-            Hive.AgentProfile.ensure_agent(comb.path, %{title: job.title, description: job.description})
+            Hive.AgentProfile.ensure_agent(comb.path, %{
+              title: job.title,
+              description: job.description
+            })
+
             Hive.AgentProfile.install_agents(comb.path, cell.worktree_path)
             :ok
 
@@ -409,6 +424,7 @@ defmodule Hive.Bee.Worker do
 
         {:error, reason} ->
           Logger.warning("Merge-back failed for bee #{state.bee_id}: #{inspect(reason)}")
+
           Hive.Waggle.send(
             state.bee_id,
             "queen",
@@ -423,18 +439,9 @@ defmodule Hive.Bee.Worker do
   end
 
   defp update_progress(bee_id, events) do
-    Enum.each(events, fn event ->
-      case event do
-        %{"type" => "tool_use", "name" => tool} ->
-          file = get_in(event, ["input", "file_path"]) || ""
-          Hive.Progress.update(bee_id, %{tool: tool, file: file, message: "Using #{tool}"})
-
-        %{"type" => "assistant", "content" => content} when is_binary(content) ->
-          Hive.Progress.update(bee_id, %{tool: nil, file: nil, message: String.slice(content, 0, 120)})
-
-        _ ->
-          :ok
-      end
+    Hive.Runtime.Models.progress_from_events(events)
+    |> Enum.each(fn progress ->
+      Hive.Progress.update(bee_id, progress)
     end)
   rescue
     _ -> :ok
@@ -464,8 +471,13 @@ defmodule Hive.Bee.Worker do
 
         {:error, :conflicts, files} ->
           Logger.warning("Conflicts detected for bee #{state.bee_id}: #{inspect(files)}")
-          Hive.Waggle.send(state.bee_id, "queen", "merge_conflict_warning",
-            "Conflicts in: #{Enum.join(files, ", ")}")
+
+          Hive.Waggle.send(
+            state.bee_id,
+            "queen",
+            "merge_conflict_warning",
+            "Conflicts in: #{Enum.join(files, ", ")}"
+          )
 
         _ ->
           :ok

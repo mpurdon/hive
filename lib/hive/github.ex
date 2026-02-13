@@ -26,7 +26,10 @@ defmodule Hive.GitHub do
         body: "Automated PR from Hive bee.\n\nJob: #{job.id}\n#{job.description || ""}"
       }
 
-      case Req.post(client, url: "/repos/#{comb.github_owner}/#{comb.github_repo}/pulls", json: body) do
+      case Req.post(client,
+             url: "/repos/#{comb.github_owner}/#{comb.github_repo}/pulls",
+             json: body
+           ) do
         {:ok, %{status: status, body: resp}} when status in [201, 200] ->
           {:ok, resp["html_url"]}
 
@@ -48,10 +51,16 @@ defmodule Hive.GitHub do
     with {:ok, client} <- client(comb) do
       case Req.patch(client,
              url: "/repos/#{comb.github_owner}/#{comb.github_repo}/issues/#{issue_number}",
-             json: %{state: "closed"}) do
-        {:ok, %{status: 200}} -> :ok
-        {:ok, %{status: status, body: resp}} -> {:error, "GitHub API error #{status}: #{inspect(resp)}"}
-        {:error, reason} -> {:error, reason}
+             json: %{state: "closed"}
+           ) do
+        {:ok, %{status: 200}} ->
+          :ok
+
+        {:ok, %{status: status, body: resp}} ->
+          {:error, "GitHub API error #{status}: #{inspect(resp)}"}
+
+        {:error, reason} ->
+          {:error, reason}
       end
     end
   end
@@ -63,10 +72,16 @@ defmodule Hive.GitHub do
     with {:ok, client} <- client(comb) do
       case Req.post(client,
              url: "/repos/#{comb.github_owner}/#{comb.github_repo}/issues",
-             json: %{title: title, body: body}) do
-        {:ok, %{status: 201, body: resp}} -> {:ok, resp}
-        {:ok, %{status: status, body: resp}} -> {:error, "GitHub API error #{status}: #{inspect(resp)}"}
-        {:error, reason} -> {:error, reason}
+             json: %{title: title, body: body}
+           ) do
+        {:ok, %{status: 201, body: resp}} ->
+          {:ok, resp}
+
+        {:ok, %{status: status, body: resp}} ->
+          {:error, "GitHub API error #{status}: #{inspect(resp)}"}
+
+        {:error, reason} ->
+          {:error, reason}
       end
     end
   end
@@ -79,10 +94,16 @@ defmodule Hive.GitHub do
 
       case Req.get(client,
              url: "/repos/#{comb.github_owner}/#{comb.github_repo}/issues",
-             params: [state: state, per_page: 30]) do
-        {:ok, %{status: 200, body: issues}} -> {:ok, issues}
-        {:ok, %{status: status, body: resp}} -> {:error, "GitHub API error #{status}: #{inspect(resp)}"}
-        {:error, reason} -> {:error, reason}
+             params: [state: state, per_page: 30]
+           ) do
+        {:ok, %{status: 200, body: issues}} ->
+          {:ok, issues}
+
+        {:ok, %{status: status, body: resp}} ->
+          {:error, "GitHub API error #{status}: #{inspect(resp)}"}
+
+        {:error, reason} ->
+          {:error, reason}
       end
     end
   end
@@ -92,11 +113,18 @@ defmodule Hive.GitHub do
   def add_comment(comb, issue_number, body) do
     with {:ok, client} <- client(comb) do
       case Req.post(client,
-             url: "/repos/#{comb.github_owner}/#{comb.github_repo}/issues/#{issue_number}/comments",
-             json: %{body: body}) do
-        {:ok, %{status: 201}} -> :ok
-        {:ok, %{status: status, body: resp}} -> {:error, "GitHub API error #{status}: #{inspect(resp)}"}
-        {:error, reason} -> {:error, reason}
+             url:
+               "/repos/#{comb.github_owner}/#{comb.github_repo}/issues/#{issue_number}/comments",
+             json: %{body: body}
+           ) do
+        {:ok, %{status: 201}} ->
+          :ok
+
+        {:ok, %{status: status, body: resp}} ->
+          {:error, "GitHub API error #{status}: #{inspect(resp)}"}
+
+        {:error, reason} ->
+          {:error, reason}
       end
     end
   end

@@ -246,8 +246,12 @@ defmodule Hive.Jobs do
     case Store.find_one(:job_dependencies, fn d ->
            d.job_id == job_id and d.depends_on_id == depends_on_id
          end) do
-      nil -> {:error, :not_found}
-      dep -> Store.delete(:job_dependencies, dep.id); :ok
+      nil ->
+        {:error, :not_found}
+
+      dep ->
+        Store.delete(:job_dependencies, dep.id)
+        :ok
     end
   end
 

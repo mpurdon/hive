@@ -34,6 +34,7 @@ defmodule Hive.CLI.Format do
       end)
 
     separator = widths |> Enum.map(&String.duplicate("-", &1)) |> Enum.join("-+-")
+
     format_row = fn row ->
       row
       |> Enum.zip(widths)

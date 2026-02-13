@@ -7,21 +7,27 @@ defmodule Hive.TranscriptTest do
 
   describe "parse_file/1" do
     test "parses valid JSONL content" do
-      path = write_transcript([
-        %{"type" => "user", "message" => "hello"},
-        %{"type" => "result", "usage" => %{"input_tokens" => 100, "output_tokens" => 50}, "model" => "claude-sonnet-4-20250514"}
-      ])
+      path =
+        write_transcript([
+          %{"type" => "user", "message" => "hello"},
+          %{
+            "type" => "result",
+            "usage" => %{"input_tokens" => 100, "output_tokens" => 50},
+            "model" => "claude-sonnet-4-20250514"
+          }
+        ])
 
       assert {:ok, entries} = Transcript.parse_file(path)
       assert length(entries) == 2
     end
 
     test "skips malformed lines" do
-      path = write_raw_transcript("""
-      {"type": "user", "message": "hello"}
-      this is not json
-      {"type": "result", "usage": {"input_tokens": 100}}
-      """)
+      path =
+        write_raw_transcript("""
+        {"type": "user", "message": "hello"}
+        this is not json
+        {"type": "result", "usage": {"input_tokens": 100}}
+        """)
 
       assert {:ok, entries} = Transcript.parse_file(path)
       assert length(entries) == 2
@@ -96,9 +102,17 @@ defmodule Hive.TranscriptTest do
 
     test "extracts multiple cost entries" do
       entries = [
-        %{"type" => "result", "usage" => %{"input_tokens" => 100, "output_tokens" => 50}, "model" => "claude-sonnet-4-20250514"},
+        %{
+          "type" => "result",
+          "usage" => %{"input_tokens" => 100, "output_tokens" => 50},
+          "model" => "claude-sonnet-4-20250514"
+        },
         %{"type" => "user", "message" => "more work"},
-        %{"type" => "result", "usage" => %{"input_tokens" => 200, "output_tokens" => 100}, "model" => "claude-sonnet-4-20250514"}
+        %{
+          "type" => "result",
+          "usage" => %{"input_tokens" => 200, "output_tokens" => 100},
+          "model" => "claude-sonnet-4-20250514"
+        }
       ]
 
       costs = Transcript.extract_costs(entries)
@@ -117,7 +131,12 @@ defmodule Hive.TranscriptTest do
       assert offset1 > 0
 
       # Append more content
-      line2 = Jason.encode!(%{"type" => "result", "usage" => %{"input_tokens" => 100, "output_tokens" => 50}})
+      line2 =
+        Jason.encode!(%{
+          "type" => "result",
+          "usage" => %{"input_tokens" => 100, "output_tokens" => 50}
+        })
+
       File.write!(path, line1 <> "\n" <> line2 <> "\n")
 
       {entries2, offset2} = Transcript.parse_from_offset(path, offset1)

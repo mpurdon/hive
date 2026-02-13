@@ -40,6 +40,7 @@ defmodule Hive.Runtime.ClaudeTest do
 
     test "stop/1 is safe to call on an already-exited port" do
       port = Port.open({:spawn, "echo hello"}, [:binary, :exit_status])
+
       receive do
         {^port, {:exit_status, _}} -> :ok
       after
@@ -53,7 +54,10 @@ defmodule Hive.Runtime.ClaudeTest do
   describe "spawn_headless/3" do
     test "returns error for invalid working directory" do
       assert {:error, :invalid_working_dir} =
-               Claude.spawn_headless("/nonexistent/dir/#{:erlang.unique_integer([:positive])}", "hello")
+               Claude.spawn_headless(
+                 "/nonexistent/dir/#{:erlang.unique_integer([:positive])}",
+                 "hello"
+               )
     end
 
     test "returns error when claude is not found" do
@@ -66,7 +70,9 @@ defmodule Hive.Runtime.ClaudeTest do
       System.put_env("PATH", original_path)
 
       case result do
-        {:error, :not_found} -> assert true
+        {:error, :not_found} ->
+          assert true
+
         {:ok, port} ->
           # Claude was found in a common location even without PATH
           Claude.stop(port)

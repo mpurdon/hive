@@ -22,15 +22,12 @@ defmodule Hive.Runtime.Settings do
   """
   @spec generate(String.t(), String.t(), String.t()) :: :ok | {:error, term()}
   def generate(bee_id, hive_root, working_dir) do
-    settings = build_settings(bee_id, hive_root)
+    case Hive.Runtime.Models.workspace_setup(bee_id, hive_root) do
+      nil ->
+        :ok
 
-    claude_dir = Path.join(working_dir, ".claude")
-    settings_path = Path.join(claude_dir, "settings.json")
-
-    with :ok <- File.mkdir_p(claude_dir),
-         json = Jason.encode!(settings, pretty: true),
-         :ok <- File.write(settings_path, json) do
-      :ok
+      settings ->
+        write_settings_json(working_dir, settings)
     end
   end
 
@@ -110,15 +107,12 @@ defmodule Hive.Runtime.Settings do
   """
   @spec generate_queen(String.t(), String.t()) :: :ok | {:error, term()}
   def generate_queen(hive_root, queen_workspace) do
-    settings = build_queen_settings(hive_root)
+    case Hive.Runtime.Models.workspace_setup("queen", hive_root) do
+      nil ->
+        :ok
 
-    claude_dir = Path.join(queen_workspace, ".claude")
-    settings_path = Path.join(claude_dir, "settings.json")
-
-    with :ok <- File.mkdir_p(claude_dir),
-         json = Jason.encode!(settings, pretty: true),
-         :ok <- File.write(settings_path, json) do
-      :ok
+      settings ->
+        write_settings_json(queen_workspace, settings)
     end
   end
 
@@ -136,6 +130,17 @@ defmodule Hive.Runtime.Settings do
   end
 
   # -- Private ---------------------------------------------------------------
+
+  defp write_settings_json(working_dir, settings) do
+    claude_dir = Path.join(working_dir, ".claude")
+    settings_path = Path.join(claude_dir, "settings.json")
+
+    with :ok <- File.mkdir_p(claude_dir),
+         json = Jason.encode!(settings, pretty: true),
+         :ok <- File.write(settings_path, json) do
+      :ok
+    end
+  end
 
   defp queen_allowed_tools(hive_bin) do
     [

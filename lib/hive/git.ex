@@ -179,7 +179,9 @@ defmodule Hive.Git do
   @spec current_branch(String.t()) :: {:ok, String.t()} | {:error, String.t()}
   def current_branch(repo_path) do
     case System.cmd("git", ["rev-parse", "--abbrev-ref", "HEAD"],
-           cd: repo_path, stderr_to_stdout: true) do
+           cd: repo_path,
+           stderr_to_stdout: true
+         ) do
       {output, 0} -> {:ok, String.trim(output)}
       {output, _code} -> {:error, String.trim(output)}
     end
@@ -188,8 +190,7 @@ defmodule Hive.Git do
   @doc "Checks out a branch."
   @spec checkout(String.t(), String.t()) :: :ok | {:error, String.t()}
   def checkout(repo_path, branch) do
-    case System.cmd("git", ["checkout", branch],
-           cd: repo_path, stderr_to_stdout: true) do
+    case System.cmd("git", ["checkout", branch], cd: repo_path, stderr_to_stdout: true) do
       {_output, 0} -> :ok
       {output, _code} -> {:error, String.trim(output)}
     end
@@ -213,7 +214,9 @@ defmodule Hive.Git do
   @spec branch_exists?(String.t(), String.t()) :: boolean()
   def branch_exists?(repo_path, branch) do
     case System.cmd("git", ["rev-parse", "--verify", "refs/heads/#{branch}"],
-           cd: repo_path, stderr_to_stdout: true) do
+           cd: repo_path,
+           stderr_to_stdout: true
+         ) do
       {_output, 0} -> true
       _ -> false
     end
@@ -223,7 +226,9 @@ defmodule Hive.Git do
   @spec branch_create(String.t(), String.t(), String.t()) :: :ok | {:error, String.t()}
   def branch_create(repo_path, branch, base) do
     case System.cmd("git", ["checkout", "-b", branch, base],
-           cd: repo_path, stderr_to_stdout: true) do
+           cd: repo_path,
+           stderr_to_stdout: true
+         ) do
       {_output, 0} -> :ok
       {output, _code} -> {:error, String.trim(output)}
     end

@@ -12,7 +12,9 @@ defmodule Hive.ConflictTest do
     on_exit(fn -> File.rm_rf!(store_dir) end)
 
     # Create a temporary git repo for testing
-    tmp_dir = Path.join(System.tmp_dir!(), "hive_conflict_test_#{:erlang.unique_integer([:positive])}")
+    tmp_dir =
+      Path.join(System.tmp_dir!(), "hive_conflict_test_#{:erlang.unique_integer([:positive])}")
+
     File.mkdir_p!(tmp_dir)
 
     System.cmd("git", ["init"], cd: tmp_dir)
@@ -29,7 +31,10 @@ defmodule Hive.ConflictTest do
       })
 
     {:ok, bee} =
-      Store.insert(:bees, %{name: "conflict-bee-#{:erlang.unique_integer([:positive])}", status: "starting"})
+      Store.insert(:bees, %{
+        name: "conflict-bee-#{:erlang.unique_integer([:positive])}",
+        status: "starting"
+      })
 
     on_exit(fn -> File.rm_rf(tmp_dir) end)
 

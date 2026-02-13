@@ -113,7 +113,7 @@ defmodule Hive.QuickStart do
   end
 
   defp has_claude? do
-    case Hive.Runtime.Claude.find_executable() do
+    case Hive.Runtime.Models.find_executable() do
       {:ok, _} -> true
       _ -> false
     end

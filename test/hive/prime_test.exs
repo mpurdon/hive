@@ -56,6 +56,54 @@ defmodule Hive.PrimeTest do
       {:ok, markdown} = Prime.prime(:queen, hive_root)
       assert markdown =~ "busy-bee"
     end
+
+    test "includes planning quests in state summary" do
+      hive_root = create_hive_workspace()
+
+      {:ok, quest} =
+        Store.insert(:quests, %{name: "plan-quest", goal: "Plan something", status: "planning"})
+
+      {:ok, markdown} = Prime.prime(:queen, hive_root)
+      assert markdown =~ "plan-quest"
+      assert markdown =~ quest.id
+    end
+
+    test "includes spec content for planning quests" do
+      hive_root = create_hive_workspace()
+
+      # Point HIVE_PATH so Specs can find the .hive dir
+      System.put_env("HIVE_PATH", hive_root)
+      on_exit(fn -> System.delete_env("HIVE_PATH") end)
+
+      {:ok, quest} =
+        Store.insert(:quests, %{name: "spec-quest", goal: "Spec something", status: "planning"})
+
+      Hive.Specs.write(quest.id, "requirements", "# Requirements\n\n- FR-1: Do the thing")
+
+      {:ok, markdown} = Prime.prime(:queen, hive_root)
+      assert markdown =~ "Planning Specs: spec-quest"
+      assert markdown =~ "Requirements"
+      assert markdown =~ "FR-1: Do the thing"
+    end
+
+    test "truncates long spec content" do
+      hive_root = create_hive_workspace()
+
+      System.put_env("HIVE_PATH", hive_root)
+      on_exit(fn -> System.delete_env("HIVE_PATH") end)
+
+      {:ok, quest} =
+        Store.insert(:quests, %{name: "long-spec", goal: "Long spec", status: "planning"})
+
+      long_content = Enum.map(1..150, fn i -> "Line #{i}" end) |> Enum.join("\n")
+      Hive.Specs.write(quest.id, "requirements", long_content)
+
+      {:ok, markdown} = Prime.prime(:queen, hive_root)
+      assert markdown =~ "(truncated"
+      assert markdown =~ "Line 1"
+      # Line 150 should be truncated away
+      refute markdown =~ "Line 150"
+    end
   end
 
   describe "prime(:bee, bee_id)" do

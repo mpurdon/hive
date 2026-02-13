@@ -50,7 +50,9 @@ defmodule Hive.ValidatorTest do
 
   describe "run_custom_validation/2" do
     test "runs a passing command" do
-      tmp_dir = Path.join(System.tmp_dir!(), "hive_val_test_#{:erlang.unique_integer([:positive])}")
+      tmp_dir =
+        Path.join(System.tmp_dir!(), "hive_val_test_#{:erlang.unique_integer([:positive])}")
+
       File.mkdir_p!(tmp_dir)
       on_exit(fn -> File.rm_rf(tmp_dir) end)
 
@@ -67,7 +69,9 @@ defmodule Hive.ValidatorTest do
     end
 
     test "returns error for failing command" do
-      tmp_dir = Path.join(System.tmp_dir!(), "hive_val_test_#{:erlang.unique_integer([:positive])}")
+      tmp_dir =
+        Path.join(System.tmp_dir!(), "hive_val_test_#{:erlang.unique_integer([:positive])}")
+
       File.mkdir_p!(tmp_dir)
       on_exit(fn -> File.rm_rf(tmp_dir) end)
 

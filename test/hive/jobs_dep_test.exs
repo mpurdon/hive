@@ -29,7 +29,12 @@ defmodule Hive.JobsDepTest do
   end
 
   defp create_bee do
-    {:ok, bee} = Store.insert(:bees, %{name: "test-bee-#{:erlang.unique_integer([:positive])}", status: "starting"})
+    {:ok, bee} =
+      Store.insert(:bees, %{
+        name: "test-bee-#{:erlang.unique_integer([:positive])}",
+        status: "starting"
+      })
+
     bee
   end
 

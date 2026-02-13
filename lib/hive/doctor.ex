@@ -110,12 +110,16 @@ defmodule Hive.Doctor do
   end
 
   defp check_claude_installed do
-    case Hive.Runtime.Claude.find_executable() do
+    case Hive.Runtime.Models.find_executable() do
       {:ok, path} ->
         result(:claude_installed, :ok, "Found at #{path}")
 
       {:error, :not_found} ->
-        result(:claude_installed, :error, "Claude CLI not found. Install from https://claude.ai/cli")
+        result(
+          :claude_installed,
+          :error,
+          "Claude CLI not found. Install from https://claude.ai/cli"
+        )
     end
   end
 
@@ -245,7 +249,11 @@ defmodule Hive.Doctor do
 
         cond do
           size_mb > 1024 ->
-            result(:disk_space, :warn, ".hive directory is #{format_size(size_bytes)} (over 1 GB)")
+            result(
+              :disk_space,
+              :warn,
+              ".hive directory is #{format_size(size_bytes)} (over 1 GB)"
+            )
 
           true ->
             result(:disk_space, :ok, ".hive directory is #{format_size(size_bytes)}")

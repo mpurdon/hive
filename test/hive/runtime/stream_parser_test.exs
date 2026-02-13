@@ -6,7 +6,9 @@ defmodule Hive.Runtime.StreamParserTest do
   describe "parse_chunk/1" do
     test "parses a single JSON line" do
       data = ~s({"type":"system","model":"claude-sonnet-4-20250514"}\n)
-      assert [%{"type" => "system", "model" => "claude-sonnet-4-20250514"}] = StreamParser.parse_chunk(data)
+
+      assert [%{"type" => "system", "model" => "claude-sonnet-4-20250514"}] =
+               StreamParser.parse_chunk(data)
     end
 
     test "parses multiple JSON lines" do
@@ -137,7 +139,11 @@ defmodule Hive.Runtime.StreamParserTest do
   describe "extract_session_id/1" do
     test "extracts session_id from a system event" do
       events = [
-        %{"type" => "system", "session_id" => "sess-abc123", "model" => "claude-sonnet-4-20250514"},
+        %{
+          "type" => "system",
+          "session_id" => "sess-abc123",
+          "model" => "claude-sonnet-4-20250514"
+        },
         %{"type" => "assistant", "message" => %{"content" => "hello"}},
         %{"type" => "result", "usage" => %{"input_tokens" => 10, "output_tokens" => 5}}
       ]

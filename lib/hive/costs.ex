@@ -8,23 +8,6 @@ defmodule Hive.Costs do
 
   alias Hive.Store
 
-  # -- Pricing tables (USD per million tokens) ---------------------------------
-
-  @pricing %{
-    "claude-sonnet-4-20250514" => %{
-      input: 3.0,
-      output: 15.0,
-      cache_read: 0.30,
-      cache_write: 3.75
-    },
-    "claude-opus-4-20250514" => %{
-      input: 15.0,
-      output: 75.0,
-      cache_read: 1.50,
-      cache_write: 18.75
-    }
-  }
-
   @default_model "claude-sonnet-4-20250514"
 
   # -- Public API --------------------------------------------------------------
@@ -119,8 +102,11 @@ defmodule Hive.Costs do
   """
   @spec calculate_cost(map()) :: float()
   def calculate_cost(attrs) do
+    pricing = Hive.Runtime.Models.pricing()
+    pricing = if map_size(pricing) > 0, do: pricing, else: default_pricing()
+
     model = Map.get(attrs, :model) || Map.get(attrs, "model") || @default_model
-    prices = Map.get(@pricing, model, @pricing[@default_model])
+    prices = Map.get(pricing, model, pricing[@default_model] || default_sonnet_prices())
 
     input = token_count(attrs, :input_tokens) * prices.input
     output = token_count(attrs, :output_tokens) * prices.output
@@ -132,6 +118,23 @@ defmodule Hive.Costs do
   end
 
   # -- Private helpers ---------------------------------------------------------
+
+  # Fallback pricing table — ensures existing tests pass without Plugin.Manager running
+  defp default_pricing do
+    %{
+      "claude-sonnet-4-20250514" => default_sonnet_prices(),
+      "claude-opus-4-20250514" => %{
+        input: 15.0,
+        output: 75.0,
+        cache_read: 1.50,
+        cache_write: 18.75
+      }
+    }
+  end
+
+  defp default_sonnet_prices do
+    %{input: 3.0, output: 15.0, cache_read: 0.30, cache_write: 3.75}
+  end
 
   defp broadcast_cost_update(cost) do
     Phoenix.PubSub.broadcast(Hive.PubSub, "hive:costs", {:cost_recorded, cost})

@@ -217,6 +217,60 @@ defmodule Hive.QuestsTest do
     end
   end
 
+  describe "set_planning/1" do
+    test "transitions pending quest to planning" do
+      {:ok, quest} = Quests.create(%{goal: "Plan this"})
+      assert quest.status == "pending"
+
+      assert {:ok, updated} = Quests.set_planning(quest.id)
+      assert updated.status == "planning"
+    end
+
+    test "rejects transition from non-pending status" do
+      {:ok, quest} = Quests.create(%{goal: "Already active"})
+      Store.put(:quests, %{quest | status: "active"})
+
+      assert {:error, :invalid_transition} = Quests.set_planning(quest.id)
+    end
+
+    test "rejects transition from planning (idempotent guard)" do
+      {:ok, quest} = Quests.create(%{goal: "Already planning"})
+      {:ok, _} = Quests.set_planning(quest.id)
+
+      assert {:error, :invalid_transition} = Quests.set_planning(quest.id)
+    end
+
+    test "returns not_found for unknown quest" do
+      assert {:error, :not_found} = Quests.set_planning("qst-nonexistent")
+    end
+  end
+
+  describe "update_status!/1 with planning" do
+    test "preserves planning status when quest has no jobs" do
+      {:ok, quest} = Quests.create(%{goal: "Planning quest"})
+      {:ok, _} = Quests.set_planning(quest.id)
+
+      assert {:ok, updated} = Quests.update_status!(quest.id)
+      assert updated.status == "planning"
+    end
+
+    test "computes status normally once planning quest has jobs", %{comb: comb} do
+      {:ok, quest} = Quests.create(%{goal: "Planning with jobs"})
+      {:ok, _} = Quests.set_planning(quest.id)
+
+      {:ok, _} =
+        Hive.Jobs.create(%{
+          title: "First job",
+          quest_id: quest.id,
+          comb_id: comb.id,
+          status: "running"
+        })
+
+      assert {:ok, updated} = Quests.update_status!(quest.id)
+      assert updated.status == "active"
+    end
+  end
+
   describe "add_job/2" do
     test "creates a job linked to the quest", %{comb: comb} do
       {:ok, quest} = Quests.create(%{goal: "Quest with jobs"})

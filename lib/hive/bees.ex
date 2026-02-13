@@ -72,7 +72,7 @@ defmodule Hive.Bees do
          :ok <- update_bee_working(bee.id, cell),
          :ok <- maybe_transition_job(job_id),
          :ok <- maybe_ensure_agent(job_id, comb_id, cell),
-         {:ok, _os_pid} <- spawn_claude_detached(bee.id, job_id, cell, hive_root) do
+         {:ok, _os_pid} <- spawn_model_detached(bee.id, job_id, cell, hive_root) do
       {:ok, bee}
     else
       {:error, reason} -> {:error, reason}
@@ -95,12 +95,19 @@ defmodule Hive.Bees do
          {:ok, cell} <- find_active_cell(dead_bee_id),
          :ok <- validate_worktree_exists(cell),
          {:ok, job} <- Hive.Jobs.get(dead_bee.job_id),
-         {:ok, new_bee} <- create_bee_record(Keyword.get(opts, :name, generate_bee_name()), dead_bee.job_id),
+         {:ok, new_bee} <-
+           create_bee_record(Keyword.get(opts, :name, generate_bee_name()), dead_bee.job_id),
          {:ok, _cell} <- Hive.Cell.adopt(cell.id, new_bee.id),
          :ok <- revive_job(job, new_bee.id),
          prompt = build_revive_prompt(job),
-         {:ok, _pid} <- start_worker(new_bee.id, job.id, cell.comb_id, hive_root,
-                           Keyword.merge(opts, [revive: true, cell_id: cell.id, prompt: prompt])) do
+         {:ok, _pid} <-
+           start_worker(
+             new_bee.id,
+             job.id,
+             cell.comb_id,
+             hive_root,
+             Keyword.merge(opts, revive: true, cell_id: cell.id, prompt: prompt)
+           ) do
       {:ok, new_bee}
     end
   end
@@ -195,7 +202,9 @@ defmodule Hive.Bees do
 
   defp update_bee_working(bee_id, cell) do
     case Store.get(:bees, bee_id) do
-      nil -> {:error, :bee_not_found}
+      nil ->
+        {:error, :bee_not_found}
+
       bee ->
         updated = Map.merge(bee, %{status: "working", cell_path: cell.worktree_path, pid: nil})
         Store.put(:bees, updated)
@@ -210,8 +219,12 @@ defmodule Hive.Bees do
           {:ok, _} -> :ok
           {:error, reason} -> {:error, reason}
         end
-      {:ok, _} -> :ok
-      {:error, reason} -> {:error, reason}
+
+      {:ok, _} ->
+        :ok
+
+      {:error, reason} ->
+        {:error, reason}
     end
   end
 
@@ -221,14 +234,24 @@ defmodule Hive.Bees do
       case Hive.Jobs.get(job_id) do
         {:ok, job} ->
           case Store.get(:combs, cell.comb_id) do
-            nil -> :ok
+            nil ->
+              :ok
+
             comb when comb.path != nil ->
-              Hive.AgentProfile.ensure_agent(comb.path, %{title: job.title, description: job.description})
+              Hive.AgentProfile.ensure_agent(comb.path, %{
+                title: job.title,
+                description: job.description
+              })
+
               Hive.AgentProfile.install_agents(comb.path, cell.worktree_path)
               :ok
-            _comb -> :ok
+
+            _comb ->
+              :ok
           end
-        {:error, _} -> :ok
+
+        {:error, _} ->
+          :ok
       end
     rescue
       _ -> :ok
@@ -237,10 +260,13 @@ defmodule Hive.Bees do
     end
   end
 
-  defp spawn_claude_detached(bee_id, job_id, cell, hive_root) do
-    with {:ok, claude_path} <- Hive.Runtime.Claude.find_executable(),
-         {:ok, prompt} <- build_job_prompt(job_id) do
-      # Write a wrapper script that runs Claude and updates hive on exit
+  defp spawn_model_detached(bee_id, job_id, cell, hive_root) do
+    with {:ok, model_path} <- Hive.Runtime.Models.find_executable(),
+         {:ok, prompt} <- build_job_prompt(job_id),
+         {:ok, plugin} <- Hive.Runtime.Models.resolve_plugin() do
+      cmd_line = build_detached_command(plugin, model_path, prompt)
+
+      # Write a wrapper script that runs the model and updates hive on exit
       script_dir = Path.join([hive_root, ".hive", "run"])
       File.mkdir_p!(script_dir)
       script_path = Path.join(script_dir, "#{bee_id}.sh")
@@ -251,7 +277,7 @@ defmodule Hive.Bees do
       script_content = """
       #!/bin/bash
       cd "#{cell.worktree_path}"
-      "#{claude_path}" --print --dangerously-skip-permissions --verbose --output-format stream-json #{escape_shell(prompt)} > "#{log_path}" 2>&1
+      #{cmd_line} > "#{log_path}" 2>&1
       EXIT_CODE=$?
       if [ $EXIT_CODE -eq 0 ]; then
         "#{hive_path}" bee complete #{bee_id}
@@ -264,7 +290,11 @@ defmodule Hive.Bees do
       File.chmod!(script_path, 0o755)
 
       # Spawn detached: nohup + redirect + disown via a subshell
-      port = Port.open({:spawn, "nohup #{script_path} >/dev/null 2>&1 & echo $!"}, [:binary, :exit_status])
+      port =
+        Port.open({:spawn, "nohup #{script_path} >/dev/null 2>&1 & echo $!"}, [
+          :binary,
+          :exit_status
+        ])
 
       os_pid =
         receive do
@@ -285,12 +315,22 @@ defmodule Hive.Bees do
     end
   end
 
+  defp build_detached_command(plugin, model_path, prompt) do
+    if function_exported?(plugin, :detached_command, 2) do
+      plugin.detached_command(prompt, [])
+    else
+      ~s("#{model_path}" #{escape_shell(prompt)})
+    end
+  end
+
   defp build_job_prompt(job_id) do
     case Hive.Jobs.get(job_id) do
       {:ok, job} ->
         prompt = if job.description, do: "#{job.title}\n\n#{job.description}", else: job.title
         {:ok, prompt}
-      {:error, reason} -> {:error, reason}
+
+      {:error, reason} ->
+        {:error, reason}
     end
   end
 

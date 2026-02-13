@@ -48,7 +48,9 @@ defmodule Hive.Conflict do
   defp check_conflicts(repo_path, branch, main_branch) do
     # Use git diff to find files that differ and may conflict
     case System.cmd("git", ["diff", "--name-only", "#{main_branch}...#{branch}"],
-           cd: repo_path, stderr_to_stdout: true) do
+           cd: repo_path,
+           stderr_to_stdout: true
+         ) do
       {output, 0} ->
         changed_files = output |> String.split("\n", trim: true)
 
@@ -74,7 +76,9 @@ defmodule Hive.Conflict do
     case merge_base do
       {:ok, base} ->
         case System.cmd("git", ["diff", "--name-only", "#{base}..#{main_branch}"],
-               cd: repo_path, stderr_to_stdout: true) do
+               cd: repo_path,
+               stderr_to_stdout: true
+             ) do
           {output, 0} ->
             main_files = output |> String.split("\n", trim: true) |> MapSet.new()
             branch_set = MapSet.new(branch_files)
@@ -97,7 +101,9 @@ defmodule Hive.Conflict do
 
   defp get_merge_base(repo_path, main_branch) do
     case System.cmd("git", ["merge-base", "HEAD", main_branch],
-           cd: repo_path, stderr_to_stdout: true) do
+           cd: repo_path,
+           stderr_to_stdout: true
+         ) do
       {output, 0} -> {:ok, String.trim(output)}
       {output, _} -> {:error, String.trim(output)}
     end
