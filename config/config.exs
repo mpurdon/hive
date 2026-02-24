@@ -1,15 +1,30 @@
 import Config
 
-config :hive, ecto_repos: [Hive.Repo]
-
-config :hive, Hive.Dashboard.Endpoint,
-  http: [port: 4040],
-  url: [host: "localhost"],
-  secret_key_base: String.duplicate("hive_secret", 8),
-  render_errors: [formats: [html: Hive.Dashboard.ErrorHTML]],
+config :hive, Hive.Web.Endpoint,
+  http: [port: 4000],
+  debug_errors: true,
+  code_reloader: true,
+  check_origin: false,
+  watchers: [],
+  secret_key_base: "HIVE_SECRET_KEY_BASE_CHANGEME_1234567890",
   pubsub_server: Hive.PubSub,
-  live_view: [signing_salt: "hive_live"],
-  server: true
+  live_view: [signing_salt: "hive_live_salt_123"],
+  render_errors: [
+    formats: [html: Hive.Web.ErrorHTML, json: Hive.Web.ErrorJSON],
+    layout: false
+  ]
+
+config :hive, :llm,
+  execution_mode: :cli,
+  default_models: %{
+    opus: "anthropic:claude-opus-4-6",
+    sonnet: "anthropic:claude-sonnet-4-6",
+    haiku: "anthropic:claude-haiku-4-5",
+    fast: "google:gemini-2.0-flash"
+  }
+
+# Allow ReqLLM to load API keys from .env files when present
+config :req_llm, load_dotenv: true
 
 config :logger, :console,
   format: "$time $metadata[$level] $message\n",

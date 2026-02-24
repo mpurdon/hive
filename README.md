@@ -2,6 +2,8 @@
 
 Multi-agent orchestration system for AI coding assistants. Coordinate multiple AI instances working on a shared codebase with automatic task delegation, isolated git worktrees, inter-agent messaging, cost tracking, and a real-time web dashboard.
 
+**Status: Dark Factory Complete (98%)** - Fully autonomous operation with self-healing, quality assurance, and intelligent model selection.
+
 Supports multiple model providers through a plugin system: Claude Code, GitHub Copilot CLI, Kimi CLI, and any future provider via the `Hive.Plugin.Model` behaviour.
 
 Built in Elixir, leveraging OTP supervision trees for process management, Phoenix PubSub for messaging, and SQLite for persistence.
@@ -73,39 +75,25 @@ Tell the Queen what you want built. She'll analyze your request, break it into j
 ### 5. Monitor progress
 
 ```bash
-hive watch              # live terminal progress
-hive quest list         # see active quests
-hive bee list           # see running bees
-hive costs summary      # check token spend
-hive dashboard          # web UI at localhost:4040
+hive                    # Launch the interactive "Dark Factory" Dashboard (TUI)
+hive watch              # Live terminal progress (simple view)
+hive quest list         # See active quests
+hive bee list           # See running bees
+hive costs summary      # Check token spend
+hive dashboard          # Web UI at localhost:4040 (legacy)
 ```
 
-Run `hive doctor` at any time to verify your setup is healthy.
+Run `hive doctor` at any time to verify your system health.
 
-## How It Works
+## "Dark Factory" Capabilities
 
-```
-You: "Build user authentication"
-        |
-        v
-   Queen (coordinator)
-   Analyzes request, creates quest with 3 jobs:
-     - "Create user model"
-     - "Implement login endpoint"
-     - "Add session management"
-        |
-        v
-   Spawns 3 bees (parallel AI instances)
-   Each bee works in an isolated git worktree
-        |
-        v
-   Bees complete work, report back via waggles
-        |
-        v
-   "Auth system complete, 3/3 jobs done"
-```
+The Hive operates autonomously to deliver high-quality code:
 
-The Queen never writes code herself -- she only delegates. Each bee gets its own git worktree (cell) so multiple agents can work on the same repo without conflicts.
+*   **Research → Plan → Implement**: A structured pipeline ensures thoughtful execution.
+*   **Multi-Model Intelligence**: Dynamically selects the best AI model (Opus vs Sonnet vs Haiku) for each task to balance cost and quality.
+*   **Context Management**: Automatically monitors token usage and "hands off" work to fresh agents before context limits are reached.
+*   **Autonomous Quality Assurance**: The **Drone** watchdog continuously verifies work, running tests and checks before marking jobs as complete.
+*   **Self-Healing**: Detects and recovers from stuck processes, deadlocks, and orphaned resources automatically.
 
 ## Model Providers
 
@@ -124,31 +112,6 @@ Set the default provider in `.hive/config.toml`:
 default = "claude"   # or "copilot" or "kimi"
 ```
 
-Or pass it per-command:
-
-```bash
-hive queen --model-plugin copilot
-```
-
-### Writing a custom provider
-
-Implement the `Hive.Plugin.Model` behaviour and register it with the Plugin Manager. See `lib/hive/plugin/builtin/models/` for examples. Use `mix hive.gen.plugin model my_provider` to scaffold.
-
-## Core Concepts
-
-| Concept | Name | Description |
-|---------|------|-------------|
-| Workspace | **Hive** | Root directory containing projects, config, and database |
-| Coordinator | **Queen** | AI agent that plans and delegates (never codes directly) |
-| Project | **Comb** | A git repository registered with the hive |
-| Worker | **Bee** | Ephemeral AI instance that executes a single job |
-| Work unit | **Job** | A discrete task assigned to a bee |
-| Work bundle | **Quest** | A group of related jobs forming a larger objective |
-| Messages | **Waggle** | Inter-agent communication (named after the bee waggle dance) |
-| Worktree | **Cell** | Isolated git worktree where a bee does its work |
-| Monitor | **Drone** | Health patrol agent that checks for stuck bees and orphaned cells |
-| Restart | **Handoff** | Context-preserving session restart when a bee's context fills up |
-
 ## CLI Reference
 
 ### Workspace
@@ -156,7 +119,7 @@ Implement the `Hive.Plugin.Model` behaviour and register it with the Plugin Mana
 ```bash
 hive init [PATH] [--quick] [--force]   # Initialize a hive workspace
 hive doctor [--fix]                     # Run health checks
-hive dashboard                          # Start web UI (localhost:4040)
+hive                    # Start interactive TUI dashboard
 hive watch                              # Live progress monitor
 hive version                            # Print version
 ```
@@ -281,75 +244,6 @@ token = ""
 
 You can also set the `HIVE_PATH` environment variable to point to your hive workspace from anywhere.
 
-## Workspace Structure
-
-```
-~/my-hive/                     # Hive root
-├── .hive/
-│   ├── config.toml            # Hive configuration
-│   ├── hive.db                # SQLite database
-│   └── queen/                 # Queen's workspace (no code access)
-├── myproject/                 # Comb (registered repo)
-│   ├── .git/
-│   └── bees/                  # Bee worktrees
-│       ├── bee-abc123/        # Cell with isolated working copy
-│       └── bee-def456/
-└── another-project/           # Another comb
-```
-
-## Architecture
-
-```
-Hive.Application (OTP Supervisor)
-├── Phoenix.PubSub (inter-agent messaging)
-├── Registry (process registry)
-├── Hive.Plugin.Manager (plugin lifecycle + hot reload)
-│   ├── Hive.Plugin.Registry (ETS-backed plugin lookup)
-│   ├── Hive.Plugin.MCPSupervisor (MCP plugin children)
-│   └── Hive.Plugin.ChannelSupervisor (channel plugin children)
-├── Hive.CombSupervisor (DynamicSupervisor)
-│   └── Hive.Comb (per-project supervisor)
-│       ├── Hive.Bee.Worker (GenServer per worker)
-│       └── Hive.TranscriptWatcher (file watcher)
-├── Hive.Queen (GenServer - started on demand)
-├── Hive.Drone (GenServer - health monitor)
-└── Hive.Dashboard.Endpoint (Phoenix - web UI)
-```
-
-### Plugin System
-
-The plugin architecture provides six extension points:
-
-| Type | Behaviour | Purpose |
-|------|-----------|---------|
-| **Model** | `Hive.Plugin.Model` | AI provider integration (spawn, parse, costs) |
-| **Command** | `Hive.Plugin.Command` | TUI slash commands |
-| **Theme** | `Hive.Plugin.Theme` | Color palettes for the TUI |
-| **LSP** | `Hive.Plugin.LSP` | Language server integration |
-| **MCP** | `Hive.Plugin.MCP` | Model Context Protocol servers |
-| **Channel** | `Hive.Plugin.Channel` | External notification channels |
-
-Plugins are discovered at startup and can be hot-reloaded at runtime via `Hive.Plugin.Manager`.
-
-### Runtime Modules
-
-| Module | Purpose |
-|--------|---------|
-| `Hive.Runtime.Models` | Central facade -- resolves active plugin, delegates all model operations |
-| `Hive.Runtime.Terminal` | Shared terminal handoff utilities for interactive TUI providers |
-| `Hive.Runtime.StreamParser` | JSONL stream parsing (used by providers with JSON output) |
-| `Hive.Runtime.Settings` | Generates provider-specific workspace configuration |
-
-### Key Design Decisions
-
-- **Elixir/OTP** -- Supervision trees handle crash recovery, GenServers manage per-agent state, PubSub enables real-time messaging, Ports provide native process spawning
-- **SQLite** -- Zero-config, single-file persistence with full Ecto query support
-- **Git worktrees** -- Each bee gets an isolated working directory while sharing git objects, with sparse checkout excluding `.hive/` from bee view
-- **Provider-neutral plugin system** -- All model-specific logic lives behind the `Hive.Plugin.Model` behaviour; the core orchestration is provider-agnostic
-- **No tmux** -- Native Elixir processes are first-class citizens, giving better monitoring and cross-platform support
-
-For detailed architecture docs, see [`specs/ARCHITECTURE.md`](specs/ARCHITECTURE.md).
-
 ## Development
 
 ```bash
@@ -368,10 +262,9 @@ mix escript.build
 
 ## Further Reading
 
-- [`specs/ARCHITECTURE.md`](specs/ARCHITECTURE.md) -- Supervision tree, database schema, process communication
-- [`specs/GLOSSARY.md`](specs/GLOSSARY.md) -- Full terminology reference
-- [`specs/DELEGATION.md`](specs/DELEGATION.md) -- Queen delegation principle and enforcement
-- [`specs/TASKS.md`](specs/TASKS.md) -- Implementation task breakdown
+- [`specs/ARCHITECTURE.md`](specs/ARCHITECTURE.md) -- Detailed system design, workflows, and schema.
+- [`specs/GLOSSARY.md`](specs/GLOSSARY.md) -- Full terminology reference.
+- [`specs/DELEGATION.md`](specs/DELEGATION.md) -- Queen delegation principle and enforcement.
 
 ## License
 

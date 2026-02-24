@@ -9,9 +9,10 @@ defmodule Hive.Observability.Alerts do
 
   @alert_rules [
     {:quest_stuck, 30 * 60},      # 30 minutes
-    {:quality_drop, 70},           # Below 70%
-    {:cost_spike, 2.0},            # 2x average
-    {:failure_rate_high, 0.3}      # 30%
+    {:quality_drop, 70},          # Below 70%
+    {:cost_spike, 2.0},           # 2x average
+    {:failure_rate_high, 0.3},    # 30%
+    {:validation_failed, 5 * 60}  # Failed in last 5 mins
   ]
 
   @doc "Check all alert rules and return triggered alerts"
@@ -27,8 +28,26 @@ defmodule Hive.Observability.Alerts do
   @doc "Send alert notification"
   def notify(alerts, channel \\ :log) do
     Enum.each(alerts, fn {type, message} ->
+      Hive.Telemetry.emit([:hive, :alert, :raised], %{}, %{type: type, message: message})
       send_notification(channel, type, message)
     end)
+  end
+
+  defp check_rule(:validation_failed, threshold_seconds) do
+    jobs = Store.all(:jobs)
+    recent_failures = Enum.filter(jobs, fn j ->
+      j.status == "done" &&
+      Map.get(j, :verification_status) == "failed" &&
+      j.verified_at &&
+      DateTime.diff(DateTime.utc_now(), j.verified_at) < threshold_seconds
+    end)
+
+    if length(recent_failures) > 0 do
+      msg = Enum.map(recent_failures, &"Job #{&1.id} failed validation") |> Enum.join(", ")
+      {:alert, msg}
+    else
+      :ok
+    end
   end
 
   defp check_rule(:quest_stuck, threshold_seconds) do

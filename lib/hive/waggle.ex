@@ -33,6 +33,13 @@ defmodule Hive.Waggle do
 
     {:ok, waggle} = Store.insert(:waggles, record)
     broadcast(to, {:waggle_received, waggle})
+
+    Hive.Telemetry.emit([:hive, :waggle, :sent], %{}, %{
+      from: from,
+      to: to,
+      subject: subject
+    })
+
     {:ok, waggle}
   end
 

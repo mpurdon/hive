@@ -16,12 +16,12 @@ defmodule Hive.Verification do
   Runs validation command and quality checks.
   Returns {:ok, :pass | :fail, result} or {:error, reason}.
   """
-  @spec verify_job(String.t()) :: {:ok, atom(), map()} | {:error, term()}
-  def verify_job(job_id) do
+  @spec verify_job(String.t(), keyword()) :: {:ok, atom(), map()} | {:error, term()}
+  def verify_job(job_id, opts \\ []) do
     with {:ok, job} <- Hive.Jobs.get(job_id),
          {:ok, cell} <- get_job_cell(job),
          {:ok, comb} <- Store.fetch(:combs, job.comb_id) do
-      
+
       result = %{
         job_id: job_id,
         status: "running",
@@ -30,10 +30,12 @@ defmodule Hive.Verification do
         quality_score: nil,
         ran_at: DateTime.utc_now()
       }
-      
-      # Run validation command if configured
-      validation_result = 
-        if Map.get(comb, :validation_command) do
+
+      skip_validation = Keyword.get(opts, :skip_validation_command, false)
+
+      # Run validation command if configured (skip if already run by Validator)
+      validation_result =
+        if not skip_validation and Map.get(comb, :validation_command) do
           case run_validation_command(cell, comb.validation_command) do
             {:ok, output} ->
               %{result | status: "passed", output: output, exit_code: 0}

@@ -58,7 +58,7 @@ defmodule Hive.Plugin.Builtin.Commands.PluginCmd do
         {:error, reason} -> send_output(ctx, "Failed: #{inspect(reason)}")
       end
     else
-      module = String.to_atom("Elixir.#{path}")
+      module = String.to_existing_atom("Elixir.#{path}")
 
       case Hive.Plugin.Manager.load_plugin(module) do
         :ok -> send_output(ctx, "Plugin #{path} loaded")
@@ -70,7 +70,7 @@ defmodule Hive.Plugin.Builtin.Commands.PluginCmd do
   defp do_unload(type_name, ctx) do
     case String.split(type_name, ":", parts: 2) do
       [type_str, name_str] ->
-        type = String.to_atom(type_str)
+        type = String.to_existing_atom(type_str)
 
         case Hive.Plugin.Manager.unload_plugin(type, name_str) do
           :ok -> send_output(ctx, "Plugin #{type}:#{name_str} unloaded")

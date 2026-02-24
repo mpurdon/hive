@@ -58,6 +58,13 @@ defmodule Hive.Plugin.Model do
   @callback get_model_info(model :: String.t()) :: {:ok, map()} | {:error, term()}
   @callback get_context_limit(model :: String.t()) :: {:ok, integer()} | {:error, term()}
 
+  # API-mode callbacks (for providers that use direct HTTP API calls)
+  @callback run_agent(prompt :: String.t(), working_dir :: String.t(), opts :: keyword()) ::
+              {:ok, map()} | {:error, term()}
+  @callback generate_text(prompt :: String.t(), opts :: keyword()) ::
+              {:ok, String.t()} | {:error, term()}
+  @callback execution_mode() :: :api | :cli
+
   @optional_callbacks [
     find_executable: 0,
     workspace_setup: 2,
@@ -69,6 +76,9 @@ defmodule Hive.Plugin.Model do
     detached_command: 2,
     list_available_models: 0,
     get_model_info: 1,
-    get_context_limit: 1
+    get_context_limit: 1,
+    run_agent: 3,
+    generate_text: 2,
+    execution_mode: 0
   ]
 end

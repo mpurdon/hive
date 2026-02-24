@@ -62,7 +62,8 @@ defmodule Hive.Shutdown do
   # -- Private ---------------------------------------------------------------
 
   defp do_shutdown(drain_timeout) do
-    Logger.info("Hive shutting down gracefully...")
+    # Suppress noisy log output during teardown
+    Logger.configure(level: :none)
 
     # 1. Notify channels
     notify_channels()
@@ -75,8 +76,6 @@ defmodule Hive.Shutdown do
 
     # 4. Stop Queen
     stop_queen()
-
-    Logger.info("Hive shutdown complete.")
   end
 
   defp notify_channels do

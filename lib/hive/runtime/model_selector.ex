@@ -34,19 +34,19 @@ defmodule Hive.Runtime.ModelSelector do
   """
   def model_registry do
     %{
-      "claude-opus" => %{
+      "opus" => %{
         capabilities: [:planning, :complex_implementation, :architecture, :refactoring],
         cost_tier: :high,
         context_limit: 200_000,
         strengths: ["complex reasoning", "large refactors", "system design"]
       },
-      "claude-sonnet" => %{
+      "sonnet" => %{
         capabilities: [:implementation, :refactoring, :debugging, :moderate_complexity],
         cost_tier: :medium,
         context_limit: 200_000,
         strengths: ["balanced performance", "general coding", "moderate complexity"]
       },
-      "claude-haiku" => %{
+      "haiku" => %{
         capabilities: [:research, :summarization, :simple_fixes, :verification, :analysis],
         cost_tier: :low,
         context_limit: 200_000,
@@ -72,23 +72,23 @@ defmodule Hive.Runtime.ModelSelector do
   @spec select_model_for_job(job_type(), complexity()) :: String.t()
   def select_model_for_job(job_type, complexity \\ :moderate)
 
-  def select_model_for_job(:planning, _complexity), do: "claude-opus"
-  def select_model_for_job(:architecture, _complexity), do: "claude-opus"
+  def select_model_for_job(:planning, _complexity), do: "opus"
+  def select_model_for_job(:architecture, _complexity), do: "opus"
 
-  def select_model_for_job(:implementation, :complex), do: "claude-opus"
-  def select_model_for_job(:implementation, :moderate), do: "claude-sonnet"
-  def select_model_for_job(:implementation, :simple), do: "claude-haiku"
+  def select_model_for_job(:implementation, :complex), do: "opus"
+  def select_model_for_job(:implementation, :moderate), do: "sonnet"
+  def select_model_for_job(:implementation, :simple), do: "haiku"
 
-  def select_model_for_job(:research, _complexity), do: "claude-haiku"
-  def select_model_for_job(:summarization, _complexity), do: "claude-haiku"
-  def select_model_for_job(:verification, _complexity), do: "claude-haiku"
-  def select_model_for_job(:simple_fix, _complexity), do: "claude-haiku"
+  def select_model_for_job(:research, _complexity), do: "haiku"
+  def select_model_for_job(:summarization, _complexity), do: "haiku"
+  def select_model_for_job(:verification, _complexity), do: "haiku"
+  def select_model_for_job(:simple_fix, _complexity), do: "haiku"
 
-  def select_model_for_job(:refactoring, :complex), do: "claude-opus"
-  def select_model_for_job(:refactoring, _complexity), do: "claude-sonnet"
+  def select_model_for_job(:refactoring, :complex), do: "opus"
+  def select_model_for_job(:refactoring, _complexity), do: "sonnet"
 
   # Default to sonnet for unknown types
-  def select_model_for_job(_job_type, _complexity), do: "claude-sonnet"
+  def select_model_for_job(_job_type, _complexity), do: "sonnet"
 
   @doc """
   Get model information from the registry.
@@ -193,7 +193,10 @@ defmodule Hive.Runtime.ModelSelector do
     _ -> model
   end
 
-  defp downgrade("claude-opus"), do: "claude-sonnet"
-  defp downgrade("claude-sonnet"), do: "claude-haiku"
+  defp downgrade("opus"), do: "sonnet"
+  defp downgrade("sonnet"), do: "haiku"
+  # Legacy names
+  defp downgrade("claude-opus"), do: "sonnet"
+  defp downgrade("claude-sonnet"), do: "haiku"
   defp downgrade(model), do: model
 end

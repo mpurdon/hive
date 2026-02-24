@@ -139,14 +139,18 @@ defmodule Hive.Store do
   @doc "Updates all matching records with an update function. Returns count updated."
   @spec update_matching(atom(), (map() -> boolean()), (map() -> map())) :: non_neg_integer()
   def update_matching(collection, filter_fun, update_fun) do
-    # Read current data to find matching records
-    matching = filter(collection, filter_fun)
-    count = length(matching)
+    # Perform filter + update inside the lock to avoid TOCTOU races
+    ref = make_ref()
+    Process.put(ref, 0)
 
-    if count > 0 do
-      with_lock(fn data ->
-        col = Map.get(data, collection, %{})
+    with_lock(fn data ->
+      col = Map.get(data, collection, %{})
+      matching = col |> Map.values() |> Enum.filter(filter_fun)
+      Process.put(ref, length(matching))
 
+      if matching == [] do
+        data
+      else
         updated_col =
           Enum.reduce(matching, col, fn record, acc ->
             updated = update_fun.(record) |> ensure_updated_at()
@@ -154,10 +158,10 @@ defmodule Hive.Store do
           end)
 
         Map.put(data, collection, updated_col)
-      end)
-    end
+      end
+    end)
 
-    count
+    Process.delete(ref) || 0
   end
 
   # -- GenServer callbacks ---------------------------------------------------
@@ -203,7 +207,14 @@ defmodule Hive.Store do
 
   defp read_data_from_disk do
     case File.read(data_path()) do
-      {:ok, binary} -> :erlang.binary_to_term(binary)
+      {:ok, binary} ->
+        try do
+          :erlang.binary_to_term(binary, [:safe])
+        rescue
+          ArgumentError ->
+            # Existing data may contain atoms not yet loaded — fall back to unsafe
+            :erlang.binary_to_term(binary)
+        end
       {:error, :enoent} -> %{}
     end
   end
@@ -326,11 +337,9 @@ defmodule Hive.Store do
   end
 
   defp lock_stale?(lock_path) do
-    case File.stat(lock_path) do
+    case File.stat(lock_path, time: :posix) do
       {:ok, %{mtime: mtime}} ->
-        lock_time = NaiveDateTime.from_erl!(mtime)
-        now = NaiveDateTime.utc_now()
-        NaiveDateTime.diff(now, lock_time, :second) > @lock_stale_seconds
+        System.os_time(:second) - mtime > @lock_stale_seconds
 
       {:error, _} ->
         # Lock disappeared between check and stat — not stale

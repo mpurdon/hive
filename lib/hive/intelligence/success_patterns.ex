@@ -68,7 +68,7 @@ defmodule Hive.Intelligence.SuccessPatterns do
   @doc """
   Recommend approach for a new job based on success patterns.
   """
-  def recommend_approach(comb_id, job_description) do
+  def recommend_approach(comb_id, _job_description) do
     best_practices = get_best_practices(comb_id)
     
     # Handle empty list case

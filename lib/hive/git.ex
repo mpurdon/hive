@@ -234,6 +234,24 @@ defmodule Hive.Git do
     end
   end
 
+  @doc """
+  Prunes stale worktree metadata.
+
+  Runs `git worktree prune` from `repo_path` to clean up
+  worktree entries whose directories have been manually removed.
+  Returns `:ok` on success.
+  """
+  @spec worktree_prune(String.t()) :: :ok | {:error, String.t()}
+  def worktree_prune(repo_path) do
+    case System.cmd("git", ["worktree", "prune"],
+           cd: repo_path,
+           stderr_to_stdout: true
+         ) do
+      {_output, 0} -> :ok
+      {output, _code} -> {:error, String.trim(output)}
+    end
+  end
+
   # -- Sparse checkout operations ----------------------------------------------
 
   @doc """

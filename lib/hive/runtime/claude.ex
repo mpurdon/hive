@@ -85,6 +85,10 @@ defmodule Hive.Runtime.Claude do
          :ok <- validate_directory(working_dir) do
       args = build_headless_args(prompt, opts)
 
+      # Always clear CLAUDECODE to prevent "nested session" errors when
+      # bees are spawned from within a Claude Code session (e.g. the TUI).
+      env = [{~c"CLAUDECODE", false} | build_env(opts)]
+
       port =
         Port.open({:spawn_executable, claude_path}, [
           :binary,
@@ -93,7 +97,7 @@ defmodule Hive.Runtime.Claude do
           :stderr_to_stdout,
           args: args,
           cd: working_dir,
-          env: build_env(opts)
+          env: env
         ])
 
       {:ok, port}
@@ -177,6 +181,9 @@ defmodule Hive.Runtime.Claude do
 
   defp build_env(opts) do
     Keyword.get(opts, :env, [])
-    |> Enum.map(fn {k, v} -> {to_charlist(k), to_charlist(v)} end)
+    |> Enum.map(fn
+      {k, false} -> {to_charlist(k), false}
+      {k, v} -> {to_charlist(k), to_charlist(v)}
+    end)
   end
 end

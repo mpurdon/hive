@@ -178,5 +178,19 @@ defmodule Hive.GitHub do
   defp maybe_add_auth(headers, nil), do: headers
   defp maybe_add_auth(headers, token), do: [{"authorization", "Bearer #{token}"} | headers]
 
-  defp detect_default_branch(_comb), do: "main"
+  defp detect_default_branch(comb) do
+    path = Map.get(comb, :path)
+
+    if path && File.dir?(path) do
+      case System.cmd("git", ["symbolic-ref", "refs/remotes/origin/HEAD", "--short"],
+             cd: path,
+             stderr_to_stdout: true
+           ) do
+        {branch, 0} -> branch |> String.trim() |> String.replace("origin/", "")
+        _ -> "main"
+      end
+    else
+      "main"
+    end
+  end
 end

@@ -16,11 +16,18 @@ defmodule HiveTest do
       original = System.get_env("HIVE_PATH")
       System.delete_env("HIVE_PATH")
 
+      # Use a temp dir that has no .hive/ marker
+      tmp = Path.join(System.tmp_dir!(), "hive_no_marker_#{:erlang.unique_integer([:positive])}")
+      File.mkdir_p!(tmp)
+      original_cwd = File.cwd!()
+      File.cd!(tmp)
+
       on_exit(fn ->
+        File.cd!(original_cwd)
+        File.rm_rf!(tmp)
         if original, do: System.put_env("HIVE_PATH", original)
       end)
 
-      # From the project root there should be no .hive/ directory
       assert {:error, :not_in_hive} = Hive.hive_dir()
     end
 

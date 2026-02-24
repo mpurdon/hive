@@ -50,6 +50,7 @@ defmodule Hive.CombSupervisor do
 
   @impl true
   def init(_opts) do
+    # Future scaling: For >10k bees, consider PartitionSupervisor
     DynamicSupervisor.init(strategy: :one_for_one)
   end
 end

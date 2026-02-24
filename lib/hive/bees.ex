@@ -38,6 +38,12 @@ defmodule Hive.Bees do
          {:ok, bee} <- create_bee_record(name, job_id),
          :ok <- assign_job(job_id, bee.id),
          {:ok, _pid} <- start_worker(bee.id, job_id, comb_id, hive_root, opts) do
+      Hive.Telemetry.emit([:hive, :bee, :spawned], %{}, %{
+        bee_id: bee.id,
+        job_id: job_id,
+        comb_id: comb_id
+      })
+
       {:ok, bee}
     else
       {:error, reason} -> {:error, reason}
@@ -63,6 +69,15 @@ defmodule Hive.Bees do
   @spec spawn_detached(String.t(), String.t(), String.t(), keyword()) ::
           {:ok, map()} | {:error, term()}
   def spawn_detached(job_id, comb_id, hive_root, opts \\ []) do
+    # In API mode, there's no process to detach from — use supervised Worker
+    if Hive.Runtime.ModelResolver.api_mode?() do
+      spawn(job_id, comb_id, hive_root, opts)
+    else
+      spawn_detached_cli(job_id, comb_id, hive_root, opts)
+    end
+  end
+
+  defp spawn_detached_cli(job_id, comb_id, hive_root, opts) do
     name = Keyword.get(opts, :name, generate_bee_name())
 
     with :ok <- check_job_ready(job_id),
@@ -247,9 +262,15 @@ defmodule Hive.Bees do
     try do
       case Hive.Jobs.get(job_id) do
         {:ok, job} ->
-          # Council expert installation
-          if Map.get(job, :council_id) && Map.get(job, :council_experts) do
-            Hive.Council.install_experts(job.council_id, job.council_experts, cell.worktree_path)
+          # Council expert installation: check council_experts alone
+          council_experts = Map.get(job, :council_experts)
+
+          if is_list(council_experts) and council_experts != [] do
+            council_id = Map.get(job, :council_id)
+
+            if council_id do
+              Hive.Council.install_experts(council_id, council_experts, cell.worktree_path)
+            end
           end
 
           # Standard comb-level agent
@@ -274,9 +295,15 @@ defmodule Hive.Bees do
           :ok
       end
     rescue
-      _ -> :ok
+      e ->
+        require Logger
+        Logger.debug("Agent setup failed for job #{job_id}: #{inspect(e)}")
+        :ok
     catch
-      _, _ -> :ok
+      _, reason ->
+        require Logger
+        Logger.debug("Agent setup error for job #{job_id}: #{inspect(reason)}")
+        :ok
     end
   end
 
@@ -285,6 +312,18 @@ defmodule Hive.Bees do
          {:ok, prompt} <- build_job_prompt(job_id),
          {:ok, plugin} <- Hive.Runtime.Models.resolve_plugin() do
       cmd_line = build_detached_command(plugin, model_path, prompt)
+
+      # Apply sandbox if available
+      # We wrap the command execution in a shell inside the sandbox
+      sandboxed_cmd_line = 
+        if Hive.Sandbox.available?() and Hive.Sandbox.name() != "local" do
+          {sandbox_cmd, sandbox_args, _opts} = 
+            Hive.Sandbox.wrap_command("sh", ["-c", cmd_line], cd: cell.worktree_path)
+          
+          Hive.Sandbox.to_shell_string(sandbox_cmd, sandbox_args)
+        else
+          cmd_line
+        end
 
       # Write a wrapper script that runs the model and updates hive on exit
       script_dir = Path.join([hive_root, ".hive", "run"])
@@ -296,13 +335,14 @@ defmodule Hive.Bees do
 
       script_content = """
       #!/bin/bash
-      cd "#{cell.worktree_path}"
-      #{cmd_line} > "#{log_path}" 2>&1
+      unset CLAUDECODE
+      cd #{escape_shell(cell.worktree_path)}
+      #{sandboxed_cmd_line} > #{escape_shell(log_path)} 2>&1
       EXIT_CODE=$?
       if [ $EXIT_CODE -eq 0 ]; then
-        "#{hive_path}" bee complete #{bee_id}
+        #{escape_shell(hive_path)} bee complete #{escape_shell(bee_id)}
       else
-        "#{hive_path}" bee fail #{bee_id} --reason "Exit code $EXIT_CODE"
+        #{escape_shell(hive_path)} bee fail #{escape_shell(bee_id)} --reason "Exit code $EXIT_CODE"
       fi
       """
 

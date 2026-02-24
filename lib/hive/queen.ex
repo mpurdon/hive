@@ -100,19 +100,16 @@ defmodule Hive.Queen do
       max_retries: 3
     }
 
-    # Best-effort: start Drone alongside Queen (unlinked so it doesn't crash the Queen)
-    try do
-      name = {:via, Registry, {Hive.Registry, :drone}}
-      case GenServer.start(Hive.Drone, [], name: name) do
-        {:ok, _pid} -> Logger.info("Drone started alongside Queen")
-        {:error, {:already_started, _pid}} -> :ok
-        {:error, reason} -> Logger.warning("Could not start Drone: #{inspect(reason)}")
-      end
-    rescue
-      _ -> :ok
+    # Drone is now supervised by Application — just verify it's running
+    case Hive.Drone.lookup() do
+      {:ok, _pid} -> Logger.debug("Drone is running")
+      :error -> Logger.warning("Drone is not running")
     end
 
     Logger.info("Queen initialized at #{hive_root}")
+
+    # Recover stuck jobs whose worker processes died
+    recover_stuck_jobs()
 
     # Recover any missed waggles from before we started
     send(self(), :recover_missed_waggles)
@@ -224,6 +221,33 @@ defmodule Hive.Queen do
     {:noreply, state}
   end
 
+  # -- Private: stuck job recovery --------------------------------------------
+
+  defp recover_stuck_jobs do
+    stuck_jobs =
+      Hive.Store.filter(:jobs, fn j -> j.status == "running" end)
+
+    Enum.each(stuck_jobs, fn job ->
+      worker_alive? =
+        case job.bee_id do
+          nil -> false
+          bee_id ->
+            case Hive.Bee.Worker.lookup(bee_id) do
+              {:ok, pid} -> Process.alive?(pid)
+              :error -> false
+            end
+        end
+
+      unless worker_alive? do
+        Logger.warning("Recovering stuck job #{job.id} (worker dead)")
+        Hive.Jobs.fail(job.id)
+      end
+    end)
+  rescue
+    e ->
+      Logger.warning("Stuck job recovery failed: #{Exception.message(e)}")
+  end
+
   # -- Private: waggle handling ----------------------------------------------
   # Business logic is deliberately minimal here. The Queen GenServer
   # dispatches to pattern-matched handlers. Heavier orchestration logic
@@ -269,14 +293,32 @@ defmodule Hive.Queen do
         {:ok, :resolved} ->
           Logger.info("Conflict resolved via rebase for cell #{cell_id}")
 
-          # Re-attempt merge after successful rebase
-          case Hive.Merge.merge_back(cell_id) do
-            {:ok, strategy} ->
-              Logger.info("Post-rebase merge succeeded (#{strategy}) for cell #{cell_id}")
+          # Re-run validation after rebase before merging
+          job_id = find_job_for_bee(waggle.from)
 
-            {:error, reason} ->
-              Logger.warning("Post-rebase merge failed for cell #{cell_id}: #{inspect(reason)}")
-              mark_needs_manual_merge(cell_id, waggle)
+          validation_ok? =
+            if job_id do
+              case Hive.Validator.validate(waggle.from, %{id: job_id}, cell_id) do
+                {:ok, _} -> true
+                _ -> false
+              end
+            else
+              true
+            end
+
+          if validation_ok? do
+            # Re-attempt merge after successful rebase + validation
+            case Hive.Merge.merge_back(cell_id) do
+              {:ok, strategy} ->
+                Logger.info("Post-rebase merge succeeded (#{strategy}) for cell #{cell_id}")
+
+              {:error, reason} ->
+                Logger.warning("Post-rebase merge failed for cell #{cell_id}: #{inspect(reason)}")
+                mark_needs_manual_merge(cell_id, waggle)
+            end
+          else
+            Logger.warning("Post-rebase validation failed for cell #{cell_id}")
+            mark_needs_manual_merge(cell_id, waggle)
           end
 
         {:error, reason} ->
@@ -329,36 +371,10 @@ defmodule Hive.Queen do
         if attempts < state.max_retries do
           Logger.info("Retrying job #{job_id} (attempt #{attempts + 1}/#{state.max_retries})")
 
-          case Hive.Jobs.reset(job_id) do
-            {:ok, job} ->
-              # Check budget before spawning retry
-              case check_quest_budget(job.quest_id) do
-                :ok ->
-                  case Hive.Bees.spawn(job_id, job.comb_id, state.hive_root) do
-                    {:ok, _bee} ->
-                      state
-
-                    {:error, reason} ->
-                      Logger.warning("Retry spawn failed for job #{job_id}: #{inspect(reason)}")
-                      state
-                  end
-
-                {:error, :budget_exceeded} ->
-                  Logger.warning("Budget exceeded for quest #{job.quest_id}, skipping retry")
-
-                  Hive.Waggle.send(
-                    "queen",
-                    "queen",
-                    "budget_exceeded",
-                    "Quest #{job.quest_id} budget exceeded, job #{job_id} retry skipped"
-                  )
-
-                  state
-              end
-
-            {:error, reason} ->
-              Logger.warning("Could not reset job #{job_id} for retry: #{inspect(reason)}")
-              state
+          # Try intelligent retry first, fall back to simple retry
+          case try_intelligent_retry(job_id, state) do
+            {:ok, _} -> state
+            {:error, _} -> simple_retry(job_id, state)
           end
         else
           Logger.warning("Job #{job_id} exhausted #{state.max_retries} retries")
@@ -367,6 +383,63 @@ defmodule Hive.Queen do
         end
 
       _ ->
+        state
+    end
+  end
+
+  defp try_intelligent_retry(job_id, state) do
+    case Hive.Intelligence.Retry.retry_with_strategy(job_id) do
+      {:ok, new_job} ->
+        case check_quest_budget(new_job.quest_id) do
+          :ok ->
+            case Hive.Bees.spawn(new_job.id, new_job.comb_id, state.hive_root) do
+              {:ok, _bee} -> {:ok, :intelligent_retry}
+              error -> error
+            end
+
+          {:error, :budget_exceeded} ->
+            {:error, :budget_exceeded}
+        end
+
+      {:error, reason} ->
+        Logger.debug("Intelligent retry unavailable for job #{job_id}: #{inspect(reason)}")
+        {:error, reason}
+    end
+  rescue
+    e ->
+      Logger.debug("Intelligent retry crashed for job #{job_id}: #{inspect(e)}")
+      {:error, :intelligent_retry_failed}
+  end
+
+  defp simple_retry(job_id, state) do
+    case Hive.Jobs.reset(job_id) do
+      {:ok, job} ->
+        case check_quest_budget(job.quest_id) do
+          :ok ->
+            case Hive.Bees.spawn(job_id, job.comb_id, state.hive_root) do
+              {:ok, _bee} ->
+                state
+
+              {:error, reason} ->
+                Logger.warning("Retry spawn failed for job #{job_id}: #{inspect(reason)}")
+                state
+            end
+
+          {:error, :budget_exceeded} ->
+            Logger.warning("Budget exceeded for quest #{job.quest_id}, skipping retry")
+
+            Hive.Waggle.send(
+              "queen",
+              "queen",
+              "budget_exceeded",
+              "Quest #{job.quest_id} budget exceeded, job #{job_id} retry skipped"
+            )
+
+            state
+        end
+
+      {:error, reason} ->
+        Logger.warning("Could not reset job #{job_id} for retry: #{inspect(reason)}")
         state
     end
   end
@@ -468,14 +541,24 @@ defmodule Hive.Queen do
         pending_jobs
         |> Enum.take(available_slots)
         |> Enum.reduce(state, fn job, acc ->
-          case Hive.Bees.spawn_detached(job.id, job.comb_id, acc.hive_root) do
-            {:ok, bee} ->
-              Logger.info("Auto-spawned bee #{bee.id} for job #{job.id} (#{job.title})")
-              acc
+          if Hive.Distributed.clustered?() do
+            # Distributed spawn: offload to cluster nodes
+            Hive.Distributed.spawn_on_cluster(fn -> 
+              Hive.Bees.spawn_detached(job.id, job.comb_id, acc.hive_root)
+            end)
+            Logger.info("Dispatched distributed spawn for job #{job.id}")
+            acc
+          else
+            # Local spawn
+            case Hive.Bees.spawn_detached(job.id, job.comb_id, acc.hive_root) do
+              {:ok, bee} ->
+                Logger.info("Auto-spawned bee #{bee.id} for job #{job.id} (#{job.title})")
+                acc
 
-            {:error, reason} ->
-              Logger.warning("Failed to auto-spawn bee for job #{job.id}: #{inspect(reason)}")
-              acc
+              {:error, reason} ->
+                Logger.warning("Failed to auto-spawn bee for job #{job.id}: #{inspect(reason)}")
+                acc
+            end
           end
         end)
     end
@@ -504,6 +587,16 @@ defmodule Hive.Queen do
 
     Enum.reduce(quests, state, fn quest, acc ->
       if quest.status in ["active", "pending", "planning", "research", "implementation"] do
+        # Check for deadlocks before spawning
+        case Hive.Resilience.detect_deadlock(quest.id) do
+          {:error, {:deadlock, cycles}} ->
+            Logger.warning("Deadlock in quest #{quest.id}, auto-resolving")
+            Hive.Resilience.resolve_deadlock(quest.id, cycles)
+
+          _ ->
+            :ok
+        end
+
         # Attach jobs to quest (they're stored separately)
         quest_jobs = Enum.filter(all_jobs, fn j -> j.quest_id == quest.id end)
         quest_with_jobs = Map.put(quest, :jobs, quest_jobs)
@@ -624,6 +717,15 @@ defmodule Hive.Queen do
           :ok
         end
     end
+  end
+
+  defp find_job_for_bee(bee_id) do
+    case Hive.Bees.get(bee_id) do
+      {:ok, bee} -> bee.job_id
+      _ -> nil
+    end
+  rescue
+    _ -> nil
   end
 
   defp mark_needs_manual_merge(cell_id, waggle) do

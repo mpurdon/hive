@@ -89,6 +89,9 @@ defmodule Hive.E2E.ConcurrentBeesTest do
     await({:job_done, job1.id}, timeout: 15_000)
     await({:job_done, job2.id}, timeout: 15_000)
 
+    # Brief pause for async cost recording to flush
+    Process.sleep(100)
+
     # Each bee should have its own cost records, not mixed
     costs1 = Hive.Costs.for_bee(bee1.id)
     costs2 = Hive.Costs.for_bee(bee2.id)

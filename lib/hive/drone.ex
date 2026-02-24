@@ -27,6 +27,15 @@ defmodule Hive.Drone do
   @registry_name Hive.Registry
   @registry_key :drone
 
+  def child_spec(opts) do
+    %{
+      id: __MODULE__,
+      start: {__MODULE__, :start_link, [opts]},
+      restart: :transient,
+      type: :worker
+    }
+  end
+
   # -- Client API --------------------------------------------------------------
 
   @doc """
@@ -56,7 +65,7 @@ defmodule Hive.Drone do
   @spec check_now() :: [map()]
   def check_now do
     case lookup() do
-      {:ok, pid} -> GenServer.call(pid, :check_now)
+      {:ok, pid} -> GenServer.call(pid, :check_now, 30_000)
       :error -> []
     end
   end
@@ -82,7 +91,8 @@ defmodule Hive.Drone do
       poll_interval: interval,
       auto_fix: auto_fix,
       verify: verify,
-      last_results: []
+      last_results: [],
+      patrol_count: 0
     }
 
     schedule_patrol(interval)
@@ -103,8 +113,13 @@ defmodule Hive.Drone do
   @impl true
   def handle_info(:patrol, state) do
     results = run_patrol(state)
+    count = state.patrol_count + 1
+
+    # Prune stale worktree metadata every 10 patrols (~5 min)
+    if rem(count, 10) == 0, do: prune_worktrees()
+
     schedule_patrol(state.poll_interval)
-    {:noreply, %{state | last_results: results}}
+    {:noreply, %{state | last_results: results, patrol_count: count}}
   end
 
   def handle_info(_msg, state) do
@@ -122,6 +137,8 @@ defmodule Hive.Drone do
     budget_results = check_budgets()
     conflict_results = check_merge_conflicts()
     verification_results = check_verifications()
+    check_stuck_jobs()
+    check_deadlocks()
 
     queen_results = check_queen_heartbeat()
     all_results = results ++ budget_results ++ conflict_results ++ verification_results ++ queen_results
@@ -269,6 +286,56 @@ defmodule Hive.Drone do
     end
   rescue
     _ -> []
+  end
+
+  defp check_deadlocks do
+    Hive.Quests.list()
+    |> Enum.filter(&(&1.status in ["active", "pending", "implementation"]))
+    |> Enum.each(fn quest ->
+      case Hive.Resilience.detect_deadlock(quest.id) do
+        {:error, {:deadlock, cycles}} ->
+          Logger.warning("Deadlock detected in quest #{quest.id}: #{inspect(cycles)}")
+          Hive.Resilience.resolve_deadlock(quest.id, cycles)
+
+        _ ->
+          :ok
+      end
+    end)
+  rescue
+    _ -> :ok
+  end
+
+  defp prune_worktrees do
+    Hive.Store.all(:combs)
+    |> Enum.each(fn comb ->
+      if comb.path && File.dir?(comb.path) do
+        Hive.Git.worktree_prune(comb.path)
+      end
+    end)
+  rescue
+    _ -> :ok
+  end
+
+  defp check_stuck_jobs do
+    Hive.Store.filter(:jobs, fn j -> j.status == "running" end)
+    |> Enum.each(fn job ->
+      worker_alive? =
+        case job.bee_id do
+          nil -> false
+          bee_id ->
+            case Hive.Bee.Worker.lookup(bee_id) do
+              {:ok, pid} -> Process.alive?(pid)
+              :error -> false
+            end
+        end
+
+      unless worker_alive? do
+        Logger.warning("Drone: recovering stuck job #{job.id} (worker dead)")
+        Hive.Jobs.fail(job.id)
+      end
+    end)
+  rescue
+    _ -> :ok
   end
 
   defp notify_queen(issues) do

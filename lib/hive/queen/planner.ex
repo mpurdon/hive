@@ -142,7 +142,7 @@ defmodule Hive.Queen.Planner do
     base_tasks ++ language_tasks
   end
 
-  defp create_job_from_task(quest_id, comb_id, task, index) do
+  defp create_job_from_task(quest_id, comb_id, task, _index) do
     classification = Classifier.classify_and_recommend(task.title, task.description)
     
     %{
@@ -179,6 +179,61 @@ defmodule Hive.Queen.Planner do
       end
     end)
   end
+
+  @doc """
+  Creates implementation jobs from phase-generated specs.
+
+  Takes a list of job spec maps (from the planning phase bee output) and
+  creates real job records with dependencies.
+
+  Returns `{:ok, [job]}`.
+  """
+  @spec create_jobs_from_specs(String.t(), [map()]) :: {:ok, [map()]}
+  def create_jobs_from_specs(quest_id, job_specs) do
+    quest = Store.get(:quests, quest_id)
+    comb_id = if quest, do: quest.comb_id
+
+    {jobs, _id_map} =
+      job_specs
+      |> Enum.with_index()
+      |> Enum.reduce({[], %{}}, fn {spec, idx}, {acc, id_map} ->
+        job_attrs = %{
+          title: spec["title"] || "Job #{idx + 1}",
+          description: spec["description"],
+          quest_id: quest_id,
+          comb_id: comb_id,
+          acceptance_criteria: spec["acceptance_criteria"] || [],
+          target_files: spec["target_files"] || [],
+          phase_job: false,
+          assigned_model: resolve_model(spec["model_recommendation"])
+        }
+
+        case Hive.Jobs.create(job_attrs) do
+          {:ok, job} ->
+            # Resolve dependencies by index
+            for dep_idx <- (spec["depends_on_indices"] || []) do
+              case Map.get(id_map, dep_idx) do
+                nil -> :ok
+                dep_id -> Hive.Jobs.add_dependency(job.id, dep_id)
+              end
+            end
+
+            {[job | acc], Map.put(id_map, idx, job.id)}
+
+          {:error, reason} ->
+            require Logger
+            Logger.warning("Failed to create job from spec #{idx}: #{inspect(reason)}")
+            {acc, id_map}
+        end
+      end)
+
+    {:ok, Enum.reverse(jobs)}
+  end
+
+  defp resolve_model("opus"), do: "claude-opus-4-6"
+  defp resolve_model("sonnet"), do: "claude-sonnet-4-6"
+  defp resolve_model(nil), do: nil
+  defp resolve_model(other), do: other
 
   # Goal-focused planning helpers
   

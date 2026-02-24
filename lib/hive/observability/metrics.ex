@@ -204,7 +204,7 @@ defmodule Hive.Observability.Metrics do
     costs = Store.all(:costs)
 
     %{
-      total: Enum.sum(Enum.map(costs, & &1.total_cost_usd)),
+      total: Enum.sum(Enum.map(costs, &Map.get(&1, :cost_usd, 0.0))),
       count: length(costs)
     }
   end

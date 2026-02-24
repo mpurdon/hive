@@ -138,11 +138,11 @@ defmodule Hive.Onboarding.Detector do
     has_file?(files, "package.json") and read_file_contains?(path, "package.json", "\"vue\"")
   end
 
-  defp has_rails?(files, path) do
+  defp has_rails?(files, _path) do
     has_file?(files, "Gemfile") and has_file?(files, "config.ru")
   end
 
-  defp has_django?(files, path) do
+  defp has_django?(files, _path) do
     has_file?(files, "manage.py")
   end
 

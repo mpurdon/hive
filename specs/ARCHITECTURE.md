@@ -1,6 +1,14 @@
 # The Hive - Architecture
 
-## Supervision Tree
+## System Overview
+
+The Hive is a multi-agent orchestration system designed to operate as a "Dark Factory" for software development. It coordinates multiple AI agents (Bees) to autonomously plan, implement, verify, and deliver code changes with minimal human oversight.
+
+The system leverages a **Research → Plan → Implement** pipeline, enforced by a central coordinator (Queen) and a dedicated quality assurance watchdog (Drone).
+
+## Core Architecture
+
+### Supervision Tree
 
 ```
 Hive.Application (OTP App)
@@ -15,137 +23,14 @@ Hive.Application (OTP App)
 │   └── Hive.Comb (per-project supervisor)
 │       ├── Hive.Bee.Worker (GenServer per worker)
 │       └── Hive.TranscriptWatcher (file watcher)
-├── Hive.Queen (GenServer - coordinator, started on demand)
-├── Hive.Drone (GenServer - health monitor)
+├── Hive.Queen (GenServer - coordinator)
+├── Hive.Drone (GenServer - autonomous watchdog)
 └── Hive.Dashboard.Endpoint (Phoenix - web UI)
 ```
 
-## Core Dependencies
+### Process Communication
 
-```elixir
-defp deps do
-  [
-    {:ecto_sqlite3, "~> 0.12"},      # SQLite persistence
-    {:phoenix_pubsub, "~> 2.1"},     # Inter-agent messaging
-    {:phoenix, "~> 1.7"},            # Web dashboard
-    {:phoenix_live_view, "~> 1.0"},  # Real-time dashboard
-    {:fs, "~> 8.6"},                 # File system watching
-    {:jason, "~> 1.4"},              # JSON parsing
-    {:optimus, "~> 0.5"},            # CLI argument parsing
-    {:toml, "~> 0.7"},               # Config file parsing
-    {:req, "~> 0.5"},                # HTTP client (GitHub API)
-    {:term_ui, "~> 0.1"},            # Terminal UI framework
-  ]
-end
-```
-
-## Database Schema
-
-```
-┌─────────────┐     ┌─────────────┐     ┌─────────────┐
-│   combs     │     │   quests    │     │    jobs     │
-├─────────────┤     ├─────────────┤     ├─────────────┤
-│ id          │     │ id          │     │ id          │
-│ name        │     │ name        │     │ title       │
-│ repo_url    │     │ status      │     │ description │
-│ path        │     │ created_at  │     │ status      │
-│ created_at  │     │ updated_at  │     │ quest_id    │◄──┐
-└─────────────┘     └─────────────┘     │ bee_id      │   │
-                           │            │ comb_id     │   │
-                           │            │ created_at  │   │
-                           └────────────┴─────────────┘   │
-                                                          │
-┌─────────────┐     ┌─────────────┐     ┌─────────────┐   │
-│    bees     │     │   waggles   │     │   costs     │   │
-├─────────────┤     ├─────────────┤     ├─────────────┤   │
-│ id          │     │ id          │     │ id          │   │
-│ name        │     │ from        │     │ bee_id      │───┘
-│ status      │     │ to          │     │ input_tokens│
-│ job_id      │     │ subject     │     │ output_tokens│
-│ cell_path   │     │ body        │     │ cost_usd    │
-│ pid         │     │ read        │     │ recorded_at │
-│ created_at  │     │ created_at  │     └─────────────┘
-└─────────────┘     └─────────────┘
-
-┌─────────────┐
-│   cells     │
-├─────────────┤
-│ id          │
-│ bee_id      │
-│ comb_id     │
-│ worktree_path│
-│ branch      │
-│ created_at  │
-└─────────────┘
-```
-
-## Plugin System
-
-The plugin architecture allows extending the Hive with new model providers, commands, themes, and integrations.
-
-### Plugin Types
-
-| Type | Behaviour | Built-in |
-|------|-----------|----------|
-| Model | `Hive.Plugin.Model` | Claude, Copilot, Kimi |
-| Command | `Hive.Plugin.Command` | Help, Quit, Quest, Bee, Plugin |
-| Theme | `Hive.Plugin.Theme` | Default |
-| LSP | `Hive.Plugin.LSP` | Generic |
-| MCP | `Hive.Plugin.MCP` | (none yet) |
-| Channel | `Hive.Plugin.Channel` | Telegram |
-
-### Plugin Lifecycle
-
-```
-1. Application starts
-        │
-        ▼
-2. Plugin.Manager.init()
-   ├── Plugin.Registry.init() (creates ETS tables)
-   ├── Register built-in models (Claude, Copilot, Kimi)
-   ├── Register built-in themes, commands
-   └── Set default theme
-        │
-        ▼
-3. Runtime: Plugin.Manager.load_plugin(MyPlugin)
-   ├── Detect type from behaviour
-   ├── Register in ETS via Plugin.Registry
-   ├── Start supervised children (MCP/Channel)
-   └── Broadcast via PubSub
-```
-
-### Model Plugin Callbacks
-
-Required:
-- `name/0` — unique identifier (e.g. `"claude"`, `"copilot"`, `"kimi"`)
-- `description/0` — human-readable description
-- `spawn_interactive/2` — launch TUI session
-- `spawn_headless/3` — launch headless prompt session
-- `parse_output/1` — parse raw output into structured events
-
-Optional:
-- `find_executable/0` — locate CLI binary
-- `workspace_setup/2` — return provider-specific workspace config
-- `pricing/0` — token pricing table
-- `capabilities/0` — supported feature list
-- `extract_costs/1` — extract cost data from events
-- `extract_session_id/1` — extract session ID from events
-- `progress_from_events/1` — extract progress updates from events
-- `detached_command/2` — build shell command for detached spawning
-
-### Model Resolution
-
-```
-Hive.Runtime.Models.resolve_plugin(opts)
-        │
-        ├── 1. Check opts[:model_plugin] (module or name string)
-        ├── 2. Check config: plugins.models.default
-        └── 3. Fallback: "claude"
-```
-
-All call sites use `Hive.Runtime.Models` instead of calling provider modules directly. This ensures provider-neutral orchestration.
-
-## Process Communication
+Agents communicate via **Waggles** (messages) broadcast over Phoenix PubSub.
 
 ```
                     ┌─────────────────┐
@@ -166,108 +51,72 @@ All call sites use `Hive.Runtime.Models` instead of calling provider modules dir
 └─────────────────┘ └─────────────────┘ └─────────────────┘
 ```
 
-## Provider Integration
+## Data Model
 
-### Workspace Setup
+The system uses a document-oriented approach over SQLite.
 
-Provider-specific workspace configuration is generated via `workspace_setup/2`:
+### Schema Entities
 
-- **Claude**: Generates `.claude/settings.json` with hooks and permissions
-- **Copilot**: Returns `nil` (manages its own config)
-- **Kimi**: Returns `nil` (manages its own config)
+| Entity | Description | Key Fields |
+|--------|-------------|------------|
+| **Comb** | A managed git repository | `id`, `name`, `path`, `repo_url` |
+| **Quest** | High-level objective | `id`, `goal`, `status`, `plan`, `current_phase` |
+| **Job** | Discrete unit of work | `id`, `title`, `job_type`, `status`, `assigned_model`, `verification_status` |
+| **Bee** | Active agent instance | `id`, `name`, `status`, `context_usage`, `assigned_model` |
+| **Cell** | Isolated git worktree | `id`, `worktree_path`, `branch` |
+| **Waggle** | Inter-agent message | `id`, `from`, `to`, `subject`, `body` |
 
-### Runtime Flow
+### Job Types
+- **Planning**: Breaking down requirements (Model: Opus)
+- **Implementation**: Writing code (Model: Sonnet)
+- **Research**: Analyzing codebase (Model: Haiku)
+- **Verification**: Running tests/checks (Model: Haiku)
 
-```
-1. Queen creates job
-         │
-         ▼
-2. Hive.Bee.Worker GenServer starts
-         │
-         ▼
-3. Create git worktree (cell)
-         │
-         ▼
-4. Generate workspace config (provider-specific)
-         │
-         ▼
-5. Spawn AI via Hive.Runtime.Models.spawn_headless()
-   (delegates to active provider plugin)
-         │
-         ▼
-6. Provider's hooks/startup inject context
-         │
-         ▼
-7. Context injected, AI starts working
-         │
-         ▼
-8. Output parsed via plugin.parse_output()
-         │
-         ▼
-9. Progress tracked via plugin.progress_from_events()
-         │
-         ▼
-10. AI completes, costs extracted via plugin.extract_costs()
-         │
-         ▼
-11. Bee reports completion via waggle to Queen
-         │
-         ▼
-12. Cell (worktree) merged back and cleaned up
-```
+## Autonomous Workflows ("The Dark Factory")
 
-## File Structure
+The Hive operates on a strict phased pipeline to ensuring quality and autonomy.
 
-```
-~/my-hive/                    # Hive root
-├── .hive/
-│   ├── config.toml           # Hive configuration
-│   ├── hive.db               # SQLite database
-│   ├── hive.db-journal
-│   └── queen/                # Queen's workspace (no code access)
-├── myproject/                # Comb (cloned repo)
-│   ├── .git/
-│   ├── bees/                 # Bee cells (worktrees)
-│   │   ├── bee-abc123/
-│   │   └── bee-def456/
-│   └── ... (repo files)
-└── another-project/          # Another comb
-```
+### 1. Research → Plan → Implement
+1.  **Research Phase**: The Queen scans the codebase using cost-effective models (Haiku) to map dependencies, entry points, and constraints. This data is cached to minimize token usage.
+2.  **Planning Phase**: The Queen uses high-intelligence models (Opus) to decompose the Quest into a dependency graph of Jobs. Each job is assigned a specific `job_type` and `verification_criteria`.
+3.  **Implementation Phase**: Bees are spawned to execute jobs in parallel. Each Bee works in an isolated **Cell** (git worktree) to prevent conflicts.
 
-## Key Design Decisions
+### 2. Multi-Model Intelligence
+The system dynamically selects the optimal AI model for each task to balance cost and quality:
+*   **Claude 3.5 Sonnet**: Default for implementation and refactoring.
+*   **Claude 3 Opus**: Used for complex planning and architectural decisions.
+*   **Claude 3 Haiku**: Used for high-volume tasks like research, summarization, and verification.
 
-### Why Elixir/OTP?
+### 3. Context Management
+*   **Context Monitor**: Real-time tracking of token usage per Bee.
+*   **Auto-Handoff**: If a Bee exceeds 50% context usage, it automatically summarizes its state and "hands off" to a fresh instance to prevent context window exhaustion.
 
-- **Supervision trees** - Automatic crash recovery for bees
-- **GenServer** - Clean state management per agent
-- **PubSub** - Real-time messaging without polling
-- **Ports** - Native process spawning and monitoring
-- **Hot code reload** - Update without stopping
+### 4. Quality Assurance & Verification
+The **Drone** acts as an autonomous quality gatekeeper:
+*   **Verification Gates**: A Job cannot be marked "Done" until it passes verification.
+*   **Static Analysis**: Automated linting and code style checks.
+*   **Security Scanning**: Vulnerability detection (secrets, dependencies).
+*   **Performance Benchmarking**: Regression testing against baselines.
+*   **Self-Healing**: The Drone periodically patrols the Hive to detect stuck Bees, deadlocks, or orphaned resources, automatically triggering recovery procedures.
 
-### Why SQLite?
+## Observability
 
-- **Zero config** - No external database to manage
-- **Single file** - Easy backup and portability
-- **Ecto support** - Full query capabilities
-- **Concurrent reads** - Multiple bees can query
+The system provides real-time visibility into the "Dark Factory" operations:
 
-### Why a Plugin System?
+*   **TUI Dashboard**: A terminal-based UI showing active Bees, Quests, and system health.
+*   **Metrics**: Real-time tracking of Quality Scores, Token Costs, and Failure Rates.
+*   **Alerts**: Immediate notifications for stalled quests, validation failures, or budget overruns.
 
-- **Provider-neutral** - Core orchestration doesn't assume any specific AI provider
-- **Hot reload** - Load/unload plugins at runtime without restart
-- **Extensible** - Six plugin types cover models, commands, themes, LSP, MCP, channels
-- **Behaviour-driven** - Clear contracts via Elixir behaviours
+## Plugin System
 
-### Why No Tmux?
+The Hive is extensible via a behaviour-based plugin system:
 
-- **Native processes** - Elixir processes are first-class
-- **Better monitoring** - Port gives us exit status, output
-- **Simpler** - No session management complexity
-- **Cross-platform** - Works on Windows too
+*   **Models**: Adapters for AI providers (Claude, Copilot, Kimi).
+*   **Commands**: Custom CLI extensions.
+*   **Themes**: UI styling.
 
-### Why Git Worktrees?
+## Future Roadmap
 
-- **Isolation** - Each bee has its own working directory
-- **Shared objects** - Saves disk space
-- **Branch per bee** - No conflicts between workers
-- **Sparse checkout** - Exclude `.hive/` from bee view
+*   **Enterprise Monitoring**: Prometheus/Grafana integration for long-term metrics history.
+*   **Multi-Agent Collaboration**: Direct Bee-to-Bee communication for collaborative problem solving.
+*   **Human-in-the-Loop**: Interactive approval gates for high-risk changes.

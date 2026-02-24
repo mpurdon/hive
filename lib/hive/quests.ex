@@ -38,10 +38,23 @@ defmodule Hive.Quests do
         comb_id: attrs[:comb_id] || attrs["comb_id"],
         current_phase: "pending",
         research_summary: nil,
-        implementation_plan: nil
+        implementation_plan: nil,
+        artifacts: %{},
+        phase_jobs: %{}
       }
 
-      Store.insert(:quests, record)
+      case Store.insert(:quests, record) do
+        {:ok, quest} = result ->
+          Hive.Telemetry.emit([:hive, :quest, :created], %{}, %{
+            quest_id: quest.id,
+            name: name
+          })
+
+          result
+
+        error ->
+          error
+      end
     end
   end
 
@@ -191,14 +204,25 @@ defmodule Hive.Quests do
   @spec update_status!(String.t()) :: {:ok, map()} | {:error, term()}
   def update_status!(quest_id) do
     with {:ok, quest} <- get(quest_id) do
-      job_statuses = Enum.map(quest.jobs, & &1.status)
+      # Filter out phase jobs — only implementation jobs affect quest status
+      impl_jobs = Enum.reject(quest.jobs, & &1[:phase_job])
+      job_statuses = Enum.map(impl_jobs, & &1.status)
 
       if quest.status == "planning" and job_statuses == [] do
         {:ok, quest |> Map.delete(:jobs)}
       else
         new_status = compute_status(job_statuses)
         updated = %{quest | status: new_status} |> Map.delete(:jobs)
-        Store.put(:quests, updated)
+        result = Store.put(:quests, updated)
+
+        if new_status == "completed" and quest.status != "completed" do
+          Hive.Telemetry.emit([:hive, :quest, :completed], %{}, %{
+            quest_id: quest.id,
+            name: quest.name
+          })
+        end
+
+        result
       end
     end
   end
@@ -215,6 +239,58 @@ defmodule Hive.Quests do
     job_attrs
     |> Map.put(:quest_id, quest_id)
     |> Hive.Jobs.create()
+  end
+
+  # -- Artifact Storage --------------------------------------------------------
+
+  @doc """
+  Stores a phase artifact on a quest record.
+
+  Merges the artifact into the quest's `artifacts` map under the given phase key.
+  Returns `{:ok, quest}` or `{:error, :not_found}`.
+  """
+  @spec store_artifact(String.t(), String.t(), map()) :: {:ok, map()} | {:error, :not_found}
+  def store_artifact(quest_id, phase, artifact) do
+    case Store.get(:quests, quest_id) do
+      nil ->
+        {:error, :not_found}
+
+      quest ->
+        artifacts = Map.get(quest, :artifacts, %{})
+        updated = Map.put(quest, :artifacts, Map.put(artifacts, phase, artifact))
+        Store.put(:quests, updated)
+    end
+  end
+
+  @doc """
+  Gets a phase artifact from a quest record.
+
+  Returns the artifact map or nil if not found.
+  """
+  @spec get_artifact(String.t(), String.t()) :: map() | nil
+  def get_artifact(quest_id, phase) do
+    case Store.get(:quests, quest_id) do
+      nil -> nil
+      quest -> get_in(quest, [:artifacts, phase]) || get_in(quest, [:artifacts, Access.key(phase)])
+    end
+  end
+
+  @doc """
+  Records which job serves which phase on a quest.
+
+  Returns `{:ok, quest}` or `{:error, :not_found}`.
+  """
+  @spec record_phase_job(String.t(), String.t(), String.t()) :: {:ok, map()} | {:error, :not_found}
+  def record_phase_job(quest_id, phase, job_id) do
+    case Store.get(:quests, quest_id) do
+      nil ->
+        {:error, :not_found}
+
+      quest ->
+        phase_jobs = Map.get(quest, :phase_jobs, %{})
+        updated = Map.put(quest, :phase_jobs, Map.put(phase_jobs, phase, job_id))
+        Store.put(:quests, updated)
+    end
   end
 
   # -- Phase Management --------------------------------------------------------

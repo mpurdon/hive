@@ -1,6 +1,7 @@
 defmodule Hive.CLI do
   @moduledoc "Escript entry point. Parses argv and dispatches to subcommand handlers."
 
+  require Logger
   alias Hive.CLI.Format
 
   # -- Escript entry point ----------------------------------------------------
@@ -32,8 +33,40 @@ defmodule Hive.CLI do
   end
 
   defp launch_tui do
-    ensure_store()
-    TermUI.Runtime.run(root: Hive.TUI.App)
+    File.write("/tmp/hive_tui_debug.log", "launch_tui_entered\n", [:append])
+
+    case ensure_store() do
+      :ok ->
+        :logger.remove_handler(:default)
+        suppress_stderr()
+
+        {:ok, _} = Application.ensure_all_started(:hive)
+
+        File.write("/tmp/hive_tui_debug.log",
+          "[#{DateTime.utc_now()}] app started, calling start_queen\n", [:append])
+
+        start_queen()
+
+        Process.flag(:trap_exit, true)
+        result = Ratatouille.run(Hive.TUI.App,
+          quit_events: [{:key, Ratatouille.Constants.key(:ctrl_c)}]
+        )
+        File.write("/tmp/hive_tui_debug.log",
+          "[#{DateTime.utc_now()}] Ratatouille.run returned: #{inspect(result)}\n", [:append])
+
+        # Check if any exit messages were trapped
+        receive do
+          {:EXIT, pid, reason} ->
+            File.write("/tmp/hive_tui_debug.log",
+              "[#{DateTime.utc_now()}] Trapped EXIT from #{inspect(pid)}: #{inspect(reason)}\n", [:append])
+        after
+          100 -> :ok
+        end
+
+      :skip ->
+        Format.error("Not inside a hive workspace. Run `hive init` first.")
+        System.halt(1)
+    end
   end
 
   defp run_cli(argv) do
@@ -98,6 +131,43 @@ defmodule Hive.CLI do
     end
   end
 
+  defp suppress_stderr do
+    # Redirect :standard_error to /dev/null so Elixir range warnings from
+    # Ratatouille's renderer don't corrupt the terminal display.
+    {:ok, null} = File.open("/dev/null", [:write])
+    Process.unregister(:standard_error)
+    Process.register(null, :standard_error)
+  rescue
+    _ -> :ok
+  end
+
+  defp start_queen do
+    File.write("/tmp/hive_tui_debug.log",
+      "[#{DateTime.utc_now()}] start_queen called, hive_dir=#{inspect(Hive.hive_dir())}\n", [:append])
+
+    case Hive.hive_dir() do
+      {:ok, root} ->
+        # Use GenServer.start (not start_link) so a Queen crash doesn't kill the TUI.
+        result = GenServer.start(Hive.Queen, %{hive_root: root}, name: Hive.Queen)
+        File.write("/tmp/hive_tui_debug.log",
+          "[#{DateTime.utc_now()}] Queen start: #{inspect(result)}\n", [:append])
+
+        case result do
+          {:ok, _pid} ->
+            Hive.Queen.start_session()
+
+          {:error, {:already_started, _pid}} ->
+            :ok
+
+          {:error, _reason} ->
+            :ok
+        end
+
+      _ ->
+        :ok
+    end
+  end
+
   defp ensure_store do
     case Hive.hive_dir() do
       {:ok, root} ->
@@ -123,7 +193,8 @@ defmodule Hive.CLI do
   @handlers [
     Hive.CLI.QuestHandler,
     Hive.CLI.BeeHandler,
-    Hive.CLI.CouncilHandler
+    Hive.CLI.CouncilHandler,
+    Hive.CLI.PlanHandler
   ]
 
   defp handler_helpers do
@@ -663,13 +734,8 @@ defmodule Hive.CLI do
           IO.puts("")
           Format.info("Attempting to resolve...")
           
-          case Hive.Resilience.resolve_deadlock(quest_id, cycles) do
-            {:ok, :deadlock_resolved} ->
-              Format.success("Deadlock resolved")
-            
-            {:error, reason} ->
-              Format.error("Failed to resolve: #{inspect(reason)}")
-          end
+          {:ok, :deadlock_resolved} = Hive.Resilience.resolve_deadlock(quest_id, cycles)
+          Format.success("Deadlock resolved")
       end
     else
       Format.error("Usage: hive deadlock --quest <id>")
@@ -1611,22 +1677,27 @@ defmodule Hive.CLI do
   end
 
   defp dispatch([:costs, :record], result) do
-    bee_id = result_get(result, :options, :bee)
-    input = result_get(result, :options, :input)
-    output = result_get(result, :options, :output)
-    model = result_get(result, :options, :model)
+    queen? = result_get(result, :flags, :queen) || false
 
-    attrs = %{
-      input_tokens: input,
-      output_tokens: output,
-      model: model
-    }
+    if queen? do
+      record_queen_costs()
+    else
+      bee_id = result_get(result, :options, :bee)
+      input = result_get(result, :options, :input)
+      output = result_get(result, :options, :output)
+      model = result_get(result, :options, :model)
 
-    {:ok, cost} = Hive.Costs.record(bee_id, attrs)
+      if is_nil(bee_id) or is_nil(input) or is_nil(output) do
+        Format.error("--bee, --input, and --output are required (or use --queen)")
+      else
+        attrs = %{input_tokens: input, output_tokens: output, model: model}
+        {:ok, cost} = Hive.Costs.record(bee_id, attrs)
 
-    Format.success(
-      "Cost recorded: $#{:erlang.float_to_binary(cost.cost_usd, decimals: 6)} (#{cost.id})"
-    )
+        Format.success(
+          "Cost recorded: $#{:erlang.float_to_binary(cost.cost_usd, decimals: 6)} (#{cost.id})"
+        )
+      end
+    end
   end
 
   defp dispatch([:doctor], result) do
@@ -2223,6 +2294,69 @@ defmodule Hive.CLI do
   end
 
   # -- Dispatch helpers (not dispatch/2 clauses) -----------------------------
+
+  @empty_costs %{input_tokens: 0, output_tokens: 0, cache_read_tokens: 0, cache_write_tokens: 0, model: nil}
+
+  defp record_queen_costs do
+    # Read costs from the latest Queen transcript if available
+    case Hive.hive_dir() do
+      {:ok, root} ->
+        transcript_dir = Path.join([root, ".hive", "queen", ".claude", "projects"])
+
+        costs = extract_costs_from_transcripts(transcript_dir)
+
+        if costs.input_tokens > 0 or costs.output_tokens > 0 do
+          attrs = %{
+            input_tokens: costs.input_tokens,
+            output_tokens: costs.output_tokens,
+            cache_read_tokens: costs.cache_read_tokens,
+            cache_write_tokens: costs.cache_write_tokens,
+            model: costs.model
+          }
+
+          {:ok, cost} = Hive.Costs.record("queen", attrs)
+          Format.success(
+            "Queen cost recorded: $#{:erlang.float_to_binary(cost.cost_usd, decimals: 6)} (#{cost.id})"
+          )
+        else
+          Format.info("No new queen costs to record.")
+        end
+
+      {:error, _} ->
+        Format.error("Not in a hive workspace.")
+    end
+  end
+
+  defp extract_costs_from_transcripts(dir) do
+    if File.dir?(dir) do
+      case Path.wildcard(Path.join([dir, "**", "*.jsonl"])) |> Enum.sort() |> List.last() do
+        nil -> @empty_costs
+        path ->
+          path
+          |> File.stream!()
+          |> Enum.reduce(@empty_costs, fn line, acc ->
+            case Jason.decode(line) do
+              {:ok, %{"type" => "usage", "usage" => usage}} ->
+                %{acc |
+                  input_tokens: acc.input_tokens + (usage["input_tokens"] || 0),
+                  output_tokens: acc.output_tokens + (usage["output_tokens"] || 0),
+                  cache_read_tokens: acc.cache_read_tokens + (usage["cache_read_input_tokens"] || 0),
+                  cache_write_tokens: acc.cache_write_tokens + (usage["cache_creation_input_tokens"] || 0)
+                }
+
+              {:ok, %{"type" => "result", "model" => model}} when is_binary(model) ->
+                %{acc | model: model}
+
+              _ -> acc
+            end
+          end)
+      end
+    else
+      @empty_costs
+    end
+  rescue
+    _ -> @empty_costs
+  end
 
   defp resolve_comb_id(explicit) when is_binary(explicit), do: {:ok, explicit}
 
@@ -2994,25 +3128,31 @@ defmodule Hive.CLI do
             record: [
               name: "record",
               about: "Manually record a cost entry",
+              flags: [
+                queen: [
+                  long: "--queen",
+                  help: "Record costs for the queen session (reads from latest transcript)"
+                ]
+              ],
               options: [
                 bee: [
                   short: "-b",
                   long: "--bee",
                   help: "Bee ID to record costs for",
                   parser: :string,
-                  required: true
+                  required: false
                 ],
                 input: [
                   long: "--input",
                   help: "Input token count",
                   parser: :integer,
-                  required: true
+                  required: false
                 ],
                 output: [
                   long: "--output",
                   help: "Output token count",
                   parser: :integer,
-                  required: true
+                  required: false
                 ],
                 model: [
                   short: "-m",

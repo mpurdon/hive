@@ -57,10 +57,11 @@ defmodule Hive.MixProject do
       {:optimus, "~> 0.5"},
       {:toml, "~> 0.7"},
       {:req, "~> 0.5"},
-      {:term_ui, "~> 0.2.0"},
+      {:ratatouille, "~> 0.5"},
       {:telemetry, "~> 1.2"},
-      {:gen_stage, "~> 1.2"},
-      {:mox, "~> 1.1", only: :test}
+      {:req_llm, "~> 1.6"},
+      {:mox, "~> 1.1", only: :test},
+      {:lazy_html, ">= 0.1.0", only: :test}
     ]
   end
 end

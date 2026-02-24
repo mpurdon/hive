@@ -111,18 +111,32 @@ defmodule Hive.Cell do
 
     orphan_count =
       Enum.count(active_cells, fn cell ->
-        case Store.get(:bees, cell.bee_id) do
-          nil ->
-            Store.put(:cells, Map.merge(cell, %{status: "removed", removed_at: now}))
-            true
+        orphan? =
+          case Store.get(:bees, cell.bee_id) do
+            nil -> true
+            bee -> bee.status in ["stopped", "crashed"]
+          end
 
-          bee ->
-            if bee.status in ["stopped", "crashed"] do
-              Store.put(:cells, Map.merge(cell, %{status: "removed", removed_at: now}))
-              true
-            else
-              false
+        if orphan? do
+          Store.put(:cells, Map.merge(cell, %{status: "removed", removed_at: now}))
+
+          # Best-effort: remove worktree and branch from disk
+          try do
+            case Hive.Comb.get(cell.comb_id) do
+              {:ok, comb} when not is_nil(comb.path) ->
+                Git.worktree_remove(comb.path, cell.worktree_path, force: true)
+                Git.branch_delete(comb.path, cell.branch)
+
+              _ ->
+                :ok
             end
+          rescue
+            _ -> :ok
+          end
+
+          true
+        else
+          false
         end
       end)
 

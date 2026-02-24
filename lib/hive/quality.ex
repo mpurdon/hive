@@ -30,9 +30,6 @@ defmodule Hive.Quality do
 
         Store.insert(:quality_reports, report)
         {:ok, report}
-
-      {:error, reason} ->
-        {:error, reason}
     end
   end
 
@@ -41,27 +38,23 @@ defmodule Hive.Quality do
   Returns {:ok, report} with security score and findings.
   """
   def analyze_security(job_id, cell_path, language) do
-    case Security.scan(cell_path, language) do
-      {:ok, %{findings: findings, score: score, tool: tool}} ->
-        report = %{
-          id: generate_id("qr"),
-          job_id: job_id,
-          analysis_type: "security",
-          score: score,
-          issues: findings,
-          tool: tool,
-          tool_available: true,
-          recommendations: generate_security_recommendations(findings),
-          inserted_at: DateTime.utc_now(),
-          updated_at: DateTime.utc_now()
-        }
+    {:ok, %{findings: findings, score: score, tool: tool}} = Security.scan(cell_path, language)
 
-        Store.insert(:quality_reports, report)
-        {:ok, report}
+    report = %{
+      id: generate_id("qr"),
+      job_id: job_id,
+      analysis_type: "security",
+      score: score,
+      issues: findings,
+      tool: tool,
+      tool_available: true,
+      recommendations: generate_security_recommendations(findings),
+      inserted_at: DateTime.utc_now(),
+      updated_at: DateTime.utc_now()
+    }
 
-      {:error, reason} ->
-        {:error, reason}
-    end
+    Store.insert(:quality_reports, report)
+    {:ok, report}
   end
 
   @doc """

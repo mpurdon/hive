@@ -5,7 +5,7 @@ defmodule Hive.Onboarding do
   """
 
   alias Hive.Onboarding.{Detector, Mapper}
-  alias Hive.{Comb, Research}
+  alias Hive.Comb
 
   @doc """
   Onboard a project with automatic detection and configuration.
@@ -70,7 +70,7 @@ defmodule Hive.Onboarding do
     {:ok, codebase_map}
   end
 
-  defp create_comb(path, project_info, codebase_map, opts) do
+  defp create_comb(path, project_info, _codebase_map, opts) do
     name = opts[:name] || Path.basename(path)
     validation_cmd = opts[:validation_command] || project_info.validation_command
     

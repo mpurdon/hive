@@ -14,7 +14,8 @@ defmodule Hive.Plugin.Manager do
   @builtin_models [
     Hive.Plugin.Builtin.Models.Claude,
     Hive.Plugin.Builtin.Models.Copilot,
-    Hive.Plugin.Builtin.Models.Kimi
+    Hive.Plugin.Builtin.Models.Kimi,
+    Hive.Plugin.Builtin.Models.ReqLLMProvider
   ]
   @builtin_themes [Hive.Plugin.Builtin.Themes.Default]
   @builtin_commands [

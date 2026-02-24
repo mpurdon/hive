@@ -16,6 +16,9 @@ defmodule Hive.Merge do
 
   alias Hive.Store
 
+  @lock_timeout 60_000
+  @lock_retry_interval 500
+
   @doc """
   Merges a bee's worktree branch back according to the comb's merge strategy.
 
@@ -27,7 +30,12 @@ defmodule Hive.Merge do
     with {:ok, cell} <- fetch_cell(cell_id),
          {:ok, comb} <- fetch_comb(cell.comb_id) do
       strategy = comb.merge_strategy || "manual"
-      apply_strategy(strategy, cell, comb)
+
+      if strategy == "auto_merge" do
+        with_comb_lock(comb.id, fn -> apply_strategy(strategy, cell, comb) end)
+      else
+        apply_strategy(strategy, cell, comb)
+      end
     end
   end
 
@@ -43,11 +51,42 @@ defmodule Hive.Merge do
     with {:ok, quest} <- Hive.Quests.get(quest_id),
          cells <- cells_for_quest(quest),
          true <- cells != [] || {:error, :no_cells},
-         {:ok, comb} <- fetch_comb_for_cells(cells),
-         {:ok, main_branch} <- detect_main_branch(comb.path),
-         quest_branch = "quest/#{quest.name}",
-         :ok <- create_quest_branch(comb.path, quest_branch, main_branch) do
-      merge_cells_into_quest_branch(comb.path, quest_branch, cells)
+         {:ok, comb} <- fetch_comb_for_cells(cells) do
+      with_comb_lock(comb.id, fn ->
+        with {:ok, main_branch} <- detect_main_branch(comb.path),
+             quest_branch = "quest/#{quest.name}",
+             :ok <- create_quest_branch(comb.path, quest_branch, main_branch) do
+          merge_cells_into_quest_branch(comb.path, quest_branch, cells)
+        end
+      end)
+    end
+  end
+
+  # -- Private: per-comb merge lock --------------------------------------------
+
+  @doc false
+  defp with_comb_lock(comb_id, fun) do
+    lock_key = {:merge_lock, comb_id}
+    acquire_lock(lock_key, @lock_timeout, fun)
+  end
+
+  defp acquire_lock(lock_key, remaining, _fun) when remaining <= 0 do
+    Logger.warning("Merge lock timeout for #{inspect(lock_key)}")
+    {:error, :merge_lock_timeout}
+  end
+
+  defp acquire_lock(lock_key, remaining, fun) do
+    case Registry.register(Hive.Registry, lock_key, :lock) do
+      {:ok, _} ->
+        try do
+          fun.()
+        after
+          Registry.unregister(Hive.Registry, lock_key)
+        end
+
+      {:error, {:already_registered, _}} ->
+        Process.sleep(@lock_retry_interval)
+        acquire_lock(lock_key, remaining - @lock_retry_interval, fun)
     end
   end
 
@@ -100,17 +139,20 @@ defmodule Hive.Merge do
   @spec merge_back_with_rebase(String.t(), keyword()) :: {:ok, String.t()} | {:error, term()}
   def merge_back_with_rebase(cell_id, _opts \\ []) do
     with {:ok, cell} <- fetch_cell(cell_id),
-         {:ok, comb} <- fetch_comb(cell.comb_id),
-         {:ok, main_branch} <- detect_main_branch(comb.path),
-         :ok <- rebase_branch(cell.worktree_path, main_branch),
-         :ok <- Hive.Git.checkout(comb.path, main_branch),
-         :ok <- Hive.Git.merge(comb.path, cell.branch, []) do
-      Logger.info("Rebase-merged #{cell.branch} into #{main_branch}")
-      {:ok, "rebase_merge"}
-    else
-      {:error, reason} ->
-        Logger.warning("Rebase-merge failed: #{inspect(reason)}")
-        {:error, reason}
+         {:ok, comb} <- fetch_comb(cell.comb_id) do
+      with_comb_lock(comb.id, fn ->
+        with {:ok, main_branch} <- detect_main_branch(comb.path),
+             :ok <- rebase_branch(cell.worktree_path, main_branch),
+             :ok <- Hive.Git.checkout(comb.path, main_branch),
+             :ok <- Hive.Git.merge(comb.path, cell.branch, []) do
+          Logger.info("Rebase-merged #{cell.branch} into #{main_branch}")
+          {:ok, "rebase_merge"}
+        else
+          {:error, reason} ->
+            Logger.warning("Rebase-merge failed: #{inspect(reason)}")
+            {:error, reason}
+        end
+      end)
     end
   end
 

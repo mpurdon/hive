@@ -66,7 +66,7 @@ defmodule Hive.Quality.Security do
 
   defp check_mix_audit(path) do
     case System.cmd("mix", ["deps.audit"], cd: path, stderr_to_stdout: true) do
-      {output, 0} -> []
+      {_output, 0} -> []
       {output, _} -> parse_mix_audit(output)
     end
   rescue

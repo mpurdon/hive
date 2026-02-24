@@ -81,6 +81,11 @@ defmodule Hive.Jobs do
         model_selection_reason: classification[:reason],
         verification_criteria: attrs[:verification_criteria] || [],
         estimated_context_tokens: attrs[:estimated_context_tokens],
+        # Phase job fields
+        phase_job: attrs[:phase_job] || false,
+        phase: attrs[:phase],
+        acceptance_criteria: attrs[:acceptance_criteria] || [],
+        target_files: attrs[:target_files] || [],
         # Verification fields
         verification_status: "pending",
         verification_result: nil,
@@ -231,7 +236,26 @@ defmodule Hive.Jobs do
     with {:ok, job} <- get(job_id),
          {:ok, next_status} <- validate_transition(job.status, action) do
       updated = %{job | status: next_status}
-      Store.put(:jobs, updated)
+      result = Store.put(:jobs, updated)
+
+      case action do
+        :start ->
+          Hive.Telemetry.emit([:hive, :job, :started], %{}, %{
+            job_id: job_id,
+            quest_id: job.quest_id
+          })
+
+        :complete ->
+          Hive.Telemetry.emit([:hive, :job, :completed], %{}, %{
+            job_id: job_id,
+            quest_id: job.quest_id
+          })
+
+        _ ->
+          :ok
+      end
+
+      result
     end
   end
 

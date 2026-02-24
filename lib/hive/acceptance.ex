@@ -10,7 +10,7 @@ defmodule Hive.Acceptance do
   @doc "Test if job meets acceptance criteria"
   def test_acceptance(job_id) do
     job = Store.get(:jobs, job_id)
-    quest = Store.get(:quests, job.quest_id)
+    _quest = Store.get(:quests, job.quest_id)
     
     goal_validation = Goals.validate_job(job_id)
     scope_check = ScopeGuard.check_scope(job_id)
@@ -28,7 +28,7 @@ defmodule Hive.Acceptance do
 
   @doc "Test if quest meets acceptance criteria"
   def test_quest_acceptance(quest_id) do
-    quest = Store.get(:quests, quest_id)
+    _quest = Store.get(:quests, quest_id)
     goal_validation = Goals.validate_quest_completion(quest_id)
     scope_check = ScopeGuard.check_quest_scope(quest_id)
     

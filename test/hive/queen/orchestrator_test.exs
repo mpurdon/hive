@@ -24,20 +24,22 @@ defmodule Hive.Queen.OrchestratorTest do
       name: "test-quest",
       goal: "Build a test feature",
       comb_id: comb.id,
-      status: "pending"
+      status: "pending",
+      current_phase: "pending",
+      artifacts: %{},
+      phase_jobs: %{},
+      research_summary: nil,
+      implementation_plan: nil
     })
-    
+
     %{quest: quest, comb: comb}
   end
 
   describe "start_quest/1" do
     test "transitions quest to research phase", %{quest: quest} do
-      # Mock research to return immediately
-      research_result = %{structure: %{main_language: "elixir"}}
-      
-      # We'll test the phase transition part
+      # We'll test the phase transition part directly
       {:ok, _} = Hive.Quests.transition_phase(quest.id, "research", "Quest started")
-      
+
       # Verify phase transition was recorded
       transitions = Hive.Quests.get_phase_transitions(quest.id)
       assert length(transitions) == 1
@@ -45,10 +47,10 @@ defmodule Hive.Queen.OrchestratorTest do
     end
 
     test "validates quest is ready before starting", %{quest: quest} do
-      # Set quest to non-pending status
-      updated = Map.put(quest, :status, "active")
+      # Set quest to completed status (not allowed)
+      updated = Map.put(quest, :status, "completed")
       Store.put(:quests, updated)
-      
+
       {:error, :quest_not_pending} = Orchestrator.start_quest(quest.id)
     end
 
@@ -56,7 +58,7 @@ defmodule Hive.Queen.OrchestratorTest do
       # Remove comb_id
       updated = Map.put(quest, :comb_id, nil)
       Store.put(:quests, updated)
-      
+
       {:error, :no_comb_assigned} = Orchestrator.start_quest(quest.id)
     end
 
@@ -70,30 +72,21 @@ defmodule Hive.Queen.OrchestratorTest do
       # Add some phase transitions
       {:ok, _} = Hive.Quests.transition_phase(quest.id, "research", "Started")
       {:ok, _} = Hive.Quests.transition_phase(quest.id, "planning", "Research done")
-      
-      # Add research summary
-      quest_record = Store.get(:quests, quest.id)
-      updated = Map.put(quest_record, :research_summary, %{done: true})
-      Store.put(:quests, updated)
-      
+
       {:ok, status} = Orchestrator.get_quest_status(quest.id)
-      
+
       assert status.quest.id == quest.id
       assert status.current_phase == "planning"
-      assert status.research_complete == true
-      assert status.plan_complete == false
       assert status.jobs_created == false
       assert length(status.phase_history) == 2
     end
 
-    test "detects when plan is complete", %{quest: quest} do
-      # Add implementation plan
-      quest_record = Store.get(:quests, quest.id)
-      updated = Map.put(quest_record, :implementation_plan, %{tasks: []})
-      Store.put(:quests, updated)
-      
+    test "detects completed phases from artifacts", %{quest: quest} do
+      # Store a research artifact
+      Hive.Quests.store_artifact(quest.id, "research", %{"architecture" => "OTP app"})
+
       {:ok, status} = Orchestrator.get_quest_status(quest.id)
-      assert status.plan_complete == true
+      assert "research" in status.completed_phases
     end
 
     test "detects when jobs are created", %{quest: quest} do
@@ -103,7 +96,7 @@ defmodule Hive.Queen.OrchestratorTest do
         quest_id: quest.id,
         comb_id: quest.comb_id
       })
-      
+
       {:ok, status} = Orchestrator.get_quest_status(quest.id)
       assert status.jobs_created == true
     end
@@ -114,95 +107,103 @@ defmodule Hive.Queen.OrchestratorTest do
   end
 
   describe "advance_quest/1" do
-    test "advances from research to planning when research complete", %{quest: quest} do
-      # Set up quest in research phase with completed research
+    test "advances from research to requirements when research artifact exists", %{quest: quest} do
+      # Set up quest in research phase with artifact
       quest_record = Store.get(:quests, quest.id)
-      updated = quest_record
-        |> Map.put(:current_phase, "research")
-        |> Map.put(:research_summary, %{structure: %{main_language: "elixir"}})
+      updated = Map.put(quest_record, :current_phase, "research")
       Store.put(:quests, updated)
-      
+
+      Hive.Quests.store_artifact(quest.id, "research", %{
+        "architecture" => "OTP app",
+        "key_files" => ["lib/app.ex"],
+        "patterns" => [],
+        "tech_stack" => ["elixir"]
+      })
+
       {:ok, phase} = Orchestrator.advance_quest(quest.id)
-      assert phase == "planning"
-      
-      # Verify quest was updated
-      updated_quest = Store.get(:quests, quest.id)
-      assert updated_quest.current_phase == "planning"
-      assert updated_quest.implementation_plan != nil
+      assert phase == "requirements"
     end
 
-    test "advances from planning to implementation when plan complete", %{quest: quest} do
-      # Set up quest in planning phase with completed plan
+    test "stays in research when no artifact exists", %{quest: quest} do
       quest_record = Store.get(:quests, quest.id)
-      updated = quest_record
-        |> Map.put(:current_phase, "planning")
-        |> Map.put(:implementation_plan, %{tasks: []})
+      updated = Map.put(quest_record, :current_phase, "research")
       Store.put(:quests, updated)
-      
+
       {:ok, phase} = Orchestrator.advance_quest(quest.id)
-      assert phase == "implementation"
-      
-      # Verify phase transition
-      updated_quest = Store.get(:quests, quest.id)
-      assert updated_quest.current_phase == "implementation"
+      assert phase == "research"
     end
 
-    test "completes quest when all jobs are done", %{quest: quest} do
-      # Create completed job
-      {:ok, job} = Hive.Jobs.create(%{
+    test "completes quest when all implementation jobs are done", %{quest: quest} do
+      # Create completed non-phase job
+      {:ok, _job} = Hive.Jobs.create(%{
         title: "Test job",
         quest_id: quest.id,
         comb_id: quest.comb_id,
-        status: "done"
+        status: "done",
+        phase_job: false
       })
-      
+
       # Set quest to implementation phase
       quest_record = Store.get(:quests, quest.id)
       updated = Map.put(quest_record, :current_phase, "implementation")
       Store.put(:quests, updated)
-      
+
       {:ok, phase} = Orchestrator.advance_quest(quest.id)
-      assert phase == "completed"
-      
-      # Verify quest completion
-      updated_quest = Store.get(:quests, quest.id)
-      assert updated_quest.current_phase == "completed"
+      # Should advance to validation (not directly to completed)
+      assert phase == "validation"
     end
 
     test "stays in implementation when jobs are not complete", %{quest: quest} do
       # Create pending job
-      {:ok, job} = Hive.Jobs.create(%{
+      {:ok, _job} = Hive.Jobs.create(%{
         title: "Test job",
         quest_id: quest.id,
         comb_id: quest.comb_id,
-        status: "pending"
+        status: "pending",
+        phase_job: false
       })
-      
+
       # Set quest to implementation phase
       quest_record = Store.get(:quests, quest.id)
       updated = Map.put(quest_record, :current_phase, "implementation")
       Store.put(:quests, updated)
-      
+
       {:ok, phase} = Orchestrator.advance_quest(quest.id)
       assert phase == "implementation"
     end
 
-    test "returns error when research not complete", %{quest: quest} do
-      # Set quest to research phase without completed research
+    test "handles review approval and advances to planning", %{quest: quest} do
       quest_record = Store.get(:quests, quest.id)
-      updated = Map.put(quest_record, :current_phase, "research")
+      updated = Map.put(quest_record, :current_phase, "review")
       Store.put(:quests, updated)
-      
-      {:error, :research_not_complete} = Orchestrator.advance_quest(quest.id)
+
+      # Store approved review artifact
+      Hive.Quests.store_artifact(quest.id, "review", %{
+        "approved" => true,
+        "coverage" => [],
+        "issues" => [],
+        "risk_assessment" => "Low risk"
+      })
+
+      {:ok, phase} = Orchestrator.advance_quest(quest.id)
+      assert phase == "planning"
     end
 
-    test "returns error when planning not complete", %{quest: quest} do
-      # Set quest to planning phase without completed plan
+    test "handles review rejection with redesign", %{quest: quest} do
       quest_record = Store.get(:quests, quest.id)
-      updated = Map.put(quest_record, :current_phase, "planning")
+      updated = Map.put(quest_record, :current_phase, "review")
       Store.put(:quests, updated)
-      
-      {:error, :planning_not_complete} = Orchestrator.advance_quest(quest.id)
+
+      # Store rejected review artifact
+      Hive.Quests.store_artifact(quest.id, "review", %{
+        "approved" => false,
+        "coverage" => [],
+        "issues" => [%{"severity" => "high", "description" => "Missing error handling"}],
+        "risk_assessment" => "High risk"
+      })
+
+      {:ok, phase} = Orchestrator.advance_quest(quest.id)
+      assert phase == "design"
     end
 
     test "returns current phase for unknown phases", %{quest: quest} do
@@ -210,9 +211,22 @@ defmodule Hive.Queen.OrchestratorTest do
       quest_record = Store.get(:quests, quest.id)
       updated = Map.put(quest_record, :current_phase, "unknown")
       Store.put(:quests, updated)
-      
+
       {:ok, phase} = Orchestrator.advance_quest(quest.id)
       assert phase == "unknown"
+    end
+  end
+
+  describe "phases/0" do
+    test "returns ordered phase list" do
+      phases = Orchestrator.phases()
+      assert "research" in phases
+      assert "requirements" in phases
+      assert "design" in phases
+      assert "review" in phases
+      assert "planning" in phases
+      assert "implementation" in phases
+      assert "validation" in phases
     end
   end
 
@@ -245,7 +259,7 @@ defmodule Hive.Queen.OrchestratorTest do
 
     test "updates quest current_phase field", %{quest: quest} do
       {:ok, _} = Hive.Quests.transition_phase(quest.id, "research", "Started")
-      
+
       updated_quest = Store.get(:quests, quest.id)
       assert updated_quest.current_phase == "research"
     end

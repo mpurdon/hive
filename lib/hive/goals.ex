@@ -31,7 +31,7 @@ defmodule Hive.Goals do
     }
   end
 
-  defp analyze_goal_achievement(quest, jobs) do
+  defp analyze_goal_achievement(_quest, jobs) do
     completed = Enum.filter(jobs, &(&1.status == "completed"))
     
     if Enum.empty?(completed) do
@@ -60,7 +60,7 @@ defmodule Hive.Goals do
     end
   end
 
-  defp check_completeness(quest, jobs) do
+  defp check_completeness(_quest, jobs) do
     required_jobs = Enum.filter(jobs, &(&1.status != "cancelled"))
     completed_jobs = Enum.filter(required_jobs, &(&1.status in ["completed", "verified"]))
     
@@ -84,7 +84,7 @@ defmodule Hive.Goals do
     end
   end
 
-  defp job_achieves_goal?(job, quest) do
+  defp job_achieves_goal?(job, _quest) do
     # Basic check: job is completed and verified
     job.status in ["completed", "verified"] && 
     (job.verification_status == "passed" || is_nil(job.verification_status))

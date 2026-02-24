@@ -192,12 +192,15 @@ defmodule Hive.Prime do
     cell = fetch_cell_for_bee(bee)
     waggles = Hive.Waggle.list_unread(bee.id)
 
+    quest_context = build_quest_context(job)
+
     sections = [
       "# Bee Briefing: #{bee.name} (#{bee.id})",
       "",
       "## Your Job",
       format_job_detail(job),
       "",
+      quest_context,
       "## Your Workspace",
       format_cell_detail(cell),
       "",
@@ -214,7 +217,9 @@ defmodule Hive.Prime do
       "- Do NOT modify files outside your worktree."
     ]
 
-    Enum.join(sections, "\n")
+    sections
+    |> Enum.reject(&(&1 == ""))
+    |> Enum.join("\n")
   end
 
   defp fetch_job_for_bee(%{job_id: nil}), do: nil
@@ -254,6 +259,91 @@ defmodule Hive.Prime do
       "Branch: `#{cell.branch}`"
     ]
     |> Enum.join("\n")
+  end
+
+  # -- Private: Quest Context ------------------------------------------------
+
+  defp build_quest_context(nil), do: ""
+
+  defp build_quest_context(job) do
+    # Only enrich non-phase implementation jobs
+    if Map.get(job, :phase_job, false) do
+      ""
+    else
+      quest = Store.get(:quests, job.quest_id)
+
+      if is_nil(quest) or is_nil(Map.get(quest, :artifacts)) or map_size(Map.get(quest, :artifacts, %{})) == 0 do
+        ""
+      else
+        sections = []
+        artifacts = quest.artifacts
+
+        # Add relevant requirements
+        sections =
+          case Map.get(artifacts, "requirements") do
+            nil ->
+              sections
+
+            reqs ->
+              func_reqs = Map.get(reqs, "functional_requirements", [])
+
+              formatted =
+                Enum.map_join(func_reqs, "\n", fn req ->
+                  criteria = Map.get(req, "acceptance_criteria", [])
+                  criteria_str = Enum.map_join(criteria, "\n", &("    - #{&1}"))
+                  "- **#{Map.get(req, "id", "?")}**: #{Map.get(req, "description", "")}\n#{criteria_str}"
+                end)
+
+              sections ++ ["## Requirements\n", formatted, ""]
+          end
+
+        # Add relevant design section
+        sections =
+          case Map.get(artifacts, "design") do
+            nil ->
+              sections
+
+            design ->
+              relevant = extract_relevant_design(design, job)
+              sections ++ ["## Technical Design\n", relevant, ""]
+          end
+
+        # Add this job's acceptance criteria
+        sections =
+          case Map.get(job, :acceptance_criteria, []) do
+            [] ->
+              sections
+
+            criteria ->
+              formatted = Enum.map_join(criteria, "\n", &("- [ ] #{&1}"))
+              sections ++ ["## Acceptance Criteria (Your Job)\n", formatted, ""]
+          end
+
+        Enum.join(sections, "\n")
+      end
+    end
+  end
+
+  defp extract_relevant_design(design, job) do
+    target_files = Map.get(job, :target_files, [])
+    components = Map.get(design, "components", [])
+
+    relevant =
+      if target_files == [] do
+        components
+      else
+        Enum.filter(components, fn comp ->
+          comp_files = Map.get(comp, "files", [])
+          Enum.any?(comp_files, fn f -> f in target_files end)
+        end)
+      end
+
+    relevant = if relevant == [], do: components, else: relevant
+
+    Enum.map_join(relevant, "\n", fn comp ->
+      files = Map.get(comp, "files", []) |> Enum.join(", ")
+      "- **#{Map.get(comp, "name", "?")}**: #{Map.get(comp, "description", "")} (#{files})"
+    end)
   end
 
   # -- Private: Agent Profile ------------------------------------------------

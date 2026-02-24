@@ -1,198 +1,669 @@
 defmodule Hive.TUI.App do
   @moduledoc """
-  Root TUI component using the Elm Architecture (term_ui).
+  The main TUI application module.
 
-  Manages the overall layout: chat pane, activity panel, input bar,
-  and status bar. Subscribes to PubSub for real-time updates.
+  Uses Ratatouille's subscription system to poll ViewModel for updates
+  rather than PubSub (which doesn't integrate with the Ratatouille runtime loop).
+
+  User chat input is sent to a headless Claude session via
+  `Ratatouille.Runtime.Command`, and the response is displayed in the
+  chat panel when it arrives.
   """
+  @behaviour Ratatouille.App
 
-  use TermUI.Elm
+  require Logger
 
-  alias TermUI.Event
+  alias Hive.TUI.Context.{Input, Chat, Activity}
+  alias Hive.TUI.{Constants, Views}
+  alias Ratatouille.Runtime.{Command, Subscription}
 
-  alias Hive.TUI.Components.ChatPane
-  alias Hive.TUI.Components.ActivityPanel
-  alias Hive.TUI.Components.InputBar
-  alias Hive.TUI.Components.StatusBar
+  import Ratatouille.View
+  import Ratatouille.Constants, only: [key: 1]
 
-  # -- Elm Architecture callbacks -------------------------------------------
+  @space key(:space)
+  @enter key(:enter)
+  @backspace key(:backspace)
+  @backspace2 key(:backspace2)
+  @delete key(:delete)
+  @arrow_left key(:arrow_left)
+  @arrow_right key(:arrow_right)
+  @arrow_up key(:arrow_up)
+  @arrow_down key(:arrow_down)
 
-  def init(_opts) do
-    # Start Queen if not already running
-    hive_root = start_queen()
-
-    # Subscribe to PubSub topics for real-time updates
-    Hive.TUI.Bridge.subscribe()
-
-    theme = Hive.Plugin.Manager.active_theme()
-
+  @impl true
+  def init(_context) do
     %{
-      hive_root: hive_root,
-      theme: theme,
-      chat: ChatPane.init(),
-      activity: ActivityPanel.init(),
-      input: InputBar.init(),
-      status: StatusBar.init(),
-      focus: :input,
-      show_command_palette: false
+      input: Input.new(),
+      chat: Chat.new(),
+      activity: Activity.new(),
+      busy: false,
+      session_id: nil,
+      chat_scroll: 0
     }
   end
 
-  def event_to_msg(%Event.Key{key: :q, modifiers: [:ctrl]}, _state), do: {:msg, :quit}
-  def event_to_msg(%Event.Key{key: :c, modifiers: [:ctrl]}, _state), do: {:msg, :quit}
+  @impl true
+  def subscribe(_model) do
+    Subscription.interval(500, :tick)
+  end
 
-  def event_to_msg(%Event.Key{key: :p, modifiers: [:ctrl]}, _state),
-    do: {:msg, :toggle_command_palette}
+  @impl true
+  def update(model, msg) do
+    case msg do
+      {:event, %{ch: ch}} when ch > 0 ->
+        input = Input.insert_char(model.input, List.to_string([ch]))
+        %{model | input: input}
 
-  def event_to_msg(%Event.Key{key: :tab}, _state), do: {:msg, :cycle_focus}
+      {:event, %{key: key}} ->
+        handle_key(model, key)
 
-  # Delegate key events to the focused component
-  def event_to_msg(%Event.Key{} = event, %{focus: :input} = state) do
-    case InputBar.event_to_msg(event, state.input) do
-      {:msg, msg} -> {:msg, {:input, msg}}
-      :ignore -> :ignore
+      {:event, %{resize: _resize}} ->
+        model
+
+      :tick ->
+        refresh_activity(model)
+
+      {:chat_response, {:ok, content, session_id}} ->
+        chat = Chat.add_message(model.chat, :assistant, content)
+        sid = session_id || model.session_id
+        %{model | chat: chat, busy: false, session_id: sid, chat_scroll: chat_bottom(chat)}
+
+      {:chat_response, {:error, reason}} ->
+        chat = Chat.add_message(model.chat, :system, "Error: #{reason}")
+        %{model | chat: chat, busy: false, chat_scroll: chat_bottom(chat)}
+
+      _ ->
+        model
     end
   end
 
-  def event_to_msg(%Event.Key{} = event, %{focus: :chat} = state) do
-    case ChatPane.event_to_msg(event, state.chat) do
-      {:msg, msg} -> {:msg, {:chat, msg}}
-      :ignore -> :ignore
+  defp handle_key(model, key) do
+    case key do
+      @space ->
+        input = Input.insert_char(model.input, " ")
+        %{model | input: input}
+
+      @enter ->
+        submit_input(model)
+
+      key when key in [@backspace, @backspace2] ->
+        input = Input.delete_char(model.input)
+        %{model | input: input}
+
+      @delete ->
+        input = Input.delete_char_forward(model.input)
+        %{model | input: input}
+
+      @arrow_left ->
+        input = Input.move_cursor(model.input, :left)
+        %{model | input: input}
+
+      @arrow_right ->
+        input = Input.move_cursor(model.input, :right)
+        %{model | input: input}
+
+      @arrow_up ->
+        input = Input.prev_history(model.input)
+        %{model | input: input}
+
+      @arrow_down ->
+        input = Input.next_history(model.input)
+        %{model | input: input}
+
+      _ ->
+        model
     end
   end
 
-  def event_to_msg(%Event.Key{} = event, %{focus: :activity} = state) do
-    case ActivityPanel.event_to_msg(event, state.activity) do
-      {:msg, msg} -> {:msg, {:activity, msg}}
-      :ignore -> :ignore
+  # Estimate scroll offset to keep latest messages visible.
+  # Each message is ~2 lines on average (prefix + wrapped content).
+  defp chat_bottom(chat) do
+    max(length(chat.history) * 3 - 5, 0)
+  end
+
+  defp debug(msg) do
+    File.write("/tmp/hive_tui_debug.log", "[#{DateTime.utc_now()}] #{msg}\n", [:append])
+  end
+
+  defp submit_input(model) do
+    {input, text} = Input.submit(model.input)
+
+    if text == "" do
+      %{model | input: input}
+    else
+      debug("submit: #{String.slice(text, 0, 80)}")
+      chat = Chat.add_message(model.chat, :user, text)
+      session_id = model.session_id
+      model = %{model | input: input, chat: chat, busy: true, chat_scroll: chat_bottom(chat)}
+      cmd = Command.new(fn -> query_claude(text, session_id) end, :chat_response)
+      {model, cmd}
     end
   end
 
-  def event_to_msg(_event, _state), do: :ignore
-
-  def update(:quit, state) do
-    Hive.Shutdown.initiate()
-    {state, [:quit]}
+  defp query_claude(text, session_id) do
+    if Hive.Runtime.ModelResolver.api_mode?() do
+      query_via_api(text, session_id)
+    else
+      query_via_cli(text, session_id)
+    end
+  catch
+    kind, reason ->
+      debug("crashed: #{kind}: #{inspect(reason)}")
+      {:error, "#{kind}: #{inspect(reason)}"}
   end
 
-  def update(:toggle_command_palette, state) do
-    {%{state | show_command_palette: not state.show_command_palette}, []}
+  defp query_via_api(text, _session_id) do
+    cwd = case Hive.hive_dir() do
+      {:ok, root} -> root
+      _ -> File.cwd!()
+    end
+
+    system_prompt = build_system_prompt(cwd)
+    debug("API mode query: #{String.slice(text, 0, 80)}")
+
+    case Hive.Runtime.AgentLoop.run(text, cwd,
+           system_prompt: system_prompt,
+           tool_set: :queen,
+           max_iterations: 20,
+           max_tokens: 8192
+         ) do
+      {:ok, result} ->
+        content = Map.get(result, :text, "")
+        sid = result[:session_id] || extract_session_from_events(result[:events])
+        {:ok, content, sid}
+
+      {:error, reason} ->
+        {:error, inspect(reason)}
+    end
   end
 
-  def update(:cycle_focus, state) do
-    next =
-      case state.focus do
-        :input -> :chat
-        :chat -> :activity
-        :activity -> :input
-      end
+  defp extract_session_from_events(nil), do: nil
 
-    {%{state | focus: next}, []}
+  defp extract_session_from_events(events) do
+    Enum.find_value(events, fn
+      %{"type" => "system", "session_id" => sid} -> sid
+      _ -> nil
+    end)
   end
 
-  def update({:input, msg}, state) do
-    {input_state, cmds} = InputBar.update(msg, state.input)
-    state = %{state | input: input_state}
+  defp query_via_cli(text, session_id) do
+    cwd = case Hive.hive_dir() do
+      {:ok, root} -> root
+      _ -> File.cwd!()
+    end
 
-    # Process input commands
-    state =
-      Enum.reduce(cmds, state, fn
-        {:submit, text}, acc -> handle_submit(text, acc)
-        {:command, name, args}, acc -> handle_command(name, args, acc)
-        _, acc -> acc
+    system_prompt = build_system_prompt(cwd)
+
+    debug("spawning headless for: #{String.slice(text, 0, 80)} session=#{inspect(session_id)}")
+
+    case spawn_claude_with_closed_stdin(text, cwd, system_prompt, session_id) do
+      {:ok, port} ->
+        debug("port spawned: #{inspect(port)}")
+        result = collect_port_output(port, [])
+        debug("result: #{inspect(result, limit: 200)}")
+        result
+
+      {:error, reason} ->
+        debug("spawn failed: #{inspect(reason)}")
+        {:error, inspect(reason)}
+    end
+  end
+
+  defp build_system_prompt(cwd) do
+    bees = try do Hive.Store.all(:bees) rescue _ -> [] end
+    quests = try do Hive.Store.all(:quests) rescue _ -> [] end
+    jobs = try do Hive.Store.all(:jobs) rescue _ -> [] end
+
+    # Only show active bees in context — crashed/stopped are noise
+    active_bees = Enum.filter(bees, fn b -> (b[:status] || b[:state]) in ["working", "provisioning"] end)
+
+    bee_summary = if active_bees == [], do: "None active", else:
+      Enum.map_join(active_bees, "\n", fn b ->
+        "  - #{b[:id] || b.id}: #{b[:status] || b[:state] || "unknown"} (job: #{b[:job_id] || "none"})"
       end)
 
-    {state, []}
+    quest_summary = if quests == [], do: "None", else:
+      Enum.map_join(quests, "\n", fn q ->
+        phase = q[:current_phase] || q[:status] || "unknown"
+        "  - #{q[:id] || q.id}: #{q[:name] || q[:goal] || "unnamed"} [#{phase}]"
+      end)
+
+    active_jobs = Enum.reject(jobs, fn j -> j[:status] in ["done"] end)
+
+    job_summary = if active_jobs == [], do: "All done", else:
+      Enum.map_join(Enum.take(active_jobs, 10), "\n", fn j ->
+        "  - #{j[:id] || j.id}: #{j[:title] || "untitled"} [#{j[:status] || "unknown"}]"
+      end)
+
+    """
+    You are the Queen's assistant running inside the Hive TUI dashboard.
+    You help the user monitor and control their autonomous coding swarm.
+    Keep responses brief — this is a terminal chat panel, not a document.
+    IMPORTANT: Do NOT use markdown, tables, bold, headers, or emojis. Plain text only.
+
+    Hive concepts:
+    - Comb: a managed git repository (has id, name, path, repo_url)
+    - Quest: a high-level objective broken into phases (research > requirements > design > review > planning > implementation > validation)
+    - Job: a discrete unit of work within a quest
+    - Bee: an autonomous AI coding agent that works on jobs in isolated git worktrees (cells)
+    - Waggle: a message between agents (like bee-to-queen status updates)
+    - Queen: the central coordinator that manages quests, spawns bees, handles retries
+    - Drone: autonomous watchdog that monitors quality
+
+    CLI commands the user can run outside the TUI:
+    - hive quest new "goal" --comb <name>  (create a quest)
+    - hive comb add <path>                 (register a repository)
+    - hive comb list                       (list combs)
+    - hive bee list                        (list bees)
+    - hive quest list                      (list quests)
+    - hive quest start <id>                (start a quest's pipeline)
+    - hive status                          (overall hive status)
+
+    Workspace: #{cwd}
+
+    Current hive state:
+    Bees: #{bee_summary}
+    Quests: #{quest_summary}
+    Jobs: #{job_summary}
+
+    You have full access to the workspace to read files and execute commands.
+    You can run hive CLI commands directly to create quests, spawn bees, etc.
+    Act autonomously — the user wants a dark factory, not hand-holding.
+
+    STRUCTURED QUESTIONS: When you need to ask the user clarifying questions,
+    wrap them in this exact format so the TUI can render them nicely:
+
+    <<<QUESTIONS
+    {"preamble": "Brief context about why you're asking", "questions": ["First question?", "Second question?", "Third question?"]}
+    QUESTIONS>>>
+
+    Only use this format for multi-question clarification. For simple yes/no or single questions, just ask normally in plain text.
+    """
   end
 
-  def update({:chat, msg}, state) do
-    {chat_state, _cmds} = ChatPane.update(msg, state.chat)
-    {%{state | chat: chat_state}, []}
-  end
+  defp spawn_claude_with_closed_stdin(prompt, cwd, system_prompt, _session_id) do
+    case Hive.Runtime.Claude.find_executable() do
+      {:ok, claude_path} ->
+        args = ["--print", "--dangerously-skip-permissions", "--verbose",
+                "--output-format", "stream-json",
+                "--system-prompt", system_prompt, prompt]
 
-  def update({:activity, msg}, state) do
-    {activity_state, _cmds} = ActivityPanel.update(msg, state.activity)
-    {%{state | activity: activity_state}, []}
-  end
+        # Spawn through shell with < /dev/null so Claude gets EOF on stdin
+        # immediately instead of hanging waiting for the Erlang port's pipe.
+        escaped_args = Enum.map_join(args, " ", fn a ->
+          "'" <> String.replace(a, "'", "'\\''") <> "'"
+        end)
 
-  # Bridge messages from PubSub
-  def update({:bridge, :waggle, waggle}, state) do
-    chat = ChatPane.add_message(state.chat, :system, "Waggle: #{waggle.subject}")
-    activity = ActivityPanel.refresh(state.activity)
-    {%{state | chat: chat, activity: activity}, []}
-  end
+        cmd = "#{claude_path} #{escaped_args} < /dev/null"
 
-  def update({:bridge, :bee_progress, _bee_id, _entry}, state) do
-    activity = ActivityPanel.refresh(state.activity)
-    {%{state | activity: activity}, []}
-  end
+        port = Port.open({:spawn, cmd}, [
+          :binary, :exit_status, :use_stdio, :stderr_to_stdout,
+          {:cd, cwd},
+          {:env, [{~c"CLAUDECODE", false}]}
+        ])
 
-  def update({:bridge, :plugin_loaded, _type, _name, _module}, state) do
-    theme = Hive.Plugin.Manager.active_theme()
-    {%{state | theme: theme}, []}
-  end
+        {:ok, port}
 
-  def update({:command_output, text}, state) do
-    chat = ChatPane.add_message(state.chat, :system, text)
-    {%{state | chat: chat}, []}
-  end
-
-  def update(_msg, state), do: {state, []}
-
-  def view(state) do
-    theme = state.theme
-
-    stack(:vertical, [
-      # Main content area (chat + activity side by side)
-      stack(:horizontal, [
-        ChatPane.view(state.chat, theme, state.focus == :chat),
-        ActivityPanel.view(state.activity, theme, state.focus == :activity)
-      ]),
-      # Input bar
-      InputBar.view(state.input, theme, state.focus == :input),
-      # Status bar
-      StatusBar.view(state.status, theme)
-    ])
-  end
-
-  # -- Private helpers -------------------------------------------------------
-
-  defp start_queen do
-    case Hive.hive_dir() do
-      {:ok, hive_root} ->
-        case Hive.Queen.start_link(hive_root: hive_root) do
-          {:ok, _pid} -> Hive.Queen.start_session()
-          {:error, {:already_started, _pid}} -> :ok
-          _ -> :ok
-        end
-
-        hive_root
-
-      {:error, _} ->
-        nil
+      {:error, reason} ->
+        {:error, reason}
     end
   end
 
-  defp handle_submit(text, state) do
-    # Add user message to chat
-    chat = ChatPane.add_message(state.chat, :user, text)
+  defp collect_port_output(port, acc) do
+    receive do
+      {^port, {:data, data}} ->
+        debug("port data: #{byte_size(data)} bytes")
+        collect_port_output(port, [acc, data])
 
-    # Forward to Queen's Claude port via bridge
-    Hive.TUI.Bridge.send_to_queen(text)
+      {^port, {:exit_status, code}} ->
+        debug("port exit: #{code}")
+        raw = IO.iodata_to_binary(acc)
+        {content, session_id} = extract_response(raw)
+        if code == 0 do
+          {:ok, content, session_id}
+        else
+          if content != "", do: {:ok, content, session_id}, else: {:error, "Claude exited with code #{code}"}
+        end
 
-    %{state | chat: chat}
+      other ->
+        debug("port unexpected msg: #{inspect(other, limit: 200)}")
+        collect_port_output(port, acc)
+    after
+      60_000 ->
+        debug("port timeout after 60s, closing")
+        Port.close(port)
+        raw = IO.iodata_to_binary(acc)
+        {content, session_id} = extract_response(raw)
+        if content != "", do: {:ok, content, session_id}, else: {:error, "Timed out waiting for Claude"}
+    end
   end
 
-  defp handle_command(name, args, state) do
-    case Hive.Plugin.Registry.lookup(:command, name) do
-      {:ok, module} ->
-        ctx = %{pid: self()}
-        module.execute(args, ctx)
-        state
+  defp extract_response(raw) do
+    # Claude --print --verbose --output-format stream-json outputs JSON lines.
+    # Parse the result text and session_id.
+    lines = String.split(raw, "\n")
 
-      :error ->
-        chat = ChatPane.add_message(state.chat, :error, "Unknown command: /#{name}")
-        %{state | chat: chat}
+    result_text = Enum.find_value(lines, fn line ->
+      case Jason.decode(line) do
+        {:ok, %{"type" => "result", "result" => result}} when is_binary(result) ->
+          String.trim(result)
+        _ -> nil
+      end
+    end)
+
+    session_id = Enum.find_value(lines, fn line ->
+      case Jason.decode(line) do
+        {:ok, %{"type" => "result", "session_id" => sid}} when is_binary(sid) -> sid
+        _ -> nil
+      end
+    end)
+
+    text = case result_text do
+      nil -> raw |> String.trim() |> String.slice(0, 2000)
+      "" -> raw |> String.trim() |> String.slice(0, 2000)
+      t -> t
+    end
+
+    # Check if the response contains a structured questions block
+    content = parse_questions(text)
+    {content, session_id}
+  end
+
+  defp parse_questions(text) do
+    case Regex.run(~r/<<<QUESTIONS\s*\n(.*?)\nQUESTIONS>>>/s, text) do
+      [_full, json] ->
+        case Jason.decode(json) do
+          {:ok, %{"preamble" => preamble, "questions" => questions}} when is_list(questions) ->
+            {:questions, preamble, questions}
+          _ -> text
+        end
+      _ -> text
+    end
+  end
+
+  defp refresh_activity(model) do
+    bees = try do Hive.Store.all(:bees) rescue _ -> [] end
+    quests = try do Hive.Store.all(:quests) rescue _ -> [] end
+    jobs = try do Hive.Store.all(:jobs) rescue _ -> [] end
+
+    # Reap dead bees — detect bees marked "working" but actually finished/dead
+    # Returns list of {bee_id, :done | :failed, summary} events
+    reap_events = reap_dead_bees(bees, jobs)
+
+    # Add reap events to chat
+    model = Enum.reduce(reap_events, model, fn
+      {bee_id, :done, summary}, m ->
+        job_title = Enum.find_value(jobs, "unknown", fn j -> if j[:bee_id] == bee_id, do: j[:title] end)
+        msg = "#{bee_id} finished: #{job_title}\n#{summary}"
+        %{m | chat: Chat.add_message(m.chat, :system, msg), chat_scroll: chat_bottom(m.chat)}
+
+      {bee_id, :failed, reason}, m ->
+        msg = "#{bee_id} failed: #{reason}"
+        %{m | chat: Chat.add_message(m.chat, :system, msg), chat_scroll: chat_bottom(m.chat)}
+    end)
+
+    # Re-read after reaping
+    bees = try do Hive.Store.all(:bees) rescue _ -> [] end
+
+    # Build job_id -> quest_id lookup
+    job_quest_map = Map.new(jobs, fn j -> {j[:id], j[:quest_id]} end)
+
+    # Filter to active bees and attach quest_id
+    active_bees = bees
+    |> Enum.filter(fn b -> (b[:status] || b[:state]) in ["working", "provisioning"] end)
+    |> Enum.map(fn b -> Map.put(b, :quest_id, job_quest_map[b[:job_id]]) end)
+
+    bee_logs = read_bee_logs(active_bees)
+
+    activity = model.activity
+    |> Activity.update_bees(active_bees)
+    |> Activity.update_quests(quests)
+    |> Activity.update_bee_logs(bee_logs)
+    %{model | activity: activity}
+  end
+
+  defp reap_dead_bees(bees, _jobs) do
+    case Hive.hive_dir() do
+      {:ok, root} ->
+        run_dir = Path.join([root, ".hive", "run"])
+
+        bees
+        |> Enum.filter(fn b -> (b[:status] || b[:state]) == "working" end)
+        |> Enum.flat_map(fn bee ->
+          log_path = Path.join(run_dir, "#{bee[:id]}.log")
+          script_path = Path.join(run_dir, "#{bee[:id]}.sh")
+
+          cond do
+            bee_log_completed?(log_path) ->
+              debug("reaper: bee #{bee[:id]} completed (result in log)")
+              summary = bee_log_last_message(log_path)
+              mark_bee_done(bee)
+              [{bee[:id], :done, summary}]
+
+            not script_running?(script_path) and File.exists?(log_path) ->
+              if bee_log_has_error?(log_path) do
+                debug("reaper: bee #{bee[:id]} failed (process dead, error in log)")
+                mark_bee_failed(bee, "Process died")
+                [{bee[:id], :failed, "Process died"}]
+              else
+                log_age = log_file_age_seconds(log_path)
+                if log_age > 120 do
+                  debug("reaper: bee #{bee[:id]} stale (log #{log_age}s old, no process)")
+                  mark_bee_failed(bee, "Process disappeared")
+                  [{bee[:id], :failed, "Process disappeared"}]
+                else
+                  []
+                end
+              end
+
+            true ->
+              []
+          end
+        end)
+
+      _ ->
+        []
+    end
+  rescue
+    _ -> []
+  end
+
+  defp bee_log_last_message(path) do
+    if File.exists?(path) do
+      path
+      |> File.stream!()
+      |> Stream.map(&String.trim/1)
+      |> Stream.reject(&(&1 == ""))
+      |> Enum.to_list()
+      |> Enum.reverse()
+      |> Enum.find_value("(no summary)", fn line ->
+        case Jason.decode(line) do
+          {:ok, %{"type" => "result", "result" => result}} when is_binary(result) ->
+            String.trim(result) |> String.slice(0, 200)
+          _ -> nil
+        end
+      end)
+    else
+      "(no log)"
+    end
+  rescue
+    _ -> "(error reading log)"
+  end
+
+  defp bee_log_completed?(path) do
+    if File.exists?(path) do
+      # Check last few lines for a "result" type (Claude finished successfully)
+      path
+      |> File.stream!()
+      |> Stream.map(&String.trim/1)
+      |> Stream.reject(&(&1 == ""))
+      |> Enum.to_list()
+      |> Enum.take(-3)
+      |> Enum.any?(fn line ->
+        case Jason.decode(line) do
+          {:ok, %{"type" => "result"}} -> true
+          _ -> false
+        end
+      end)
+    else
+      false
+    end
+  rescue
+    _ -> false
+  end
+
+  defp bee_log_has_error?(path) do
+    if File.exists?(path) do
+      path
+      |> File.stream!()
+      |> Enum.any?(fn line ->
+        String.contains?(line, "Error:") or String.contains?(line, "cannot be launch")
+      end)
+    else
+      false
+    end
+  rescue
+    _ -> false
+  end
+
+  defp script_running?(script_path) do
+    # Check if any process is running this script
+    case System.cmd("pgrep", ["-f", script_path], stderr_to_stdout: true) do
+      {_, 0} -> true
+      _ -> false
+    end
+  rescue
+    _ -> false
+  end
+
+  defp log_file_age_seconds(path) do
+    case File.stat(path, time: :posix) do
+      {:ok, %{mtime: mtime}} -> System.os_time(:second) - mtime
+      _ -> 0
+    end
+  rescue
+    _ -> 0
+  end
+
+  defp mark_bee_done(bee) do
+    try do
+      updated = Map.put(bee, :status, "stopped")
+      Hive.Store.put(:bees, updated)
+
+      if bee[:job_id] do
+        Hive.Jobs.complete(bee[:job_id])
+        Hive.Jobs.unblock_dependents(bee[:job_id])
+        Hive.Waggle.send(bee[:id], "queen", "job_complete", "Job #{bee[:job_id]} completed (reaped)")
+
+        # Tell Queen to advance
+        case Process.whereis(Hive.Queen) do
+          nil -> :ok
+          _pid ->
+            try do
+              {:ok, job} = Hive.Jobs.get(bee[:job_id])
+              Hive.Queen.Orchestrator.advance_quest(job.quest_id)
+            rescue
+              _ -> :ok
+            end
+        end
+      end
+    rescue
+      _ -> :ok
+    end
+  end
+
+  defp mark_bee_failed(bee, reason) do
+    try do
+      updated = Map.put(bee, :status, "crashed")
+      Hive.Store.put(:bees, updated)
+
+      if bee[:job_id] do
+        Hive.Jobs.fail(bee[:job_id])
+        Hive.Waggle.send(bee[:id], "queen", "job_failed", "Job #{bee[:job_id]} failed: #{reason}")
+      end
+    rescue
+      _ -> :ok
+    end
+  end
+
+  defp read_bee_logs(bees) do
+    case Hive.hive_dir() do
+      {:ok, root} ->
+        run_dir = Path.join([root, ".hive", "run"])
+
+        bees
+        |> Enum.filter(fn b -> (b[:status] || b[:state]) in ["working", "provisioning"] end)
+        |> Map.new(fn bee ->
+          log_path = Path.join(run_dir, "#{bee[:id]}.log")
+          lines = tail_file(log_path, 3)
+          {bee[:id], lines}
+        end)
+
+      _ ->
+        %{}
+    end
+  rescue
+    _ -> %{}
+  end
+
+  defp tail_file(path, n) do
+    if File.exists?(path) do
+      path
+      |> File.stream!()
+      |> Stream.map(&String.trim_trailing/1)
+      |> Stream.reject(&(&1 == ""))
+      |> Enum.to_list()
+      |> Enum.take(-n)
+      |> Enum.flat_map(fn line ->
+        case Jason.decode(line) do
+          {:ok, %{"type" => "tool_use", "name" => tool} = event} ->
+            file = get_in(event, ["input", "file_path"]) || ""
+            cmd = get_in(event, ["input", "command"]) || ""
+            detail = if file != "", do: file, else: String.slice(cmd, 0, 40)
+            [String.slice("#{tool} #{detail}", 0, 60)]
+
+          {:ok, %{"type" => "tool_result"} = event} ->
+            output = get_in(event, ["output"]) || ""
+            if String.contains?(output, "Error"), do: [String.slice(output, 0, 60)], else: []
+
+          _ ->
+            []
+        end
+      end)
+    else
+      []
+    end
+  rescue
+    _ -> []
+  end
+
+  @impl true
+  def render(model) do
+    view bottom_bar: input_bar(model) do
+      row do
+        column size: 8 do
+          Views.Chat.render(model)
+        end
+        column size: 4 do
+          Views.Activity.render(model)
+        end
+      end
+    end
+  end
+
+  defp input_bar(%{input: input, busy: busy}) do
+    {before_cursor, at_cursor, after_cursor} = Views.Input.split_at_cursor(input.text, input.cursor)
+
+    prompt = if busy, do: "... ", else: Constants.prompt_symbol()
+    prompt_color = if busy, do: :yellow, else: Constants.color_prompt()
+
+    bar do
+      label do
+        text(content: prompt, color: prompt_color)
+        text(content: before_cursor)
+        text(content: at_cursor, attributes: [:reverse])
+        text(content: after_cursor)
+      end
     end
   end
 end

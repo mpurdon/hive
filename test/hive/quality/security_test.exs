@@ -14,22 +14,24 @@ defmodule Hive.Quality.SecurityTest do
     end
 
     test "detects secrets in code" do
-      # Create temp file with secret
-      dir = System.tmp_dir!()
-      file = Path.join(dir, "test_#{:rand.uniform(10000)}.ex")
+      # Create an isolated temp dir with a secret file
+      dir = Path.join(System.tmp_dir!(), "hive_sec_test_#{:erlang.unique_integer([:positive])}")
+      File.mkdir_p!(dir)
+      file = Path.join(dir, "test_secret.ex")
       File.write!(file, """
       defmodule Test do
-        @api_key "sk_live_EXAMPLE_KEY_12345"
+        api_key = "sk_live_EXAMPLE_KEY_12345"
+        password = "super_secret_password_1234"
       end
       """)
-      
+
+      on_exit(fn -> File.rm_rf!(dir) end)
+
       {:ok, result} = Security.scan(dir, :elixir)
-      
+
       # Should detect the API key pattern
       secret_findings = Enum.filter(result.findings, &(&1.type == "secret"))
       assert length(secret_findings) > 0
-      
-      File.rm(file)
     end
 
     test "handles missing audit tools gracefully" do

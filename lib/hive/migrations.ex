@@ -127,8 +127,4 @@ defmodule Hive.Migrations do
     :ok
   end
 
-  defp run_migration(6) do
-    # Migration 6: Placeholder for future use
-    :ok
-  end
 end

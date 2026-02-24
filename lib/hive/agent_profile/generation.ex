@@ -16,18 +16,23 @@ defmodule Hive.AgentProfile.Generation do
   @spec generate_via_model(String.t(), String.t(), keyword()) ::
           {:ok, String.t()} | {:error, term()}
   def generate_via_model(prompt, cwd, opts \\ []) do
-    case Hive.Runtime.Models.find_executable(opts) do
-      {:ok, _} ->
-        case Hive.Runtime.Models.spawn_headless(prompt, cwd, Keyword.merge(opts, output_format: :text)) do
-          {:ok, port} ->
-            collect_port_output(port)
+    if Hive.Runtime.ModelResolver.api_mode?() do
+      # API mode: use generate_text directly (no tools needed)
+      Hive.Runtime.Models.generate_text(prompt, opts)
+    else
+      case Hive.Runtime.Models.find_executable(opts) do
+        {:ok, _} ->
+          case Hive.Runtime.Models.spawn_headless(prompt, cwd, Keyword.merge(opts, output_format: :text)) do
+            {:ok, port} ->
+              collect_port_output(port)
 
-          {:error, reason} ->
-            {:error, reason}
-        end
+            {:error, reason} ->
+              {:error, reason}
+          end
 
-      {:error, :not_found} ->
-        {:error, :model_not_found}
+        {:error, :not_found} ->
+          {:error, :model_not_found}
+      end
     end
   end
 

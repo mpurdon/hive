@@ -21,31 +21,88 @@ defmodule Hive.Runtime.Models do
   @doc """
   Spawns a headless model session with the given prompt.
 
+  In API mode, delegates to `run_agent/3` instead.
   Resolves the active plugin and delegates to its `spawn_headless/3`.
   """
-  @spec spawn_headless(String.t(), String.t(), keyword()) :: {:ok, port()} | {:error, term()}
+  @spec spawn_headless(String.t(), String.t(), keyword()) :: {:ok, port()} | {:ok, map()} | {:error, term()}
   def spawn_headless(prompt, cwd, opts \\ []) do
     {:ok, plugin} = resolve_plugin(opts)
-    service_key = plugin_service_key(plugin)
 
-    Hive.CircuitBreaker.call(service_key, fn ->
-      plugin.spawn_headless(prompt, cwd, opts)
-    end)
+    if api_mode?(plugin) do
+      run_agent(prompt, cwd, opts)
+    else
+      service_key = plugin_service_key(plugin)
+
+      Hive.CircuitBreaker.call(service_key, fn ->
+        plugin.spawn_headless(prompt, cwd, opts)
+      end)
+    end
   end
 
   @doc """
   Spawns an interactive model session.
 
+  In API mode, delegates to `run_agent/3` with queen tools.
   Resolves the active plugin and delegates to its `spawn_interactive/2`.
   """
-  @spec spawn_interactive(String.t(), keyword()) :: {:ok, port()} | {:error, term()}
+  @spec spawn_interactive(String.t(), keyword()) :: {:ok, port()} | {:ok, map()} | {:error, term()}
   def spawn_interactive(cwd, opts \\ []) do
     {:ok, plugin} = resolve_plugin(opts)
-    service_key = plugin_service_key(plugin)
 
-    Hive.CircuitBreaker.call(service_key, fn ->
-      plugin.spawn_interactive(cwd, opts)
-    end)
+    if api_mode?(plugin) do
+      run_agent("You are the Queen orchestrator. Manage the hive.", cwd,
+        Keyword.merge(opts, tool_set: :queen, max_iterations: 200))
+    else
+      service_key = plugin_service_key(plugin)
+
+      Hive.CircuitBreaker.call(service_key, fn ->
+        plugin.spawn_interactive(cwd, opts)
+      end)
+    end
+  end
+
+  @doc """
+  Runs an agentic tool-calling loop (API mode).
+
+  Resolves the active plugin and delegates to its `run_agent/3`.
+  Falls back to `Hive.Runtime.AgentLoop.run/3` if the plugin doesn't
+  implement `run_agent/3`.
+  """
+  @spec run_agent(String.t(), String.t(), keyword()) :: {:ok, map()} | {:error, term()}
+  def run_agent(prompt, cwd, opts \\ []) do
+    {:ok, plugin} = resolve_plugin(opts)
+
+    if function_exported?(plugin, :run_agent, 3) do
+      plugin.run_agent(prompt, cwd, opts)
+    else
+      Hive.Runtime.AgentLoop.run(prompt, cwd, opts)
+    end
+  end
+
+  @doc """
+  Simple text generation without tools (API mode).
+
+  Resolves the active plugin and delegates to its `generate_text/2`.
+  Falls back to spawning headless + collecting output in CLI mode.
+  """
+  @spec generate_text(String.t(), keyword()) :: {:ok, String.t()} | {:error, term()}
+  def generate_text(prompt, opts \\ []) do
+    {:ok, plugin} = resolve_plugin(opts)
+
+    if function_exported?(plugin, :generate_text, 2) do
+      plugin.generate_text(prompt, opts)
+    else
+      # CLI fallback: spawn headless and collect output
+      cwd = Keyword.get(opts, :cwd, System.tmp_dir!())
+
+      case plugin.spawn_headless(prompt, cwd, opts) do
+        {:ok, port} ->
+          Hive.AgentProfile.Generation.collect_port_output(port)
+
+        {:error, reason} ->
+          {:error, reason}
+      end
+    end
   end
 
   @doc """
@@ -222,9 +279,15 @@ defmodule Hive.Runtime.Models do
   """
   @spec default_name() :: String.t()
   def default_name do
-    Hive.Config.Provider.get([:plugins, :models, :default]) || @default_plugin_name
+    configured = Hive.Config.Provider.get([:plugins, :models, :default])
+
+    cond do
+      configured != nil -> configured
+      Hive.Runtime.ModelResolver.api_mode?() -> "reqllm"
+      true -> @default_plugin_name
+    end
   rescue
-    _ -> @default_plugin_name
+    _ -> if Hive.Runtime.ModelResolver.api_mode?(), do: "reqllm", else: @default_plugin_name
   end
 
   # -- Resolution --------------------------------------------------------------
@@ -257,6 +320,23 @@ defmodule Hive.Runtime.Models do
     case Hive.Plugin.Registry.lookup(:model, name) do
       {:ok, module} -> {:ok, module}
       :error -> {:ok, @default_plugin}
+    end
+  end
+
+  @doc """
+  Returns true if the given plugin operates in API mode.
+
+  Checks `plugin.execution_mode() == :api` if the callback is defined,
+  otherwise falls back to `ModelResolver.api_mode?()`.
+  """
+  @spec api_mode?(module()) :: boolean()
+  def api_mode?(plugin \\ nil) do
+    cond do
+      is_atom(plugin) and function_exported?(plugin, :execution_mode, 0) ->
+        plugin.execution_mode() == :api
+
+      true ->
+        Hive.Runtime.ModelResolver.api_mode?()
     end
   end
 

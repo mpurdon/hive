@@ -6,6 +6,20 @@ defmodule Hive.DroneVerificationTest do
   setup do
     # Start store for testing
     {:ok, _} = Store.start_link(data_dir: System.tmp_dir!())
+
+    # Stop any existing drone (e.g. started by Queen during test setup)
+    case Registry.lookup(Hive.Registry, :drone) do
+      [{pid, _}] -> GenServer.stop(pid, :normal, 1000)
+      [] -> :ok
+    end
+
+    on_exit(fn ->
+      case Registry.lookup(Hive.Registry, :drone) do
+        [{pid, _}] -> GenServer.stop(pid, :normal, 1000)
+        [] -> :ok
+      end
+    end)
+
     :ok
   end
 

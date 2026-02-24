@@ -6,6 +6,7 @@ defmodule Hive.Application do
   @impl true
   def start(_type, _args) do
     setup_file_logging()
+    Hive.Runtime.Keys.load()
     Hive.Progress.init()
     Hive.CircuitBreaker.init()
     Hive.Observability.Metrics.init()
@@ -15,18 +16,38 @@ defmodule Hive.Application do
     children = [
       # PubSub MUST be first — everything else depends on it
       {Phoenix.PubSub, name: Hive.PubSub},
+      {Hive.Store, data_dir: Application.get_env(:hive, :store_dir, Path.join(File.cwd!, ".hive/store"))},
+      # The Queen is the brain of the factory - starts automatically now
+      {Hive.Queen, hive_root: Application.get_env(:hive, :store_dir, File.cwd!)},
+      {Hive.PubSubBridge, []},
+      {Hive.Web.Endpoint, []},
       {Registry, keys: :unique, name: Hive.Registry},
       {Hive.CombSupervisor, []},
+      {Hive.Budget.Watchdog, []},
       {Hive.Plugin.MCPSupervisor, []},
       {Hive.Plugin.ChannelSupervisor, []},
       {Hive.Plugin.Manager, []},
+      {Hive.Runtime.GeminiCacheManager, []},
       # ViewModel starts after PubSub; subscribes in handle_continue
       {Hive.ViewModel, []},
       {Hive.Shutdown, []}
-    ]
+    ] ++ optional_children()
 
     opts = [strategy: :one_for_one, name: Hive.Supervisor]
     Supervisor.start_link(children, opts)
+  end
+
+  # Background monitoring processes — skip in test to avoid conflicts
+  # with tests that restart Store or other supervised components.
+  defp optional_children do
+    if function_exported?(Mix, :env, 0) and Mix.env() == :test do
+      []
+    else
+      [
+        {Hive.Observability, []},
+        {Hive.Drone, []}
+      ]
+    end
   end
 
   defp setup_file_logging do

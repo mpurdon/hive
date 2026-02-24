@@ -41,6 +41,16 @@ defmodule Hive.Costs do
 
     {:ok, cost} = Store.insert(:costs, record)
     broadcast_cost_update(cost)
+
+    Hive.Telemetry.emit([:hive, :token, :consumed], %{
+      input: cost.input_tokens,
+      output: cost.output_tokens,
+      cost: cost.cost_usd
+    }, %{
+      model: cost.model,
+      bee_id: cost.bee_id
+    })
+
     {:ok, cost}
   end
 
@@ -128,6 +138,32 @@ defmodule Hive.Costs do
         output: 75.0,
         cache_read: 1.50,
         cache_write: 18.75
+      },
+      # API mode model names (provider:model format)
+      "anthropic:claude-opus-4-6" => %{
+        input: 15.0,
+        output: 75.0,
+        cache_read: 1.50,
+        cache_write: 18.75
+      },
+      "anthropic:claude-sonnet-4-6" => default_sonnet_prices(),
+      "anthropic:claude-haiku-4-5" => %{
+        input: 0.80,
+        output: 4.0,
+        cache_read: 0.08,
+        cache_write: 1.0
+      },
+      "google:gemini-2.5-pro" => %{
+        input: 1.25,
+        output: 10.0,
+        cache_read: 0.315,
+        cache_write: 0.0
+      },
+      "google:gemini-2.0-flash" => %{
+        input: 0.10,
+        output: 0.40,
+        cache_read: 0.025,
+        cache_write: 0.0
       }
     }
   end

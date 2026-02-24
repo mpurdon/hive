@@ -26,7 +26,7 @@ defmodule Hive.Plugin.Builtin.Themes.Default do
       border: :white,
       border_focused: :yellow,
       text: :white,
-      text_dim: :light_black,
+      text_dim: :bright_black,
       text_bold: :white,
 
       # Chat pane
@@ -34,12 +34,12 @@ defmodule Hive.Plugin.Builtin.Themes.Default do
       assistant_message: :white,
       system_message: :yellow,
       tool_use: :magenta,
-      thinking: :light_black,
+      thinking: :bright_black,
 
       # Activity panel
       bee_working: :green,
       bee_idle: :white,
-      bee_stopped: :light_black,
+      bee_stopped: :bright_black,
       bee_crashed: :red,
 
       # Status bar
@@ -51,7 +51,7 @@ defmodule Hive.Plugin.Builtin.Themes.Default do
       # Input bar
       input_prefix: :yellow,
       input_text: :white,
-      input_placeholder: :light_black
+      input_placeholder: :bright_black
     }
   end
 end

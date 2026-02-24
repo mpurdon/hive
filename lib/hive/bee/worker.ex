@@ -251,6 +251,11 @@ defmodule Hive.Bee.Worker do
 
   @impl true
   def terminate(_reason, state) do
+    # Mark bee as crashed if still in an active state
+    if state.status in [:provisioning, :running] do
+      update_bee_status(state.bee_id, "crashed")
+    end
+
     # Shutdown API task if running
     if state.task != nil do
       Task.shutdown(state.task, :brutal_kill)
@@ -312,21 +317,35 @@ defmodule Hive.Bee.Worker do
 
   defp provision_fresh(state) do
     # Enrich logging metadata with quest_id
-    case Hive.Jobs.get(state.job_id) do
-      {:ok, job} -> Logger.metadata(quest_id: job.quest_id)
-      _ -> :ok
-    end
+    is_phase_job =
+      case Hive.Jobs.get(state.job_id) do
+        {:ok, job} ->
+          Logger.metadata(quest_id: job.quest_id)
+          Map.get(job, :phase_job, false)
+
+        _ ->
+          false
+      end
 
     with {:ok, cell} <- create_cell(state),
          :ok <- update_bee_working(state, cell),
          :ok <- maybe_transition_job(state),
-         :ok <- maybe_ensure_agent(state, cell),
-         {:ok, handle} <- spawn_process(state, cell) do
-      # handle is either a port (CLI mode) or a Task (API mode)
-      if is_struct(handle, Task) do
-        {:ok, %{state | cell_id: cell.id, task: handle, status: :running}}
-      else
-        {:ok, %{state | cell_id: cell.id, port: handle, status: :running}}
+         :ok <- maybe_ensure_agent(state, cell) do
+      # Build task-specific skill for non-phase jobs (works for both API and CLI)
+      unless is_phase_job do
+        maybe_build_task_skill(build_prompt(state), cell.worktree_path, state.job_id)
+      end
+
+      case spawn_process(state, cell) do
+        {:ok, handle} ->
+          if is_struct(handle, Task) do
+            {:ok, %{state | cell_id: cell.id, task: handle, status: :running}}
+          else
+            {:ok, %{state | cell_id: cell.id, port: handle, status: :running}}
+          end
+
+        {:error, reason} ->
+          {:error, reason}
       end
     end
   end
@@ -416,17 +435,14 @@ defmodule Hive.Bee.Worker do
   defp spawn_api_task(prompt, working_dir, spawn_opts, state) do
     bee_id = state.bee_id
 
-    # Determine tool_set and whether this is a phase job
-    {tool_set, is_phase_job} =
+    # Determine tool_set based on phase job type
+    tool_set =
       case Hive.Jobs.get(state.job_id) do
         {:ok, %{phase_job: true, phase: phase}} when phase in ["research", "requirements", "review", "validation"] ->
-          {:readonly, true}
-
-        {:ok, %{phase_job: true}} ->
-          {:standard, true}
+          :readonly
 
         _ ->
-          {:standard, false}
+          :standard
       end
 
     agent_opts =
@@ -437,11 +453,6 @@ defmodule Hive.Bee.Worker do
       end)
 
     task = Task.async(fn ->
-      # Non-phase bees get a research step to build task-specific skills
-      unless is_phase_job do
-        maybe_build_task_skill(prompt, working_dir, state.job_id)
-      end
-
       Hive.Runtime.AgentLoop.run(prompt, working_dir, agent_opts)
     end)
 
@@ -578,6 +589,11 @@ defmodule Hive.Bee.Worker do
         Hive.Jobs.unblock_dependents(state.job_id)
     end
 
+    Hive.Telemetry.emit([:hive, :bee, :completed], %{}, %{
+      bee_id: state.bee_id,
+      job_id: state.job_id
+    })
+
     record_costs_from_events(state)
 
     # Collect phase output if this is a phase job
@@ -686,6 +702,12 @@ defmodule Hive.Bee.Worker do
   defp mark_failed(state, reason) do
     update_bee_status(state.bee_id, "crashed")
     Hive.Jobs.fail(state.job_id)
+
+    Hive.Telemetry.emit([:hive, :bee, :failed], %{}, %{
+      bee_id: state.bee_id,
+      error: reason
+    })
+
     record_costs_from_events(state)
     Hive.Progress.clear(state.bee_id)
 
@@ -710,8 +732,17 @@ defmodule Hive.Bee.Worker do
     case Hive.Jobs.get(state.job_id) do
       {:ok, job} ->
         # Council expert installation: if the job has council_experts, install those
-        if Map.get(job, :council_id) && Map.get(job, :council_experts) do
-          Hive.Council.install_experts(job.council_id, job.council_experts, cell.worktree_path)
+        council_experts = Map.get(job, :council_experts)
+
+        if is_list(council_experts) and council_experts != [] do
+          council_id = Map.get(job, :council_id)
+
+          if council_id do
+            Hive.Council.install_experts(council_id, council_experts, cell.worktree_path)
+          else
+            # No council_id — search hive-wide councils directory for matching expert files
+            install_experts_from_disk(council_experts, cell.worktree_path)
+          end
         end
 
         # Standard comb-level agent
@@ -735,6 +766,30 @@ defmodule Hive.Bee.Worker do
       {:error, _} ->
         :ok
     end
+  end
+
+  defp install_experts_from_disk(expert_keys, worktree_path) do
+    case Hive.hive_dir() do
+      {:ok, root} ->
+        councils_dir = Path.join([root, ".hive", "councils"])
+        dst_dir = Path.join(worktree_path, ".claude/agents")
+        File.mkdir_p!(dst_dir)
+
+        Enum.each(expert_keys, fn key ->
+          # Search all council directories for matching expert file
+          pattern = Path.join([councils_dir, "*", "#{key}-expert.md"])
+
+          case Path.wildcard(pattern) do
+            [src | _] -> File.cp!(src, Path.join(dst_dir, "#{key}-expert.md"))
+            [] -> :ok
+          end
+        end)
+
+      _ ->
+        :ok
+    end
+  rescue
+    _ -> :ok
   end
 
   defp maybe_merge_back(state) do
@@ -807,7 +862,14 @@ defmodule Hive.Bee.Worker do
         case Hive.Validator.validate(state.bee_id, job, cell_id) do
           {:ok, _verdict} ->
             # Step 2: Run quality gate via Verification
-            run_quality_gate(state)
+            case run_quality_gate(state) do
+              :ok ->
+                # Step 3: Run acceptance gate
+                run_acceptance_gate(state)
+
+              error ->
+                error
+            end
 
           {:error, reason, _details} ->
             {:error, reason}
@@ -830,8 +892,25 @@ defmodule Hive.Bee.Worker do
       :ok
   end
 
+  defp run_acceptance_gate(state) do
+    result = Hive.Acceptance.test_acceptance(state.job_id)
+
+    if result.ready_to_merge do
+      :ok
+    else
+      Logger.warning("Acceptance gate failed for job #{state.job_id}: #{inspect(result.blockers)}")
+      {:error, :acceptance_failed}
+    end
+  rescue
+    e ->
+      # Acceptance crash = let it pass (non-blocking)
+      Logger.debug("Acceptance gate crashed for job #{state.job_id}: #{inspect(e)}")
+      :ok
+  end
+
   defp run_quality_gate(state) do
-    case Hive.Verification.verify_job(state.job_id) do
+    # Skip validation command since Validator already ran it
+    case Hive.Verification.verify_job(state.job_id, skip_validation_command: true) do
       {:ok, :pass, _result} ->
         :ok
 
