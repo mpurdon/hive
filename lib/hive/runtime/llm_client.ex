@@ -78,8 +78,13 @@ defmodule Hive.Runtime.LLMClient.Default do
       }
     }
     
-    # TODO: Add tool support (requires formatting tools to Gemini JSON schema)
-    # For now, this enables caching for research/planning phases which are text-heavy.
+    # Add tools if present
+    body = 
+      if tools = opts[:tools] do
+        Map.put(body, "tools", Hive.Runtime.Gemini.Mapper.map_tools(tools))
+      else
+        body
+      end
     
     case Req.post(url, json: body) do
       {:ok, %{status: 200, body: resp}} ->
@@ -124,13 +129,33 @@ defmodule Hive.Runtime.LLMClient.Default do
   defp parse_gemini_response(resp, model) do
     # Minimal parsing
     candidate = List.first(resp["candidates"] || [])
-    content = candidate["content"]["parts"] |> List.first() |> Map.get("text", "")
+    parts = candidate["content"]["parts"] || []
+
+    # Extract text parts
+    text_parts =
+      parts
+      |> Enum.filter(&Map.has_key?(&1, "text"))
+      |> Enum.map_join("\n", & &1["text"])
+
+    # Extract tool calls
+    tool_calls =
+      parts
+      |> Enum.filter(&Map.has_key?(&1, "functionCall"))
+      |> Enum.map(fn part ->
+        call = part["functionCall"]
+        %{
+          name: call["name"],
+          arguments: call["args"] # Gemini returns args as JSON object directly
+        }
+      end)
+
     usage = resp["usageMetadata"] || %{}
-    
+
     %ReqLLM.Response{
        model: model,
        role: :assistant,
-       content: content,
+       content: text_parts,
+       tool_calls: tool_calls,
        usage: %{
          input_tokens: usage["promptTokenCount"],
          output_tokens: usage["candidatesTokenCount"],
