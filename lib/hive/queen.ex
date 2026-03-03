@@ -123,6 +123,9 @@ defmodule Hive.Queen do
     # Periodically check for stalled bees
     schedule_stall_check()
 
+    # Periodically check post-review windows
+    schedule_post_review_check()
+
     {:ok, state}
   end
 
@@ -262,6 +265,12 @@ defmodule Hive.Queen do
   def handle_info(:check_stalls, state) do
     detect_stalled_bees(state)
     schedule_stall_check()
+    {:noreply, state}
+  end
+
+  def handle_info(:check_post_reviews, state) do
+    check_post_reviews()
+    schedule_post_review_check()
     {:noreply, state}
   end
 
@@ -471,6 +480,30 @@ defmodule Hive.Queen do
         Logger.warning("Failed to advance quest #{quest_id}: #{inspect(reason)}")
     end
     state
+  end
+
+  defp handle_waggle(%{subject: "human_approval"} = waggle, state) do
+    case Jason.decode(waggle.body) do
+      {:ok, %{"action" => "approve", "quest_id" => quest_id} = data} ->
+        opts = %{
+          approved_by: Map.get(data, "approved_by", waggle.from),
+          notes: Map.get(data, "notes")
+        }
+        Hive.HumanGate.approve(quest_id, opts)
+        Hive.Queen.Orchestrator.advance_quest(quest_id)
+
+      {:ok, %{"action" => "reject", "quest_id" => quest_id} = data} ->
+        reason = Map.get(data, "reason", "Rejected via waggle")
+        Hive.HumanGate.reject(quest_id, reason)
+        Hive.Queen.Orchestrator.advance_quest(quest_id)
+
+      _ ->
+        Logger.warning("Invalid human_approval waggle body: #{waggle.body}")
+    end
+
+    state
+  rescue
+    _ -> state
   end
 
   defp handle_waggle(%{subject: "clarification_needed"} = waggle, state) do
@@ -711,6 +744,39 @@ defmodule Hive.Queen do
     end
   rescue
     _ -> :ok
+  end
+
+  # -- Private: post-review checks --------------------------------------------
+
+  @post_review_interval :timer.minutes(5)
+
+  defp schedule_post_review_check do
+    Process.send_after(self(), :check_post_reviews, @post_review_interval)
+  end
+
+  defp check_post_reviews do
+    reviews = Hive.PostReview.active_reviews()
+
+    Enum.each(reviews, fn review ->
+      if Hive.PostReview.expired?(review) do
+        Logger.info("Post-review expired for quest #{review.quest_id}, closing")
+        Hive.PostReview.close_review(review.quest_id)
+      else
+        case Hive.PostReview.check_regressions(review.quest_id) do
+          {:ok, :clean} ->
+            :ok
+
+          {:ok, :regression, findings} ->
+            Hive.PostReview.handle_regression(review.quest_id, findings)
+
+          {:error, _reason} ->
+            :ok
+        end
+      end
+    end)
+  rescue
+    e ->
+      Logger.warning("Post-review check failed: #{Exception.message(e)}")
   end
 
   # -- Private: stall detection ------------------------------------------------

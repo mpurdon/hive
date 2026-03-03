@@ -66,11 +66,29 @@ defmodule Hive.Verification do
         # Run quality checks
         quality_result = run_quality_checks(job_id, cell, comb)
 
-        # Combine results
-        final_result = Map.merge(validation_result, quality_result)
+        # Run cross-model audit if enabled
+        cross_audit_result =
+          if Hive.Runtime.CrossModelAudit.enabled?(comb.id) do
+            case Hive.Runtime.CrossModelAudit.audit_job(job_id) do
+              {:ok, audit} ->
+                %{cross_audit_score: audit.score, cross_audit_issues: audit.issues}
+              {:error, _} ->
+                %{}
+            end
+          else
+            %{}
+          end
 
-        # Determine overall status with authority-adjusted thresholds
-        final_status = determine_status(final_result, comb, authority_level)
+        # Combine results
+        final_result =
+          validation_result
+          |> Map.merge(quality_result)
+          |> Map.merge(cross_audit_result)
+
+        # Build verification contract and evaluate
+        contract = Hive.VerificationContract.build_contract(job)
+        adjusted_contract = adjust_contract_thresholds(contract, authority_level)
+        final_status = evaluate_contract_status(final_result, adjusted_contract)
         final_result = %{final_result | status: final_status}
 
         # Store result
@@ -235,38 +253,19 @@ defmodule Hive.Verification do
     end
   end
 
-  defp determine_status(result, comb, authority_level) do
-    base_thresholds = Quality.get_thresholds(comb.id)
-    thresholds = Hive.Authority.adjusted_thresholds(base_thresholds, authority_level)
-    nil_policy = Map.get(comb, :nil_score_policy, :require_passing)
+  defp adjust_contract_thresholds(contract, authority_level) do
+    adjusted = Hive.Authority.adjusted_thresholds(contract.thresholds, authority_level)
+    %{contract | thresholds: adjusted}
+  end
 
-    cond do
-      result.status == "failed" ->
-        "failed"
-
-      # Security: nil means no data — check policy
-      is_nil(result[:security_score]) and nil_policy == :require_passing ->
-        "failed"
-
-      not is_nil(result[:security_score]) and result.security_score < thresholds.security ->
-        "failed"
-
-      # Performance: nil means no data — check policy
-      is_nil(result[:performance_score]) and nil_policy == :require_passing ->
-        "failed"
-
-      not is_nil(result[:performance_score]) and result.performance_score < thresholds.performance ->
-        "failed"
-
-      # Composite quality: nil means no data — check policy
-      is_nil(result[:quality_score]) and nil_policy == :require_passing ->
-        "failed"
-
-      not is_nil(result[:quality_score]) and result.quality_score < thresholds.composite ->
-        "failed"
-
-      true ->
-        "passed"
+  defp evaluate_contract_status(result, contract) do
+    if result.status == "failed" do
+      "failed"
+    else
+      case Hive.VerificationContract.evaluate(contract, result) do
+        :pass -> "passed"
+        {:fail, _reasons} -> "failed"
+      end
     end
   end
 end

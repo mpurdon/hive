@@ -375,6 +375,8 @@ defmodule Hive.Store do
   defp collection_prefix(:model_reputation), do: :mrp
   defp collection_prefix(:council_reputation), do: :crp
   defp collection_prefix(:expert_reputation), do: :erp
+  defp collection_prefix(:approval_requests), do: :apr
+  defp collection_prefix(:post_reviews), do: :prv
   defp collection_prefix(_), do: :hiv
 
   defp ensure_timestamps(record) do

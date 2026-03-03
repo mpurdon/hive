@@ -45,6 +45,8 @@ defmodule Hive.Reputation do
       nil
     else
       done = Enum.count(jobs, &(&1.status == "done"))
+      regression_count = Enum.count(jobs, &(Map.get(&1, :regression_detected, false) == true))
+      adjusted_done = max(done - regression_count * 0.5, 0)
       total = length(jobs)
 
       quality_scores =
@@ -60,7 +62,7 @@ defmodule Hive.Reputation do
       rep = %{
         model: model,
         job_type: job_type,
-        success_rate: if(total > 0, do: done / total, else: 0.0),
+        success_rate: if(total > 0, do: adjusted_done / total, else: 0.0),
         avg_quality: avg_quality,
         total_jobs: total,
         computed_at: DateTime.utc_now()
@@ -236,6 +238,36 @@ defmodule Hive.Reputation do
       _ ->
         :ok
     end
+  end
+
+  # -- Regression Penalty ----------------------------------------------------
+
+  @doc """
+  Applies a regression penalty to all non-phase jobs of a quest.
+
+  Marks jobs with `regression_detected: true` and invalidates their
+  reputation cache so the penalty is reflected in future computations.
+  """
+  @spec apply_regression_penalty(String.t()) :: :ok
+  def apply_regression_penalty(quest_id) do
+    jobs = Hive.Jobs.list(quest_id: quest_id)
+
+    jobs
+    |> Enum.reject(& &1[:phase_job])
+    |> Enum.each(fn job ->
+      updated = Map.put(job, :regression_detected, true)
+      Store.put(:jobs, updated)
+
+      # Invalidate reputation cache for this job's model
+      model = normalize_model(job[:assigned_model])
+      job_type = job[:job_type]
+
+      if not is_nil(model) and not is_nil(job_type) do
+        invalidate(:model_reputation, "model:#{model}:#{job_type}")
+      end
+    end)
+
+    :ok
   end
 
   # -- Cache Helpers ---------------------------------------------------------

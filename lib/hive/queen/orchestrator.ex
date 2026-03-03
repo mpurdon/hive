@@ -16,7 +16,7 @@ defmodule Hive.Queen.Orchestrator do
   alias Hive.Store
   alias Hive.Queen.{FastPath, PhasePrompts, Planner}
 
-  @phases ~w(research requirements design review planning implementation validation merge)
+  @phases ~w(research requirements design review planning implementation validation awaiting_approval merge)
   @max_redesign_iterations 2
 
   # -- Public API --------------------------------------------------------------
@@ -110,6 +110,9 @@ defmodule Hive.Queen.Orchestrator do
 
         "validation" ->
           handle_validation_result(quest)
+
+        "awaiting_approval" ->
+          handle_approval_result(quest)
 
         other ->
           {:ok, other}
@@ -260,6 +263,34 @@ defmodule Hive.Queen.Orchestrator do
           Logger.warning("Quest #{quest.id} merge failed: #{inspect(reason)}")
           {:ok, "merge"}
       end
+    end
+  end
+
+  defp start_awaiting_approval(quest) do
+    with {:ok, _} <- Hive.Quests.transition_phase(quest.id, "awaiting_approval", "Validation passed, awaiting human approval") do
+      Hive.HumanGate.request_approval(quest.id)
+      {:ok, "awaiting_approval"}
+    end
+  end
+
+  defp handle_approval_result(quest) do
+    case Hive.HumanGate.approval_status(quest.id) do
+      :approved ->
+        {:ok, quest} = Hive.Quests.get(quest.id)
+        start_merge(quest)
+
+      :rejected ->
+        Logger.warning("Quest #{quest.id} rejected by human reviewer")
+        Hive.Quests.transition_phase(quest.id, "completed", "Human review rejected")
+        Hive.Quests.update_status!(quest.id)
+        {:ok, "completed"}
+
+      :pending ->
+        {:ok, "awaiting_approval"}
+
+      :not_required ->
+        {:ok, quest} = Hive.Quests.get(quest.id)
+        start_merge(quest)
     end
   end
 
@@ -431,7 +462,12 @@ defmodule Hive.Queen.Orchestrator do
         {:ok, "validation"}
 
       validation["overall_verdict"] == "pass" ->
-        start_merge(quest)
+        # Check if human approval is required before merge
+        if Hive.HumanGate.requires_approval?(quest) do
+          start_awaiting_approval(quest)
+        else
+          start_merge(quest)
+        end
 
       true ->
         # Validation failed — mark quest as needing attention
@@ -445,6 +481,14 @@ defmodule Hive.Queen.Orchestrator do
   defp complete_quest(quest_id) do
     with {:ok, _} <- Hive.Quests.transition_phase(quest_id, "completed", "All phases complete") do
       Hive.Quests.update_status!(quest_id)
+
+      # Start post-review if enabled for this comb
+      with {:ok, quest} <- Hive.Quests.get(quest_id),
+           comb_id when not is_nil(comb_id) <- quest.comb_id,
+           true <- Hive.PostReview.enabled?(comb_id) do
+        Hive.PostReview.start_review(quest_id)
+      end
+
       {:ok, "completed"}
     end
   end

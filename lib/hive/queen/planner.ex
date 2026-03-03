@@ -372,7 +372,8 @@ defmodule Hive.Queen.Planner do
           acceptance_criteria: spec["acceptance_criteria"] || [],
           target_files: spec["target_files"] || [],
           phase_job: false,
-          assigned_model: resolve_model(spec["model_recommendation"])
+          assigned_model: resolve_model(spec["model_recommendation"]),
+          verification_contract: spec["verification_contract"]
         }
 
         case Hive.Jobs.create(job_attrs) do
