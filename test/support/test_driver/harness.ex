@@ -42,7 +42,7 @@ defmodule Hive.TestDriver.Harness do
     File.mkdir_p!(mock_dir)
 
     # Restart Store with isolated directory
-    if Process.whereis(Hive.Store), do: GenServer.stop(Hive.Store)
+    Hive.Test.StoreHelper.stop_store()
     {:ok, _} = Store.start_link(data_dir: store_dir)
 
     env = %{
@@ -182,7 +182,15 @@ defmodule Hive.TestDriver.Harness do
   """
   @spec start_queen(env()) :: env()
   def start_queen(env) do
-    if Process.whereis(Hive.Queen), do: safe_stop(Process.whereis(Hive.Queen))
+    # Terminate Queen from supervisor to prevent auto-restart conflicts
+    try do
+      Supervisor.terminate_child(Hive.Supervisor, Hive.Queen)
+      Supervisor.delete_child(Hive.Supervisor, Hive.Queen)
+    catch
+      :exit, _ -> :ok
+    end
+    safe_stop(Process.whereis(Hive.Queen))
+    Process.sleep(10)
 
     {:ok, pid} = Hive.Queen.start_link(hive_root: env.hive_root)
     Hive.Queen.start_session()

@@ -7,7 +7,7 @@ defmodule Hive.CostsTest do
   setup do
     tmp_dir = Path.join(System.tmp_dir!(), "hive_test_#{:erlang.unique_integer([:positive])}")
     File.mkdir_p!(tmp_dir)
-    if Process.whereis(Hive.Store), do: GenServer.stop(Hive.Store)
+    Hive.Test.StoreHelper.stop_store()
     {:ok, _} = Hive.Store.start_link(data_dir: tmp_dir)
     on_exit(fn -> File.rm_rf!(tmp_dir) end)
 
@@ -17,7 +17,7 @@ defmodule Hive.CostsTest do
   end
 
   describe "calculate_cost/1" do
-    test "calculates cost with sonnet pricing (default)" do
+    test "calculates cost with default model pricing (gemini-2.5-flash)" do
       attrs = %{
         input_tokens: 1_000_000,
         output_tokens: 1_000_000,
@@ -25,23 +25,23 @@ defmodule Hive.CostsTest do
         cache_write_tokens: 0
       }
 
-      # sonnet: $3/MTok input + $15/MTok output = $18
+      # gemini-2.5-flash: $0.15/MTok input + $0.60/MTok output = $0.75
       cost = Costs.calculate_cost(attrs)
-      assert_in_delta cost, 18.0, 0.001
+      assert_in_delta cost, 0.75, 0.001
     end
 
-    test "calculates cost with opus pricing" do
+    test "calculates cost with gemini-2.5-pro pricing" do
       attrs = %{
         input_tokens: 1_000_000,
         output_tokens: 1_000_000,
         cache_read_tokens: 0,
         cache_write_tokens: 0,
-        model: "claude-opus-4-20250514"
+        model: "google:gemini-2.5-pro"
       }
 
-      # opus: $15/MTok input + $75/MTok output = $90
+      # gemini-2.5-pro: $1.25/MTok input + $10.0/MTok output = $11.25
       cost = Costs.calculate_cost(attrs)
-      assert_in_delta cost, 90.0, 0.001
+      assert_in_delta cost, 11.25, 0.001
     end
 
     test "includes cache token costs" do
@@ -50,10 +50,10 @@ defmodule Hive.CostsTest do
         output_tokens: 0,
         cache_read_tokens: 1_000_000,
         cache_write_tokens: 1_000_000,
-        model: "claude-sonnet-4-20250514"
+        model: "anthropic:claude-sonnet-4-6"
       }
 
-      # sonnet cache: $0.30/MTok read + $3.75/MTok write = $4.05
+      # claude-sonnet cache: $0.30/MTok read + $3.75/MTok write = $4.05
       cost = Costs.calculate_cost(attrs)
       assert_in_delta cost, 4.05, 0.001
     end
@@ -69,16 +69,16 @@ defmodule Hive.CostsTest do
       assert Costs.calculate_cost(attrs) == 0.0
     end
 
-    test "defaults to sonnet pricing for unknown model" do
+    test "defaults to gemini-2.5-flash pricing for unknown model" do
       attrs = %{
         input_tokens: 1_000_000,
         output_tokens: 0,
-        model: "claude-unknown-model"
+        model: "unknown-model"
       }
 
-      # defaults to sonnet: $3/MTok input
+      # defaults to gemini-2.5-flash: $0.15/MTok input
       cost = Costs.calculate_cost(attrs)
-      assert_in_delta cost, 3.0, 0.001
+      assert_in_delta cost, 0.15, 0.001
     end
   end
 
@@ -87,7 +87,7 @@ defmodule Hive.CostsTest do
       attrs = %{
         input_tokens: 500,
         output_tokens: 200,
-        model: "claude-sonnet-4-20250514"
+        model: "google:gemini-2.5-flash"
       }
 
       assert {:ok, cost} = Costs.record(bee.id, attrs)
@@ -171,8 +171,8 @@ defmodule Hive.CostsTest do
       {:ok, c2} = Costs.record(bee.id, %{input_tokens: 1_000_000, output_tokens: 0})
 
       total = Costs.total([c1, c2])
-      # 2 * $3/MTok = $6
-      assert_in_delta total, 6.0, 0.001
+      # 2 * $0.15/MTok (gemini-2.5-flash default) = $0.30
+      assert_in_delta total, 0.30, 0.001
     end
 
     test "returns zero for empty list" do
@@ -186,7 +186,7 @@ defmodule Hive.CostsTest do
         Costs.record(bee.id, %{
           input_tokens: 1000,
           output_tokens: 500,
-          model: "claude-sonnet-4-20250514"
+          model: "google:gemini-2.5-flash"
         })
 
       summary = Costs.summary()

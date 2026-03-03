@@ -42,6 +42,32 @@ defmodule Hive.TestDriver.Scenario do
       @moduletag :e2e
 
       setup do
+        Hive.Test.StoreHelper.ensure_infrastructure()
+
+        # Ensure CombSupervisor is running (needed for bee spawning)
+        unless Process.whereis(Hive.CombSupervisor) do
+          DynamicSupervisor.start_link(strategy: :one_for_one, name: Hive.CombSupervisor)
+        end
+
+        # E2E mock scripts emit Claude Code stream-json format.
+        # Start Config.Provider if not running, then override to use Claude plugin.
+        unless Process.whereis(Hive.Config.Provider) do
+          Hive.Config.Provider.start_link([])
+        end
+
+        original_config =
+          try do
+            [{:config, c}] = :ets.lookup(:hive_config, :config)
+            c
+          rescue
+            _ -> nil
+          end
+
+        if original_config do
+          updated = put_in(original_config, [:plugins, :models, :default], "claude")
+          :ets.insert(:hive_config, {:config, updated})
+        end
+
         # Hide real Claude from the Validator's find_executable lookup.
         # Bee Workers use claude_executable directly (mock scripts), so
         # they're unaffected. This prevents the Validator from spawning
@@ -67,6 +93,14 @@ defmodule Hive.TestDriver.Scenario do
           Recorder.stop()
           Harness.teardown(env)
           System.put_env("PATH", original_path)
+          # Restore original config (may fail if Config.Provider was stopped)
+          try do
+            if original_config do
+              :ets.insert(:hive_config, {:config, original_config})
+            end
+          rescue
+            ArgumentError -> :ok
+          end
         end)
 
         %{env: env}

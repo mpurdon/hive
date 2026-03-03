@@ -5,12 +5,15 @@ defmodule Hive.AutonomyTest do
   alias Hive.Store
 
   setup do
+    Hive.Test.StoreHelper.ensure_infrastructure()
+
     store_dir = Path.join(System.tmp_dir!(), "hive-autonomy-test-#{:rand.uniform(100000)}")
     File.mkdir_p!(store_dir)
-    start_supervised!({Store, data_dir: store_dir})
-    
+    Hive.Test.StoreHelper.stop_store()
+    {:ok, _} = Store.start_link(data_dir: store_dir)
+
     on_exit(fn -> File.rm_rf!(store_dir) end)
-    
+
     %{store_dir: store_dir}
   end
 

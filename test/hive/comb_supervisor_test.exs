@@ -6,6 +6,17 @@ defmodule Hive.CombSupervisorTest do
   # The CombSupervisor is already started by the Application supervisor,
   # so we test against the running instance.
 
+  setup do
+    Hive.Test.StoreHelper.ensure_infrastructure()
+
+    # Ensure CombSupervisor is running (may have been killed by prior tests)
+    unless Process.whereis(Hive.CombSupervisor) do
+      DynamicSupervisor.start_link(strategy: :one_for_one, name: Hive.CombSupervisor)
+    end
+
+    :ok
+  end
+
   describe "active_count/0" do
     test "returns zero when no children are running" do
       # Clean up any leftover children first

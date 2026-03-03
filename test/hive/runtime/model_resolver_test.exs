@@ -5,9 +5,9 @@ defmodule Hive.Runtime.ModelResolverTest do
 
   describe "resolve/1" do
     test "resolves tier names to provider-qualified specs" do
-      assert ModelResolver.resolve("opus") == "anthropic:claude-opus-4-6"
-      assert ModelResolver.resolve("sonnet") == "anthropic:claude-sonnet-4-6"
-      assert ModelResolver.resolve("haiku") == "anthropic:claude-haiku-4-5"
+      assert ModelResolver.resolve("opus") == "google:gemini-2.5-pro"
+      assert ModelResolver.resolve("sonnet") == "google:gemini-2.5-flash"
+      assert ModelResolver.resolve("haiku") == "google:gemini-2.0-flash"
       assert ModelResolver.resolve("fast") == "google:gemini-2.0-flash"
     end
 
@@ -36,12 +36,12 @@ defmodule Hive.Runtime.ModelResolverTest do
     end
 
     test "resolves tier then extracts provider" do
-      assert ModelResolver.provider("opus") == "anthropic"
+      assert ModelResolver.provider("opus") == "google"
       assert ModelResolver.provider("fast") == "google"
     end
 
-    test "defaults to anthropic for unqualified unknown names" do
-      assert ModelResolver.provider("unknown") == "anthropic"
+    test "defaults to google for unqualified unknown names" do
+      assert ModelResolver.provider("unknown") == "google"
     end
   end
 
@@ -52,7 +52,7 @@ defmodule Hive.Runtime.ModelResolverTest do
     end
 
     test "resolves tier then extracts model id" do
-      assert ModelResolver.model_id("sonnet") == "claude-sonnet-4-6"
+      assert ModelResolver.model_id("sonnet") == "gemini-2.5-flash"
       assert ModelResolver.model_id("fast") == "gemini-2.0-flash"
     end
   end

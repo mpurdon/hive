@@ -1,0 +1,127 @@
+defmodule Hive.Web.GameChannelTest do
+  use ExUnit.Case, async: false
+  import Phoenix.ChannelTest
+
+  @endpoint Hive.Web.Endpoint
+
+  # Start the endpoint ONCE for all tests in this module.
+  # Using setup_all ensures the endpoint process is linked to the long-lived
+  # setup_all process rather than individual test processes, preventing it
+  # from being killed between tests.
+  setup_all do
+    Hive.Test.StoreHelper.ensure_infrastructure()
+
+    # Use the app's Store (don't restart it)
+    unless Process.whereis(Hive.Store) do
+      tmp_dir = Path.join(System.tmp_dir!(), "game_test_#{:erlang.unique_integer([:positive])}")
+      File.mkdir_p!(tmp_dir)
+      {:ok, _} = Hive.Store.start_link(data_dir: tmp_dir)
+    end
+
+    # Ensure Web.Endpoint is running with server: false
+    ensure_web_endpoint!()
+
+    :ok
+  end
+
+  setup do
+    Hive.Test.StoreHelper.ensure_infrastructure()
+
+    # Ensure PubSubBridge is alive (needed for forwarding telemetry events)
+    unless Process.whereis(Hive.PubSubBridge) && Process.alive?(Process.whereis(Hive.PubSubBridge)) do
+      try do
+        Supervisor.terminate_child(Hive.Supervisor, Hive.PubSubBridge)
+        Supervisor.delete_child(Hive.Supervisor, Hive.PubSubBridge)
+      catch
+        :exit, _ -> :ok
+      end
+      Hive.Test.StoreHelper.safe_stop(Hive.PubSubBridge)
+      {:ok, _} = Hive.PubSubBridge.start_link([])
+    end
+
+    # Ensure endpoint is still alive (it should be, since setup_all owns it)
+    ensure_web_endpoint!()
+
+    # Create dummy comb data
+    comb_name = "game-test-comb-#{System.os_time(:nanosecond)}"
+    comb =
+      case Hive.Comb.add("/tmp", name: comb_name) do
+        {:ok, c} -> c
+        {:error, :name_already_taken} ->
+          case Hive.Comb.list() do
+            [first | _] -> first
+            [] -> raise "No combs available and could not create one"
+          end
+      end
+
+    # Connect
+    {:ok, socket} = connect(Hive.Web.UserSocket, %{})
+    {:ok, _, socket} = subscribe_and_join(socket, "game:control", %{})
+
+    %{socket: socket, comb: comb}
+  end
+
+  test "receives initial world state on join", %{socket: _socket} do
+    assert_push "world_state", %{quests: _, bees: _, combs: _}
+  end
+
+  test "receives hive events", %{socket: _socket} do
+    # Emit a fake telemetry event
+    Hive.Telemetry.emit([:hive, :bee, :spawned], %{}, %{bee_id: "test-bee"})
+
+    # Assert pushed to channel
+    assert_push "hive_event", %{type: "hive.bee.spawned", data: %{bee_id: "test-bee"}}
+  end
+
+  test "can spawn quest via command", %{socket: socket} do
+    ref = push(socket, "spawn_quest", %{"goal" => "Build a game"})
+    assert_reply ref, :ok, %{quest_id: _}
+  end
+
+  # -- Helpers ----------------------------------------------------------------
+
+  defp ensure_web_endpoint! do
+    ets_ok? =
+      try do
+        Hive.Web.Endpoint.config(:pubsub_server)
+        true
+      rescue
+        ArgumentError -> false
+      end
+
+    endpoint_pid = Process.whereis(Hive.Web.Endpoint)
+    endpoint_alive? = endpoint_pid != nil and Process.alive?(endpoint_pid)
+
+    if endpoint_alive? and ets_ok? do
+      :ok
+    else
+      # Terminate from supervisor to avoid conflicts
+      try do
+        Supervisor.terminate_child(Hive.Supervisor, Hive.Web.Endpoint)
+      catch
+        :exit, _ -> :ok
+      end
+
+      try do
+        Supervisor.delete_child(Hive.Supervisor, Hive.Web.Endpoint)
+      catch
+        :exit, _ -> :ok
+      end
+
+      Hive.Test.StoreHelper.safe_stop(Hive.Web.Endpoint)
+      Process.sleep(100)
+
+      # Ensure config has server: false (no HTTP listener in tests)
+      current = Application.get_env(:hive, Hive.Web.Endpoint, [])
+      Application.put_env(:hive, Hive.Web.Endpoint, Keyword.put(current, :server, false))
+
+      case Hive.Web.Endpoint.start_link([]) do
+        {:ok, _pid} -> :ok
+        {:error, {:already_started, _pid}} -> :ok
+        other -> raise "Failed to start Web.Endpoint: #{inspect(other)}"
+      end
+
+      Process.sleep(50)
+    end
+  end
+end

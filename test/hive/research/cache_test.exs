@@ -6,6 +6,7 @@ defmodule Hive.Research.CacheTest do
 
   setup do
     # Start store for testing
+    Hive.Test.StoreHelper.stop_store()
     {:ok, _} = Store.start_link(data_dir: System.tmp_dir!() <> "/test_cache_#{:rand.uniform(10000)}")
     
     # Create test comb

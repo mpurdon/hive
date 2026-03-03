@@ -6,10 +6,13 @@ warn_threshold_usd = 5.0
 token = ""
 
 [hive]
-version = "0.2.14"
+version = "0.3.4"
 
 [queen]
 max_bees = 5
 
+[server]
+url = ""
+
 [session]
-current_comb = "cmb-537417"
+current_comb = "cmb-a89d73"

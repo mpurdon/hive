@@ -5,9 +5,11 @@ defmodule Hive.DoctorTest do
   alias Hive.Store
 
   setup do
+    Hive.Test.StoreHelper.ensure_infrastructure()
+
     tmp_dir = Path.join(System.tmp_dir!(), "hive_test_#{:erlang.unique_integer([:positive])}")
     File.mkdir_p!(tmp_dir)
-    if Process.whereis(Hive.Store), do: GenServer.stop(Hive.Store)
+    Hive.Test.StoreHelper.stop_store()
     {:ok, _} = Hive.Store.start_link(data_dir: tmp_dir)
     on_exit(fn -> File.rm_rf!(tmp_dir) end)
     :ok
@@ -18,7 +20,7 @@ defmodule Hive.DoctorTest do
       checks = Doctor.checks()
       assert is_list(checks)
       assert :git_installed in checks
-      assert :claude_installed in checks
+      assert :model_configured in checks
       assert :database_ok in checks
       assert :settings_valid in checks
       assert :orphan_cells in checks
@@ -229,40 +231,13 @@ defmodule Hive.DoctorTest do
   end
 
   describe "fix/1 - settings_valid" do
-    test "regenerates settings with new format" do
+    test "reports no regeneration needed in API mode" do
       case Hive.hive_dir() do
-        {:ok, path} ->
-          queen_claude_dir = Path.join([path, ".hive", "queen", ".claude"])
-          settings_path = Path.join(queen_claude_dir, "settings.json")
-          File.mkdir_p!(queen_claude_dir)
-
-          old_format = %{
-            "permissions" => %{"allow" => []},
-            "hooks" => %{
-              "SessionStart" => [
-                %{"type" => "command", "command" => "hive prime --queen"}
-              ]
-            }
-          }
-
-          File.write!(settings_path, Jason.encode!(old_format))
-
+        {:ok, _path} ->
+          # In API mode, settings files are skipped (no CLI process to configure)
           result = Doctor.fix(:settings_valid)
           assert result.name == :settings_valid
           assert result.status == :ok
-          assert result.message =~ "Regenerated"
-
-          # Verify new format
-          {:ok, content} = File.read(settings_path)
-          {:ok, settings} = Jason.decode(content)
-          hooks = settings["hooks"]
-
-          Enum.each(hooks, fn {_event, entries} ->
-            Enum.each(entries, fn entry ->
-              assert Map.has_key?(entry, "hooks"), "Expected new format with 'hooks' key"
-              assert Map.has_key?(entry, "matcher"), "Expected new format with 'matcher' key"
-            end)
-          end)
 
         {:error, _} ->
           :ok

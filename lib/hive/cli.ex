@@ -8,6 +8,10 @@ defmodule Hive.CLI do
 
   @spec main([String.t()]) :: no_return()
   def main(argv) do
+    if Hive.Client.remote?() do
+      :logger.set_primary_config(:level, :error)
+    end
+
     case extract_cmd_flag(argv) do
       {:cmd, cmd_argv} ->
         # Non-interactive mode: `hive -c <cmd>` or `hive --cmd <cmd>`
@@ -78,8 +82,23 @@ defmodule Hive.CLI do
         Optimus.Help.help(optimus, [], 80) |> Enum.each(&IO.puts/1)
 
       {:ok, subcommand_path, result} ->
-        maybe_ensure_store(subcommand_path)
-        dispatch(subcommand_path, result)
+        unless Hive.Client.remote?(), do: maybe_ensure_store(subcommand_path)
+
+        if Hive.Client.remote?() do
+          case Hive.Client.ping() do
+            :ok -> :ok
+            {:error, reason} ->
+              Format.error("Cannot connect to Hive server at #{Hive.Client.server_url()}. Is it running?")
+              Format.error("  #{reason}")
+              System.halt(1)
+          end
+        end
+
+        try do
+          dispatch(subcommand_path, result)
+        catch
+          :return_early -> :ok
+        end
 
       :version ->
         IO.puts("hive #{Hive.version()}")
@@ -109,7 +128,7 @@ defmodule Hive.CLI do
     Map.get(Map.get(r, section, %{}), key)
   end
 
-  @quest_subcommands ~w(new list show delete merge report close spec)
+  @quest_subcommands ~w(new list show remove merge report close spec plan start status)
 
   defp expand_defaults(["quest" | rest]) when rest != [] do
     case rest do
@@ -123,7 +142,7 @@ defmodule Hive.CLI do
   defp expand_defaults(argv), do: argv
 
   # Commands that manage their own store lifecycle or don't need the store.
-  @no_auto_store [[:init], [:version]]
+  @no_auto_store [[:init], [:version], [:server]]
 
   defp maybe_ensure_store(subcommand_path) do
     unless subcommand_path in @no_auto_store do
@@ -672,6 +691,11 @@ defmodule Hive.CLI do
   end
 
   defp dispatch([:heal], _result) do
+    if Hive.Client.remote?() do
+      Format.error("This command runs on the server. Run it there directly.")
+      return_early()
+    end
+
     Format.info("Running self-healing checks...")
     
     results = Hive.Autonomy.self_heal()
@@ -687,6 +711,11 @@ defmodule Hive.CLI do
   end
 
   defp dispatch([:optimize], result) do
+    if Hive.Client.remote?() do
+      Format.error("This command runs on the server. Run it there directly.")
+      return_early()
+    end
+
     comb_id = result_get(result, :options, :comb)
     
     if comb_id do
@@ -717,6 +746,11 @@ defmodule Hive.CLI do
   end
 
   defp dispatch([:deadlock], result) do
+    if Hive.Client.remote?() do
+      Format.error("This command runs on the server. Run it there directly.")
+      return_early()
+    end
+
     quest_id = result_get(result, :options, :quest)
     
     if quest_id do
@@ -743,6 +777,11 @@ defmodule Hive.CLI do
   end
 
   defp dispatch([:monitor], result) do
+    if Hive.Client.remote?() do
+      Format.error("This command runs on the server. Run it there directly.")
+      return_early()
+    end
+
     action = result_get(result, :args, :action)
     
     case action do
@@ -896,111 +935,139 @@ defmodule Hive.CLI do
 
   defp dispatch([:comb, :add], result) do
     path = result_get(result, :args, :path)
-    auto = result_get(result, :options, :auto) || false
 
-    path =
-      if path do
-        path
-      else
-        case discover_nearby_repos() do
-          [] ->
-            Format.error("No git repositories found in the current directory.")
-            System.halt(1)
-
-          repos ->
-            IO.puts("Found git repositories:")
-
-            repos
-            |> Enum.with_index(1)
-            |> Enum.each(fn {{display, _abs_path}, idx} ->
-              IO.puts("  #{idx}) #{display}")
-            end)
-
-            IO.puts("")
-            answer = IO.gets("Select a repo [1-#{length(repos)}]: ") |> String.trim()
-
-            case Integer.parse(answer) do
-              {n, ""} when n >= 1 and n <= length(repos) ->
-                {_display, abs_path} = Enum.at(repos, n - 1)
-                abs_path
-
-              _ ->
-                Format.error("Invalid selection: #{answer}")
-                System.halt(1)
-            end
-        end
+    if Hive.Client.remote?() do
+      unless path do
+        Format.error("Remote mode requires an explicit path. Usage: hive comb add <path>")
+        System.halt(1)
       end
 
-    # If --auto flag is set, use onboarding
-    if auto do
       name = result_get(result, :options, :name)
-      validation_command = result_get(result, :options, :validation_command)
-      
-      opts = []
-      opts = if name, do: Keyword.put(opts, :name, name), else: opts
-      opts = if validation_command, do: Keyword.put(opts, :validation_command, validation_command), else: opts
-      opts = Keyword.put(opts, :skip_research, true)
+      opts = if name, do: [name: name], else: []
 
-      case Hive.Onboarding.onboard(path, opts) do
-        {:ok, result} ->
-          Format.success("Comb \"#{result.comb.name}\" auto-configured (#{result.comb.id})")
-          Format.info("  Language: #{result.project_info.language}")
-          if result.project_info.framework, do: Format.info("  Framework: #{result.project_info.framework}")
-          if result.project_info.validation_command, do: Format.info("  Validation: #{result.project_info.validation_command}")
-        {:error, reason} ->
-          Format.error("Auto-configuration failed: #{reason}")
+      case Hive.Client.add_comb(path, opts) do
+        {:ok, comb} -> Format.success("Comb \"#{comb.name}\" registered (#{comb.id})")
+        {:error, reason} -> Format.error("Failed to add comb: #{inspect(reason)}")
       end
     else
-      # Original manual configuration
-      name = result_get(result, :options, :name)
-      merge_strategy = result_get(result, :options, :merge_strategy)
-      validation_command = result_get(result, :options, :validation_command)
-      github_owner = result_get(result, :options, :github_owner)
-      github_repo = result_get(result, :options, :github_repo)
+      auto = result_get(result, :options, :auto) || false
 
-      opts = []
-      opts = if name, do: Keyword.put(opts, :name, name), else: opts
-      opts = if merge_strategy, do: Keyword.put(opts, :merge_strategy, merge_strategy), else: opts
+      path =
+        if path do
+          path
+        else
+          case discover_nearby_repos() do
+            [] ->
+              Format.error("No git repositories found in the current directory.")
+              System.halt(1)
 
-      opts =
-        if validation_command,
-          do: Keyword.put(opts, :validation_command, validation_command),
-          else: opts
+            repos ->
+              IO.puts("Found git repositories:")
 
-      opts = if github_owner, do: Keyword.put(opts, :github_owner, github_owner), else: opts
-      opts = if github_repo, do: Keyword.put(opts, :github_repo, github_repo), else: opts
+              repos
+              |> Enum.with_index(1)
+              |> Enum.each(fn {{display, _abs_path}, idx} ->
+                IO.puts("  #{idx}) #{display}")
+              end)
 
-      case Hive.Comb.add(path, opts) do
-        {:ok, comb} ->
-          Format.success("Comb \"#{comb.name}\" registered (#{comb.id})")
+              IO.puts("")
+              answer = IO.gets("Select a repo [1-#{length(repos)}]: ") |> String.trim()
 
-        {:error, :path_not_found} ->
-          Format.error("Path does not exist: #{path}")
+              case Integer.parse(answer) do
+                {n, ""} when n >= 1 and n <= length(repos) ->
+                  {_display, abs_path} = Enum.at(repos, n - 1)
+                  abs_path
 
-        {:error, reason} ->
-          Format.error("Failed to add comb: #{inspect(reason)}")
+                _ ->
+                  Format.error("Invalid selection: #{answer}")
+                  System.halt(1)
+              end
+          end
+        end
+
+      # If --auto flag is set, use onboarding
+      if auto do
+        name = result_get(result, :options, :name)
+        validation_command = result_get(result, :options, :validation_command)
+
+        opts = []
+        opts = if name, do: Keyword.put(opts, :name, name), else: opts
+        opts = if validation_command, do: Keyword.put(opts, :validation_command, validation_command), else: opts
+        opts = Keyword.put(opts, :skip_research, true)
+
+        case Hive.Onboarding.onboard(path, opts) do
+          {:ok, result} ->
+            Format.success("Comb \"#{result.comb.name}\" auto-configured (#{result.comb.id})")
+            Format.info("  Language: #{result.project_info.language}")
+            if result.project_info.framework, do: Format.info("  Framework: #{result.project_info.framework}")
+            if result.project_info.validation_command, do: Format.info("  Validation: #{result.project_info.validation_command}")
+          {:error, reason} ->
+            Format.error("Auto-configuration failed: #{reason}")
+        end
+      else
+        # Original manual configuration
+        name = result_get(result, :options, :name)
+        merge_strategy = result_get(result, :options, :merge_strategy)
+        validation_command = result_get(result, :options, :validation_command)
+        github_owner = result_get(result, :options, :github_owner)
+        github_repo = result_get(result, :options, :github_repo)
+
+        opts = []
+        opts = if name, do: Keyword.put(opts, :name, name), else: opts
+        opts = if merge_strategy, do: Keyword.put(opts, :merge_strategy, merge_strategy), else: opts
+
+        opts =
+          if validation_command,
+            do: Keyword.put(opts, :validation_command, validation_command),
+            else: opts
+
+        opts = if github_owner, do: Keyword.put(opts, :github_owner, github_owner), else: opts
+        opts = if github_repo, do: Keyword.put(opts, :github_repo, github_repo), else: opts
+
+        case Hive.Comb.add(path, opts) do
+          {:ok, comb} ->
+            Format.success("Comb \"#{comb.name}\" registered (#{comb.id})")
+
+          {:error, :path_not_found} ->
+            Format.error("Path does not exist: #{path}")
+
+          {:error, reason} ->
+            Format.error("Failed to add comb: #{inspect(reason)}")
+        end
       end
     end
   end
 
   defp dispatch([:comb, :list], _result) do
-    case Hive.Comb.list() do
+    combs =
+      if Hive.Client.remote?() do
+        case Hive.Client.list_combs() do
+          {:ok, c} -> c
+          {:error, reason} -> Format.error("Remote error: #{inspect(reason)}"); []
+        end
+      else
+        Hive.Comb.list()
+      end
+
+    case combs do
       [] ->
         Format.info("No combs registered. Use `hive comb add <path>` to register one.")
 
       combs ->
         current_id =
-          case Hive.Comb.current() do
-            {:ok, c} -> c.id
-            _ -> nil
+          unless Hive.Client.remote?() do
+            case Hive.Comb.current() do
+              {:ok, c} -> c.id
+              _ -> nil
+            end
           end
 
         headers = ["", "ID", "Name", "Path"]
 
         rows =
           Enum.map(combs, fn c ->
-            marker = if c.id == current_id, do: "*", else: ""
-            [marker, c.id, c.name, c.path || c.repo_url || "-"]
+            marker = if current_id && c.id == current_id, do: "*", else: ""
+            [marker, c.id, c.name, c[:path] || c[:repo_url] || "-"]
           end)
 
         Format.table(headers, rows)
@@ -1010,7 +1077,15 @@ defmodule Hive.CLI do
   defp dispatch([:comb, :remove], result) do
     name = result_get(result, :args, :name)
 
-    case Hive.Comb.remove(name) do
+    remove_result =
+      if Hive.Client.remote?(),
+        do: Hive.Client.remove_comb(name),
+        else: Hive.Comb.remove(name)
+
+    case remove_result do
+      :ok ->
+        Format.success("Comb \"#{name}\" removed.")
+
       {:ok, comb} ->
         Format.success("Comb \"#{comb.name}\" removed.")
 
@@ -1023,50 +1098,63 @@ defmodule Hive.CLI do
   defp dispatch([:comb, :use], result) do
     name = result_get(result, :args, :name)
 
-    if name do
-      case Hive.Comb.set_current(name) do
-        {:ok, comb} ->
-          Format.success("Current comb set to \"#{comb.name}\" (#{comb.id})")
+    if Hive.Client.remote?() do
+      unless name do
+        Format.error("Remote mode requires an explicit name/id. Usage: hive comb use <name>")
+        System.halt(1)
+      end
 
-        {:error, :not_found} ->
-          Format.error("Comb not found: #{name}")
-          Format.info("Hint: use `hive comb list` to see all combs.")
-
-        {:error, reason} ->
-          Format.error("Failed to set current comb: #{inspect(reason)}")
+      case Hive.Client.use_comb(name) do
+        {:ok, comb} -> Format.success("Current comb set to \"#{comb.name}\" (#{comb.id})")
+        {:error, :not_found} -> Format.error("Comb not found: #{name}")
+        {:error, reason} -> Format.error("Failed to set current comb: #{inspect(reason)}")
       end
     else
-      case Hive.Comb.list() do
-        [] ->
-          Format.error("No combs registered. Use `hive comb add <path>` to register one.")
+      if name do
+        case Hive.Comb.set_current(name) do
+          {:ok, comb} ->
+            Format.success("Current comb set to \"#{comb.name}\" (#{comb.id})")
 
-        combs ->
-          IO.puts("Registered combs:")
+          {:error, :not_found} ->
+            Format.error("Comb not found: #{name}")
+            Format.info("Hint: use `hive comb list` to see all combs.")
 
-          combs
-          |> Enum.with_index(1)
-          |> Enum.each(fn {c, idx} ->
-            IO.puts("  #{idx}) #{c.name} (#{c.id})")
-          end)
+          {:error, reason} ->
+            Format.error("Failed to set current comb: #{inspect(reason)}")
+        end
+      else
+        case Hive.Comb.list() do
+          [] ->
+            Format.error("No combs registered. Use `hive comb add <path>` to register one.")
 
-          IO.puts("")
-          answer = IO.gets("Select a comb [1-#{length(combs)}]: ") |> String.trim()
+          combs ->
+            IO.puts("Registered combs:")
 
-          case Integer.parse(answer) do
-            {n, ""} when n >= 1 and n <= length(combs) ->
-              comb = Enum.at(combs, n - 1)
+            combs
+            |> Enum.with_index(1)
+            |> Enum.each(fn {c, idx} ->
+              IO.puts("  #{idx}) #{c.name} (#{c.id})")
+            end)
 
-              case Hive.Comb.set_current(comb.id) do
-                {:ok, c} ->
-                  Format.success("Current comb set to \"#{c.name}\" (#{c.id})")
+            IO.puts("")
+            answer = IO.gets("Select a comb [1-#{length(combs)}]: ") |> String.trim()
 
-                {:error, reason} ->
-                  Format.error("Failed: #{inspect(reason)}")
-              end
+            case Integer.parse(answer) do
+              {n, ""} when n >= 1 and n <= length(combs) ->
+                comb = Enum.at(combs, n - 1)
 
-            _ ->
-              Format.error("Invalid selection: #{answer}")
-          end
+                case Hive.Comb.set_current(comb.id) do
+                  {:ok, c} ->
+                    Format.success("Current comb set to \"#{c.name}\" (#{c.id})")
+
+                  {:error, reason} ->
+                    Format.error("Failed: #{inspect(reason)}")
+                end
+
+              _ ->
+                Format.error("Invalid selection: #{answer}")
+            end
+        end
       end
     end
   end
@@ -1178,15 +1266,20 @@ defmodule Hive.CLI do
     bee_id = result_get(result, :options, :bee)
     queen? = result_get(result, :flags, :queen) || false
 
-    cond do
-      queen? ->
-        do_prime_queen()
+    if Hive.Client.remote?() do
+      # In remote mode, prime is a no-op — the bee works without local context injection
+      :ok
+    else
+      cond do
+        queen? ->
+          do_prime_queen()
 
-      is_binary(bee_id) ->
-        do_prime_bee(bee_id)
+        is_binary(bee_id) ->
+          do_prime_bee(bee_id)
 
-      true ->
-        Format.error("Specify --queen or --bee <id>")
+        true ->
+          Format.error("Specify --queen or --bee <id>")
+      end
     end
   end
 
@@ -1227,7 +1320,17 @@ defmodule Hive.CLI do
   end
 
   defp dispatch([:bee, :list], _result) do
-    case Hive.Bees.list() do
+    bees =
+      if Hive.Client.remote?() do
+        case Hive.Client.list_bees() do
+          {:ok, b} -> b
+          {:error, reason} -> Format.error("Remote error: #{inspect(reason)}"); []
+        end
+      else
+        Hive.Bees.list()
+      end
+
+    case bees do
       [] ->
         Format.info("No bees. Bees are spawned when the Queen assigns jobs.")
 
@@ -1237,12 +1340,13 @@ defmodule Hive.CLI do
         rows =
           Enum.map(bees, fn b ->
             context_pct =
-              case b.context_percentage do
+              case b[:context_percentage] do
                 nil -> "-"
-                pct -> "#{Float.round(pct * 100, 1)}%"
+                pct when is_number(pct) -> "#{Float.round(pct * 100, 1)}%"
+                _ -> "-"
               end
 
-            [b.id, b.name, b.status, b.job_id || "-", context_pct]
+            [b.id, b.name, b.status, b[:job_id] || "-", context_pct]
           end)
 
         Format.table(headers, rows)
@@ -1285,7 +1389,12 @@ defmodule Hive.CLI do
   defp dispatch([:bee, :stop], result) do
     bee_id = result_get(result, :options, :id)
 
-    case Hive.Bees.stop(bee_id) do
+    stop_result =
+      if Hive.Client.remote?(),
+        do: Hive.Client.stop_bee(bee_id),
+        else: Hive.Bees.stop(bee_id)
+
+    case stop_result do
       :ok ->
         Format.success("Bee #{bee_id} stopped.")
 
@@ -1298,26 +1407,33 @@ defmodule Hive.CLI do
   defp dispatch([:bee, :complete], result) do
     bee_id = result_get(result, :args, :bee_id)
 
-    case Hive.Bees.get(bee_id) do
-      {:ok, bee} ->
-        Hive.Store.put(:bees, %{bee | status: "stopped"})
+    if Hive.Client.remote?() do
+      case Hive.Client.complete_bee(bee_id) do
+        :ok -> Format.success("Bee #{bee_id} marked as completed.")
+        {:error, reason} -> Format.error("Failed: #{inspect(reason)}")
+      end
+    else
+      case Hive.Bees.get(bee_id) do
+        {:ok, bee} ->
+          Hive.Store.put(:bees, %{bee | status: "stopped"})
 
-        if bee.job_id do
-          Hive.Jobs.complete(bee.job_id)
-          Hive.Jobs.unblock_dependents(bee.job_id)
+          if bee.job_id do
+            Hive.Jobs.complete(bee.job_id)
+            Hive.Jobs.unblock_dependents(bee.job_id)
 
-          Hive.Waggle.send(
-            bee_id,
-            "queen",
-            "job_complete",
-            "Job #{bee.job_id} completed successfully"
-          )
-        end
+            Hive.Waggle.send(
+              bee_id,
+              "queen",
+              "job_complete",
+              "Job #{bee.job_id} completed successfully"
+            )
+          end
 
-        Format.success("Bee #{bee_id} marked as completed.")
+          Format.success("Bee #{bee_id} marked as completed.")
 
-      {:error, _} ->
-        Format.error("Bee not found: #{bee_id}")
+        {:error, _} ->
+          Format.error("Bee not found: #{bee_id}")
+      end
     end
   end
 
@@ -1325,19 +1441,26 @@ defmodule Hive.CLI do
     bee_id = result_get(result, :args, :bee_id)
     reason = result_get(result, :options, :reason) || "unknown"
 
-    case Hive.Bees.get(bee_id) do
-      {:ok, bee} ->
-        Hive.Store.put(:bees, %{bee | status: "crashed"})
+    if Hive.Client.remote?() do
+      case Hive.Client.fail_bee(bee_id, reason) do
+        :ok -> Format.success("Bee #{bee_id} marked as failed: #{reason}")
+        {:error, err} -> Format.error("Failed: #{inspect(err)}")
+      end
+    else
+      case Hive.Bees.get(bee_id) do
+        {:ok, bee} ->
+          Hive.Store.put(:bees, %{bee | status: "crashed"})
 
-        if bee.job_id do
-          Hive.Jobs.fail(bee.job_id)
-          Hive.Waggle.send(bee_id, "queen", "job_failed", "Job #{bee.job_id} failed: #{reason}")
-        end
+          if bee.job_id do
+            Hive.Jobs.fail(bee.job_id)
+            Hive.Waggle.send(bee_id, "queen", "job_failed", "Job #{bee.job_id} failed: #{reason}")
+          end
 
-        Format.success("Bee #{bee_id} marked as failed: #{reason}")
+          Format.success("Bee #{bee_id} marked as failed: #{reason}")
 
-      {:error, _} ->
-        Format.error("Bee not found: #{bee_id}")
+        {:error, _} ->
+          Format.error("Bee not found: #{bee_id}")
+      end
     end
   end
 
@@ -1385,43 +1508,62 @@ defmodule Hive.CLI do
   defp dispatch([:quest, :report], result) do
     id = result_get(result, :args, :id)
 
-    case Hive.Report.generate(id) do
-      {:ok, report} ->
-        IO.puts(Hive.Report.format(report))
+    if Hive.Client.remote?() do
+      case Hive.Client.quest_report(id) do
+        {:ok, report} -> IO.puts(report[:text] || inspect(report))
+        {:error, reason} -> Format.error("Report failed: #{format_error(reason)}")
+      end
+    else
+      case Hive.Report.generate(id) do
+        {:ok, report} ->
+          IO.puts(Hive.Report.format(report))
 
-      {:error, :not_found} ->
-        Format.error("Quest not found: #{id}")
+        {:error, :not_found} ->
+          Format.error("Quest not found: #{id}")
 
-      {:error, reason} ->
-        Format.error("Report failed: #{inspect(reason)}")
+        {:error, reason} ->
+          Format.error("Report failed: #{format_error(reason)}")
+      end
     end
   end
 
   defp dispatch([:quest, :merge], result) do
     id = result_get(result, :args, :id)
 
-    case Hive.Merge.merge_quest(id) do
-      {:ok, branch} ->
-        Format.success("All bee branches merged into #{branch}")
+    if Hive.Client.remote?() do
+      case Hive.Client.quest_merge(id) do
+        {:ok, data} -> Format.success("All bee branches merged into #{data[:branch] || "quest branch"}")
+        {:error, reason} -> Format.error("Quest merge failed: #{format_error(reason)}")
+      end
+    else
+      case Hive.Merge.merge_quest(id) do
+        {:ok, branch} ->
+          Format.success("All bee branches merged into #{branch}")
 
-      {:error, :not_found} ->
-        Format.error("Quest not found: #{id}")
+        {:error, :not_found} ->
+          Format.error("Quest not found: #{id}")
 
-      {:error, :no_cells} ->
-        Format.error("No active cells to merge for this quest.")
+        {:error, :no_cells} ->
+          Format.error("No active cells to merge for this quest.")
 
-      {:error, {:merge_conflicts, branch, failed}} ->
-        Format.warn("Merged into #{branch} with conflicts in: #{Enum.join(failed, ", ")}")
+        {:error, {:merge_conflicts, branch, failed}} ->
+          Format.warn("Merged into #{branch} with conflicts in: #{Enum.join(failed, ", ")}")
 
-      {:error, reason} ->
-        Format.error("Quest merge failed: #{inspect(reason)}")
+        {:error, reason} ->
+          Format.error("Quest merge failed: #{format_error(reason)}")
+      end
     end
   end
 
   defp dispatch([:quest, :close], result) do
     id = result_get(result, :args, :id)
 
-    case Hive.Quests.close(id) do
+    close_result =
+      if Hive.Client.remote?(),
+        do: Hive.Client.close_quest(id),
+        else: Hive.Quests.close(id)
+
+    case close_result do
       {:ok, quest} ->
         Format.success("Quest \"#{quest.name}\" closed. Associated cells removed.")
 
@@ -1434,35 +1576,50 @@ defmodule Hive.CLI do
   defp dispatch([:quest, :new], result) do
     goal = result_get(result, :args, :goal)
 
-    case resolve_comb_id(result_get(result, :options, :comb)) do
-      {:ok, comb_id} ->
-        attrs = %{goal: goal, comb_id: comb_id}
+    if Hive.Client.remote?() do
+      comb_opt = result_get(result, :options, :comb)
+      attrs = if comb_opt, do: %{goal: goal, comb_id: comb_opt}, else: %{goal: goal}
 
-        case Hive.Quests.create(attrs) do
-          {:ok, quest} ->
-            Format.success("Quest \"#{quest.name}\" created (#{quest.id})")
+      case Hive.Client.create_quest(attrs) do
+        {:ok, quest} -> Format.success("Quest \"#{quest.name}\" created (#{quest.id})")
+        {:error, reason} -> Format.error("Failed to create quest: #{inspect(reason)}")
+      end
+    else
+      case resolve_comb_id(result_get(result, :options, :comb)) do
+        {:ok, comb_id} ->
+          attrs = %{goal: goal, comb_id: comb_id}
 
-          {:error, reason} ->
-            Format.error("Failed to create quest: #{inspect(reason)}")
-        end
+          case Hive.Quests.create(attrs) do
+            {:ok, quest} ->
+              Format.success("Quest \"#{quest.name}\" created (#{quest.id})")
 
-      {:error, :no_comb} ->
-        case Hive.Quests.create(%{goal: goal}) do
-          {:ok, quest} ->
-            Format.success("Quest \"#{quest.name}\" created (#{quest.id})")
+            {:error, reason} ->
+              Format.error("Failed to create quest: #{inspect(reason)}")
+          end
 
-          {:error, reason} ->
-            Format.error("Failed to create quest: #{inspect(reason)}")
-        end
+        {:error, :no_comb} ->
+          case Hive.Quests.create(%{goal: goal}) do
+            {:ok, quest} ->
+              Format.success("Quest \"#{quest.name}\" created (#{quest.id})")
+
+            {:error, reason} ->
+              Format.error("Failed to create quest: #{inspect(reason)}")
+          end
+      end
     end
   end
 
-  defp dispatch([:quest, :delete], result) do
+  defp dispatch([:quest, :remove], result) do
     id = result_get(result, :args, :id)
 
-    case Hive.Quests.delete(id) do
+    del_result =
+      if Hive.Client.remote?(),
+        do: Hive.Client.delete_quest(id),
+        else: Hive.Quests.delete(id)
+
+    case del_result do
       :ok ->
-        Format.success("Quest #{id} deleted.")
+        Format.success("Quest #{id} removed.")
 
       {:error, :not_found} ->
         Format.error("Quest not found: #{id}")
@@ -1471,17 +1628,29 @@ defmodule Hive.CLI do
   end
 
   defp dispatch([:quest, :list], _result) do
-    case Hive.Quests.list() do
+    quests =
+      if Hive.Client.remote?() do
+        case Hive.Client.list_quests() do
+          {:ok, q} -> q
+          {:error, reason} -> Format.error("Remote error: #{inspect(reason)}"); []
+        end
+      else
+        Hive.Quests.list()
+      end
+
+    case quests do
       [] ->
         Format.info("No quests. Create one with `hive quest \"<goal>\"`.")
 
       quests ->
-        headers = ["ID", "Name", "Status", "Comb"]
+        headers = ["ID", "Name", "Phase", "Status", "Comb"]
 
         rows =
           Enum.map(quests, fn q ->
-            comb_name = resolve_comb_name(q[:comb_id])
-            [q.id, q.name, q.status, comb_name]
+            comb_name =
+              if Hive.Client.remote?(), do: q[:comb_id] || "-", else: resolve_comb_name(q[:comb_id])
+            phase = q[:current_phase] || "-"
+            [q.id, q.name, phase, q.status, comb_name]
           end)
 
         Format.table(headers, rows)
@@ -1491,25 +1660,33 @@ defmodule Hive.CLI do
   defp dispatch([:quest, :show], result) do
     id = result_get(result, :args, :id)
 
-    case Hive.Quests.get(id) do
+    quest_result =
+      if Hive.Client.remote?(),
+        do: Hive.Client.get_quest(id),
+        else: Hive.Quests.get(id)
+
+    case quest_result do
       {:ok, quest} ->
         IO.puts("ID:     #{quest.id}")
         IO.puts("Name:   #{quest.name}")
         IO.puts("Status: #{quest.status}")
 
         if quest[:comb_id] do
-          comb_name = resolve_comb_name(quest.comb_id)
+          comb_name =
+            if Hive.Client.remote?(), do: quest.comb_id, else: resolve_comb_name(quest.comb_id)
           IO.puts("Comb:   #{comb_name}")
         end
 
-        if quest[:council_id] do
-          council_label =
-            case Hive.Council.get(quest.council_id) do
-              {:ok, c} -> "#{c.domain} (#{c.id})"
-              _ -> quest.council_id
-            end
+        unless Hive.Client.remote?() do
+          if quest[:council_id] do
+            council_label =
+              case Hive.Council.get(quest.council_id) do
+                {:ok, c} -> "#{c.domain} (#{c.id})"
+                _ -> quest.council_id
+              end
 
-          IO.puts("Council: #{council_label}")
+            IO.puts("Council: #{council_label}")
+          end
         end
 
         if quest[:goal] do
@@ -1518,14 +1695,18 @@ defmodule Hive.CLI do
 
         IO.puts("")
 
-        spec_phases = Hive.Specs.list_phases(id)
+        unless Hive.Client.remote?() do
+          spec_phases = Hive.Specs.list_phases(id)
 
-        if spec_phases != [] do
-          IO.puts("Specs:  #{Enum.join(spec_phases, ", ")}")
-          IO.puts("")
+          if spec_phases != [] do
+            IO.puts("Specs:  #{Enum.join(spec_phases, ", ")}")
+            IO.puts("")
+          end
         end
 
-        case quest.jobs do
+        jobs = quest[:jobs] || []
+
+        case jobs do
           [] ->
             Format.info("No jobs in this quest.")
 
@@ -1534,7 +1715,7 @@ defmodule Hive.CLI do
 
             rows =
               Enum.map(jobs, fn j ->
-                [j.id, j.title, j.status, j.bee_id || "-"]
+                [j.id, j.title, j.status, j[:bee_id] || "-"]
               end)
 
             Format.table(headers, rows)
@@ -1547,7 +1728,17 @@ defmodule Hive.CLI do
   end
 
   defp dispatch([:jobs, :list], _result) do
-    case Hive.Jobs.list() do
+    jobs =
+      if Hive.Client.remote?() do
+        case Hive.Client.list_jobs() do
+          {:ok, j} -> j
+          {:error, reason} -> Format.error("Remote error: #{inspect(reason)}"); []
+        end
+      else
+        Hive.Jobs.list()
+      end
+
+    case jobs do
       [] ->
         Format.info("No jobs found.")
 
@@ -1556,7 +1747,7 @@ defmodule Hive.CLI do
 
         rows =
           Enum.map(jobs, fn j ->
-            [j.id, j.title, j.status, j.quest_id, j.bee_id || "-"]
+            [j.id, j.title, j.status, j[:quest_id], j[:bee_id] || "-"]
           end)
 
         Format.table(headers, rows)
@@ -1566,18 +1757,23 @@ defmodule Hive.CLI do
   defp dispatch([:jobs, :show], result) do
     id = result_get(result, :args, :id)
 
-    case Hive.Jobs.get(id) do
+    job_result =
+      if Hive.Client.remote?(),
+        do: Hive.Client.get_job(id),
+        else: Hive.Jobs.get(id)
+
+    case job_result do
       {:ok, job} ->
         IO.puts("ID:          #{job.id}")
         IO.puts("Title:       #{job.title}")
         IO.puts("Status:      #{job.status}")
-        IO.puts("Quest ID:    #{job.quest_id}")
-        IO.puts("Comb ID:     #{job.comb_id}")
-        IO.puts("Bee ID:      #{job.bee_id || "-"}")
-        IO.puts("Created:     #{job.inserted_at}")
+        IO.puts("Quest ID:    #{job[:quest_id]}")
+        IO.puts("Comb ID:     #{job[:comb_id]}")
+        IO.puts("Bee ID:      #{job[:bee_id] || "-"}")
+        IO.puts("Created:     #{job[:inserted_at]}")
         IO.puts("")
 
-        if job.description do
+        if job[:description] do
           IO.puts(job.description)
         end
 
@@ -1617,7 +1813,12 @@ defmodule Hive.CLI do
   defp dispatch([:jobs, :reset], result) do
     job_id = result_get(result, :args, :id)
 
-    case Hive.Jobs.reset(job_id) do
+    reset_result =
+      if Hive.Client.remote?(),
+        do: Hive.Client.reset_job(job_id),
+        else: Hive.Jobs.reset(job_id)
+
+    case reset_result do
       {:ok, job} ->
         Format.success("Job \"#{job.title}\" reset to #{job.status} (#{job.id})")
 
@@ -1633,24 +1834,37 @@ defmodule Hive.CLI do
   end
 
   defp dispatch([:costs, :summary], _result) do
-    summary = Hive.Costs.summary()
+    summary =
+      if Hive.Client.remote?() do
+        case Hive.Client.costs_summary() do
+          {:ok, s} -> s
+          {:error, reason} ->
+            Format.error("Remote error: #{inspect(reason)}")
+            System.halt(1)
+        end
+      else
+        Hive.Costs.summary()
+      end
 
-    IO.puts("Total cost:          $#{:erlang.float_to_binary(summary.total_cost, decimals: 4)}")
-    IO.puts("Total input tokens:  #{summary.total_input_tokens}")
-    IO.puts("Total output tokens: #{summary.total_output_tokens}")
+    total_cost = summary[:total_cost] || 0.0
+    IO.puts("Total cost:          $#{:erlang.float_to_binary(total_cost / 1, decimals: 4)}")
+    IO.puts("Total input tokens:  #{summary[:total_input_tokens] || 0}")
+    IO.puts("Total output tokens: #{summary[:total_output_tokens] || 0}")
     IO.puts("")
 
-    if map_size(summary.by_model) > 0 do
+    by_model = summary[:by_model] || %{}
+    if map_size(by_model) > 0 do
       IO.puts("By model:")
       headers = ["Model", "Cost", "Input Tokens", "Output Tokens"]
 
       rows =
-        Enum.map(summary.by_model, fn {model, data} ->
+        Enum.map(by_model, fn {model, data} ->
+          cost = (data[:cost] || 0.0) / 1
           [
             model,
-            "$#{:erlang.float_to_binary(data.cost, decimals: 4)}",
-            "#{data.input_tokens}",
-            "#{data.output_tokens}"
+            "$#{:erlang.float_to_binary(cost, decimals: 4)}",
+            "#{data[:input_tokens] || 0}",
+            "#{data[:output_tokens] || 0}"
           ]
         end)
 
@@ -1658,17 +1872,19 @@ defmodule Hive.CLI do
       IO.puts("")
     end
 
-    if map_size(summary.by_bee) > 0 do
+    by_bee = summary[:by_bee] || %{}
+    if map_size(by_bee) > 0 do
       IO.puts("By bee:")
       headers = ["Bee ID", "Cost", "Input Tokens", "Output Tokens"]
 
       rows =
-        Enum.map(summary.by_bee, fn {bee_id, data} ->
+        Enum.map(by_bee, fn {bee_id, data} ->
+          cost = (data[:cost] || 0.0) / 1
           [
             bee_id,
-            "$#{:erlang.float_to_binary(data.cost, decimals: 4)}",
-            "#{data.input_tokens}",
-            "#{data.output_tokens}"
+            "$#{:erlang.float_to_binary(cost, decimals: 4)}",
+            "#{data[:input_tokens] || 0}",
+            "#{data[:output_tokens] || 0}"
           ]
         end)
 
@@ -1677,25 +1893,30 @@ defmodule Hive.CLI do
   end
 
   defp dispatch([:costs, :record], result) do
-    queen? = result_get(result, :flags, :queen) || false
-
-    if queen? do
-      record_queen_costs()
+    if Hive.Client.remote?() do
+      # In remote mode, cost recording is a no-op for now
+      :ok
     else
-      bee_id = result_get(result, :options, :bee)
-      input = result_get(result, :options, :input)
-      output = result_get(result, :options, :output)
-      model = result_get(result, :options, :model)
+      queen? = result_get(result, :flags, :queen) || false
 
-      if is_nil(bee_id) or is_nil(input) or is_nil(output) do
-        Format.error("--bee, --input, and --output are required (or use --queen)")
+      if queen? do
+        record_queen_costs()
       else
-        attrs = %{input_tokens: input, output_tokens: output, model: model}
-        {:ok, cost} = Hive.Costs.record(bee_id, attrs)
+        bee_id = result_get(result, :options, :bee)
+        input = result_get(result, :options, :input)
+        output = result_get(result, :options, :output)
+        model = result_get(result, :options, :model)
 
-        Format.success(
-          "Cost recorded: $#{:erlang.float_to_binary(cost.cost_usd, decimals: 6)} (#{cost.id})"
-        )
+        if is_nil(bee_id) or is_nil(input) or is_nil(output) do
+          Format.error("--bee, --input, and --output are required (or use --queen)")
+        else
+          attrs = %{input_tokens: input, output_tokens: output, model: model}
+          {:ok, cost} = Hive.Costs.record(bee_id, attrs)
+
+          Format.success(
+            "Cost recorded: $#{:erlang.float_to_binary(cost.cost_usd, decimals: 6)} (#{cost.id})"
+          )
+        end
       end
     end
   end
@@ -1762,6 +1983,11 @@ defmodule Hive.CLI do
   end
 
   defp dispatch([:drone], result) do
+    if Hive.Client.remote?() do
+      Format.error("This command runs on the server. Run it there directly.")
+      return_early()
+    end
+
     no_fix = result_get(result, :flags, :no_fix) || false
     verify = result_get(result, :flags, :verify) || false
 
@@ -1779,7 +2005,24 @@ defmodule Hive.CLI do
     end
   end
 
+  defp dispatch([:server], result) do
+    port = result_get(result, :options, :port) || 4000
+
+    {:ok, _} = Application.ensure_all_started(:hive)
+
+    url = "http://localhost:#{port}"
+    Format.success("Hive server v#{Hive.version()} running at #{url}")
+    Format.info("API available at #{url}/api/v1/health")
+    Format.info("Press Ctrl+C to stop.")
+    Process.sleep(:infinity)
+  end
+
   defp dispatch([:dashboard], _result) do
+    if Hive.Client.remote?() do
+      Format.error("This command runs on the server. Run it there directly.")
+      return_early()
+    end
+
     do_start_dashboard()
   end
 
@@ -2062,22 +2305,31 @@ defmodule Hive.CLI do
     phase = result_get(result, :options, :phase)
     content = result_get(result, :options, :content)
 
-    content =
-      if content do
-        content
-      else
-        IO.read(:stdio, :eof)
+    if Hive.Client.remote?() do
+      content = content || IO.read(:stdio, :eof)
+
+      case Hive.Client.quest_spec_write(quest_id, phase, content) do
+        {:ok, _} -> Format.success("Spec written for #{phase}")
+        {:error, reason} -> Format.error("Failed to write spec: #{format_error(reason)}")
       end
+    else
+      content =
+        if content do
+          content
+        else
+          IO.read(:stdio, :eof)
+        end
 
-    case Hive.Specs.write(quest_id, phase, content) do
-      {:ok, path} ->
-        Format.success("Spec written: #{path}")
+      case Hive.Specs.write(quest_id, phase, content) do
+        {:ok, path} ->
+          Format.success("Spec written: #{path}")
 
-      {:error, {:invalid_phase, p}} ->
-        Format.error("Invalid phase: #{p}. Valid phases: #{Enum.join(Hive.Specs.phases(), ", ")}")
+        {:error, {:invalid_phase, p}} ->
+          Format.error("Invalid phase: #{p}. Valid phases: #{Enum.join(Hive.Specs.phases(), ", ")}")
 
-      {:error, reason} ->
-        Format.error("Failed to write spec: #{inspect(reason)}")
+        {:error, reason} ->
+          Format.error("Failed to write spec: #{format_error(reason)}")
+      end
     end
   end
 
@@ -2085,36 +2337,90 @@ defmodule Hive.CLI do
     quest_id = result_get(result, :args, :quest_id)
     phase = result_get(result, :options, :phase)
 
-    case Hive.Specs.read(quest_id, phase) do
-      {:ok, content} ->
-        IO.puts(content)
+    if Hive.Client.remote?() do
+      case Hive.Client.quest_spec(quest_id, phase) do
+        {:ok, data} -> IO.puts(data[:content] || inspect(data))
+        {:error, :not_found} -> Format.error("No #{phase} spec found for quest #{quest_id}")
+        {:error, reason} -> Format.error("Failed: #{format_error(reason)}")
+      end
+    else
+      case Hive.Specs.read(quest_id, phase) do
+        {:ok, content} ->
+          IO.puts(content)
 
-      {:error, :not_found} ->
-        Format.error("No #{phase} spec found for quest #{quest_id}")
+        {:error, :not_found} ->
+          Format.error("No #{phase} spec found for quest #{quest_id}")
 
-      {:error, {:invalid_phase, p}} ->
-        Format.error("Invalid phase: #{p}. Valid phases: #{Enum.join(Hive.Specs.phases(), ", ")}")
+        {:error, {:invalid_phase, p}} ->
+          Format.error("Invalid phase: #{p}. Valid phases: #{Enum.join(Hive.Specs.phases(), ", ")}")
+      end
     end
   end
 
   defp dispatch([:quest, :plan], result) do
     quest_id = result_get(result, :args, :quest_id)
 
-    case Hive.Queen.Planner.generate_plan(quest_id, %{}) do
+    plan_result =
+      if Hive.Client.remote?(),
+        do: Hive.Client.plan_quest(quest_id),
+        else: Hive.Queen.Planner.generate_llm_plan(quest_id)
+
+    case plan_result do
       {:ok, plan} ->
+        tasks = plan[:tasks] || plan.tasks || []
         Format.success("Plan generated for quest #{quest_id}")
-        IO.puts("Tasks: #{length(plan.tasks)}")
-        IO.puts("Estimated duration: #{plan.estimated_duration}")
+        IO.puts("")
+        IO.puts("Goal:     #{plan[:goal] || "-"}")
+        IO.puts("Duration: #{plan[:estimated_duration] || "-"}")
+        IO.puts("")
+
+        tasks
+        |> Enum.with_index(1)
+        |> Enum.each(fn {task, i} ->
+          title = task["title"] || task[:title] || "Untitled"
+          desc = task["description"] || task[:description] || ""
+          files = task["target_files"] || task[:target_files] || []
+          criteria = task["acceptance_criteria"] || task[:acceptance_criteria] || []
+          deps = task["depends_on_indices"] || task[:depends_on_indices] || []
+          model = task["model_recommendation"] || task[:model_recommendation] || "-"
+
+          IO.puts("  #{i}. #{title}")
+          IO.puts("     #{String.slice(to_string(desc), 0, 120)}")
+
+          if files != [] do
+            IO.puts("     Files: #{Enum.join(files, ", ")}")
+          end
+
+          if deps != [] do
+            IO.puts("     Depends on: #{Enum.map_join(deps, ", ", &"##{&1 + 1}")}")
+          end
+
+          IO.puts("     Model: #{model}")
+
+          if criteria != [] do
+            IO.puts("     Criteria: #{Enum.join(criteria, "; ")}")
+          end
+
+          IO.puts("")
+        end)
 
       {:error, reason} ->
-        Format.error("Failed to generate plan: #{inspect(reason)}")
+        Format.error("Failed to generate plan: #{format_error(reason)}")
     end
   end
 
   defp dispatch([:quest, :start], result) do
     quest_id = result_get(result, :args, :quest_id)
 
-    case Hive.Queen.Orchestrator.start_quest(quest_id) do
+    start_result =
+      if Hive.Client.remote?(),
+        do: Hive.Client.start_quest(quest_id),
+        else: Hive.Queen.Orchestrator.start_quest(quest_id)
+
+    case start_result do
+      {:ok, data} when is_map(data) ->
+        Format.success("Quest #{quest_id} started, now in #{data.phase} phase")
+
       {:ok, phase} ->
         Format.success("Quest #{quest_id} started, now in #{phase} phase")
 
@@ -2126,19 +2432,28 @@ defmodule Hive.CLI do
   defp dispatch([:quest, :status], result) do
     quest_id = result_get(result, :args, :quest_id)
 
-    case Hive.Queen.Orchestrator.get_quest_status(quest_id) do
+    status_result =
+      if Hive.Client.remote?(),
+        do: Hive.Client.quest_status(quest_id),
+        else: Hive.Queen.Orchestrator.get_quest_status(quest_id)
+
+    case status_result do
       {:ok, status} ->
-        quest = status.quest
-        Format.info("Quest: #{quest.name} (#{quest.id})")
-        Format.info("Current phase: #{status.current_phase}")
-        Format.info("Research complete: #{status.research_complete}")
-        Format.info("Plan complete: #{status.plan_complete}")
-        Format.info("Jobs created: #{status.jobs_created}")
-        
-        if status.phase_history != [] do
+        quest = status[:quest] || %{}
+        Format.info("Quest: #{quest[:name]} (#{quest[:id]})")
+        Format.info("Current phase: #{status[:current_phase]}")
+        Format.info("Completed phases: #{inspect(status[:completed_phases] || [])}")
+        Format.info("Jobs created: #{status[:jobs_created]}")
+
+        if status[:artifacts_summary] do
+          Format.info("Artifacts: #{inspect(status[:artifacts_summary])}")
+        end
+
+        phase_history = status[:phase_history] || []
+        if phase_history != [] do
           Format.info("Phase history:")
-          Enum.each(status.phase_history, fn t ->
-            IO.puts("  #{t.from_phase} → #{t.to_phase} (#{t.reason})")
+          Enum.each(phase_history, fn t ->
+            IO.puts("  #{t[:from_phase]} → #{t[:to_phase]} (#{t[:reason]})")
           end)
         end
 
@@ -2217,12 +2532,12 @@ defmodule Hive.CLI do
     end
   end
 
-  defp dispatch([:council, :delete], result) do
+  defp dispatch([:council, :remove], result) do
     id = result_get(result, :args, :id)
 
     case Hive.Council.delete(id) do
       :ok ->
-        Format.success("Council #{id} deleted.")
+        Format.success("Council #{id} removed.")
 
       {:error, :not_found} ->
         Format.error("Council not found: #{id}")
@@ -2357,6 +2672,17 @@ defmodule Hive.CLI do
   rescue
     _ -> @empty_costs
   end
+
+  # Guard helper: used after printing an error to skip the rest of a dispatch clause.
+  # The throw is caught by dispatch/2's catch-all or simply ends the function.
+  defp return_early, do: throw(:return_early)
+
+  @doc false
+  def format_error(:unknown_provider), do: "LLM provider not configured. Set GOOGLE_API_KEY or ANTHROPIC_API_KEY."
+  def format_error(:not_found), do: "Not found."
+  def format_error({:api_error, reason}), do: "API error: #{inspect(reason)}"
+  def format_error(reason) when is_binary(reason), do: reason
+  def format_error(reason), do: inspect(reason)
 
   defp resolve_comb_id(explicit) when is_binary(explicit), do: {:ok, explicit}
 
@@ -2786,13 +3112,13 @@ defmodule Hive.CLI do
                 ]
               ]
             ],
-            delete: [
-              name: "delete",
-              about: "Delete a quest",
+            remove: [
+              name: "remove",
+              about: "Remove a quest",
               args: [
                 id: [
                   value_name: "ID",
-                  help: "Quest ID to delete",
+                  help: "Quest ID to remove",
                   required: true,
                   parser: :string
                 ]
@@ -2924,6 +3250,34 @@ defmodule Hive.CLI do
                   parser: :string
                 ]
               ]
+            ]
+          ]
+        ],
+        plan: [
+          name: "plan",
+          about: "Start an interactive planning session",
+          args: [
+            goal: [
+              value_name: "GOAL",
+              help: "Goal or Quest ID to plan",
+              required: false,
+              parser: :string
+            ]
+          ],
+          options: [
+            quest: [
+              short: "-q",
+              long: "--quest",
+              help: "Quest ID (alternative to goal arg)",
+              parser: :string,
+              required: false
+            ],
+            comb: [
+              short: "-c",
+              long: "--comb",
+              help: "Comb ID (repository) for the quest",
+              parser: :string,
+              required: false
             ]
           ]
         ],
@@ -3407,6 +3761,19 @@ defmodule Hive.CLI do
           name: "dashboard",
           about: "Open the live TUI dashboard"
         ],
+        server: [
+          name: "server",
+          about: "Start the Hive web server for real-time quest monitoring",
+          options: [
+            port: [
+              short: "-p",
+              long: "--port",
+              help: "Port to listen on (default: 4000)",
+              parser: :integer,
+              required: false
+            ]
+          ]
+        ],
         handoff: [
           name: "handoff",
           about: "Manage context-preserving bee handoffs",
@@ -3617,13 +3984,13 @@ defmodule Hive.CLI do
                 ]
               ]
             ],
-            delete: [
-              name: "delete",
-              about: "Delete a council and its agent files",
+            remove: [
+              name: "remove",
+              about: "Remove a council and its agent files",
               args: [
                 id: [
                   value_name: "ID",
-                  help: "Council ID to delete",
+                  help: "Council ID to remove",
                   required: true,
                   parser: :string
                 ]

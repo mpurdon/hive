@@ -13,7 +13,7 @@ defmodule Hive.TUI.App do
 
   require Logger
 
-  alias Hive.TUI.Context.{Input, Chat, Activity}
+  alias Hive.TUI.Context.{Input, Chat, Activity, Plan}
   alias Hive.TUI.{Constants, Views}
   alias Ratatouille.Runtime.{Command, Subscription}
 
@@ -36,6 +36,7 @@ defmodule Hive.TUI.App do
       input: Input.new(),
       chat: Chat.new(),
       activity: Activity.new(),
+      plan: Plan.new(),
       busy: false,
       session_id: nil,
       chat_scroll: 0
@@ -51,8 +52,21 @@ defmodule Hive.TUI.App do
   def update(model, msg) do
     case msg do
       {:event, %{ch: ch}} when ch > 0 ->
-        input = Input.insert_char(model.input, List.to_string([ch]))
-        %{model | input: input}
+        # In plan-review mode with empty input, single chars are shortcuts
+        if model.plan.mode == :reviewing and model.input.text == "" do
+          case List.to_string([ch]) do
+            "y" -> %{model | plan: Plan.accept_section(model.plan)}
+            "n" -> handle_plan_reject(model)
+            "a" -> %{model | plan: Plan.accept_all(model.plan)}
+            "q" -> handle_plan_cancel(model)
+            char ->
+              input = Input.insert_char(model.input, char)
+              %{model | input: input}
+          end
+        else
+          input = Input.insert_char(model.input, List.to_string([ch]))
+          %{model | input: input}
+        end
 
       {:event, %{key: key}} ->
         handle_key(model, key)
@@ -64,9 +78,24 @@ defmodule Hive.TUI.App do
         refresh_activity(model)
 
       {:chat_response, {:ok, content, session_id}} ->
-        chat = Chat.add_message(model.chat, :assistant, content)
         sid = session_id || model.session_id
-        %{model | chat: chat, busy: false, session_id: sid, chat_scroll: chat_bottom(chat)}
+        # Check if response contains a plan block
+        case parse_plan_block(content) do
+          {:plan, plan_data, remaining_text} ->
+            chat =
+              if remaining_text != "" do
+                Chat.add_message(model.chat, :assistant, remaining_text)
+              else
+                Chat.add_message(model.chat, :assistant, "Plan generated. Review it in the right panel.")
+              end
+
+            plan = Plan.load_plan(model.plan, plan_data)
+            %{model | chat: chat, plan: plan, busy: false, session_id: sid, chat_scroll: chat_bottom(chat)}
+
+          :no_plan ->
+            chat = Chat.add_message(model.chat, :assistant, content)
+            %{model | chat: chat, busy: false, session_id: sid, chat_scroll: chat_bottom(chat)}
+        end
 
       {:chat_response, {:error, reason}} ->
         chat = Chat.add_message(model.chat, :system, "Error: #{reason}")
@@ -78,13 +107,20 @@ defmodule Hive.TUI.App do
   end
 
   defp handle_key(model, key) do
+    plan_reviewing? = model.plan.mode == :reviewing
+    input_empty? = model.input.text == ""
+
     case key do
       @space ->
         input = Input.insert_char(model.input, " ")
         %{model | input: input}
 
       @enter ->
-        submit_input(model)
+        if plan_reviewing? and input_empty? and Plan.all_accepted?(model.plan) do
+          handle_plan_confirm(model)
+        else
+          submit_input(model)
+        end
 
       key when key in [@backspace, @backspace2] ->
         input = Input.delete_char(model.input)
@@ -103,16 +139,73 @@ defmodule Hive.TUI.App do
         %{model | input: input}
 
       @arrow_up ->
-        input = Input.prev_history(model.input)
-        %{model | input: input}
+        if plan_reviewing? and input_empty? do
+          %{model | plan: Plan.select_prev(model.plan)}
+        else
+          input = Input.prev_history(model.input)
+          %{model | input: input}
+        end
 
       @arrow_down ->
-        input = Input.next_history(model.input)
-        %{model | input: input}
+        if plan_reviewing? and input_empty? do
+          %{model | plan: Plan.select_next(model.plan)}
+        else
+          input = Input.next_history(model.input)
+          %{model | input: input}
+        end
 
       _ ->
         model
     end
+  end
+
+  # -- Plan mode handlers ----------------------------------------------------
+
+  defp handle_plan_confirm(model) do
+    specs = Plan.to_confirmed_specs(model.plan)
+    quest_id = model.plan.quest_id
+    chat = Chat.add_message(model.chat, :system, "Confirming plan...")
+    plan = %{model.plan | mode: :confirmed}
+    model = %{model | chat: chat, plan: plan, busy: true, chat_scroll: chat_bottom(chat)}
+
+    cmd = Command.new(fn ->
+      case Hive.Client.confirm_plan(quest_id, specs) do
+        {:ok, data} ->
+          jobs = data[:jobs_created] || 0
+          {:ok, "Plan confirmed. #{jobs} job(s) created for quest #{quest_id}.", nil}
+
+        {:error, reason} ->
+          # Fallback to local if not remote
+          unless Hive.Client.remote?() do
+            case Hive.Queen.Planner.create_jobs_from_specs(quest_id, specs) do
+              {:ok, jobs} ->
+                Hive.Quests.store_artifact(quest_id, "planning", specs)
+                {:ok, "Plan confirmed. #{length(jobs)} job(s) created.", nil}
+
+              {:error, inner} ->
+                {:error, inspect(inner)}
+            end
+          else
+            {:error, inspect(reason)}
+          end
+      end
+    end, :chat_response)
+
+    {model, cmd}
+  end
+
+  defp handle_plan_reject(model) do
+    plan = Plan.reject_section(model.plan)
+    section = Enum.at(plan.sections, plan.selected)
+    title = if section, do: section.title, else: "this section"
+    chat = Chat.add_message(model.chat, :system, "Rejected: #{title}. Type feedback for revision.")
+    %{model | plan: plan, chat: chat, chat_scroll: chat_bottom(chat)}
+  end
+
+  defp handle_plan_cancel(model) do
+    plan = Plan.dismiss(model.plan)
+    chat = Chat.add_message(model.chat, :system, "Plan review cancelled.")
+    %{model | plan: plan, chat: chat, chat_scroll: chat_bottom(chat)}
   end
 
   # Estimate scroll offset to keep latest messages visible.
@@ -278,6 +371,19 @@ defmodule Hive.TUI.App do
     QUESTIONS>>>
 
     Only use this format for multi-question clarification. For simple yes/no or single questions, just ask normally in plain text.
+
+    STRUCTURED PLANS: When the user asks you to plan a quest or you generate a plan,
+    wrap the plan in this exact format so the TUI can display it for review:
+
+    <<<PLAN
+    {"quest_id": "qst-xxx", "goal": "What we're building", "tasks": [
+      {"title": "Task title", "description": "Details", "target_files": ["file.py"], "model_recommendation": "sonnet"},
+      {"title": "Another task", "description": "More details", "target_files": [], "depends_on_indices": [0], "model_recommendation": "sonnet"}
+    ]}
+    PLAN>>>
+
+    Use this format when generating implementation plans. The user will review each task
+    and can accept, reject, or ask questions about individual sections.
     """
   end
 
@@ -380,6 +486,21 @@ defmodule Hive.TUI.App do
       _ -> text
     end
   end
+
+  defp parse_plan_block(content) when is_binary(content) do
+    case Regex.run(~r/<<<PLAN\s*\n(.*?)\nPLAN>>>/s, content) do
+      [full, json] ->
+        case Jason.decode(json) do
+          {:ok, plan_data} when is_map(plan_data) ->
+            remaining = String.replace(content, full, "") |> String.trim()
+            {:plan, plan_data, remaining}
+          _ -> :no_plan
+        end
+      _ -> :no_plan
+    end
+  end
+
+  defp parse_plan_block(_), do: :no_plan
 
   defp refresh_activity(model) do
     bees = try do Hive.Store.all(:bees) rescue _ -> [] end
@@ -645,7 +766,11 @@ defmodule Hive.TUI.App do
           Views.Chat.render(model)
         end
         column size: 4 do
-          Views.Activity.render(model)
+          if model.plan.mode in [:reviewing, :confirmed] do
+            Views.Plan.render(model)
+          else
+            Views.Activity.render(model)
+          end
         end
       end
     end

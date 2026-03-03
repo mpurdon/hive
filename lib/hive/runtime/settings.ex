@@ -6,6 +6,9 @@ defmodule Hive.Runtime.Settings do
   the hive. The `SessionStart` hook primes the bee with its job context,
   and the `Stop` hook records cost data back to the hive database.
 
+  In API mode, no settings file is needed (no CLI process to configure),
+  so generation is skipped.
+
   This is a pure data-transformation module: takes a bee ID and hive root,
   produces a JSON file on disk.
   """
@@ -22,12 +25,17 @@ defmodule Hive.Runtime.Settings do
   """
   @spec generate(String.t(), String.t(), String.t()) :: :ok | {:error, term()}
   def generate(bee_id, hive_root, working_dir) do
-    case Hive.Runtime.Models.workspace_setup(bee_id, hive_root) do
-      nil ->
-        :ok
+    if Hive.Runtime.ModelResolver.api_mode?() do
+      # API mode: no CLI process, no settings file needed
+      :ok
+    else
+      case Hive.Runtime.Models.workspace_setup(bee_id, hive_root) do
+        nil ->
+          :ok
 
-      settings ->
-        write_settings_json(working_dir, settings)
+        settings ->
+          write_settings_json(working_dir, settings)
+      end
     end
   end
 
@@ -39,6 +47,7 @@ defmodule Hive.Runtime.Settings do
   @spec build_settings(String.t(), String.t()) :: map()
   def build_settings(bee_id, hive_root) do
     hive_bin = hive_binary_path(hive_root)
+    env_prefix = server_env_prefix()
 
     %{
       "permissions" => %{
@@ -49,7 +58,7 @@ defmodule Hive.Runtime.Settings do
           %{
             "matcher" => "",
             "hooks" => [
-              %{"type" => "command", "command" => "#{hive_bin} prime --bee #{bee_id}"}
+              %{"type" => "command", "command" => "#{env_prefix}#{hive_bin} prime --bee #{bee_id}"}
             ]
           }
         ],
@@ -57,7 +66,7 @@ defmodule Hive.Runtime.Settings do
           %{
             "matcher" => "",
             "hooks" => [
-              %{"type" => "command", "command" => "#{hive_bin} costs record --bee #{bee_id}"}
+              %{"type" => "command", "command" => "#{env_prefix}#{hive_bin} costs record --bee #{bee_id}"}
             ]
           }
         ]
@@ -107,12 +116,17 @@ defmodule Hive.Runtime.Settings do
   """
   @spec generate_queen(String.t(), String.t()) :: :ok | {:error, term()}
   def generate_queen(hive_root, queen_workspace) do
-    case Hive.Runtime.Models.workspace_setup("queen", hive_root) do
-      nil ->
-        :ok
+    if Hive.Runtime.ModelResolver.api_mode?() do
+      # API mode: no CLI process, no settings file needed
+      :ok
+    else
+      case Hive.Runtime.Models.workspace_setup("queen", hive_root) do
+        nil ->
+          :ok
 
-      settings ->
-        write_settings_json(queen_workspace, settings)
+        settings ->
+          write_settings_json(queen_workspace, settings)
+      end
     end
   end
 
@@ -176,6 +190,22 @@ defmodule Hive.Runtime.Settings do
       "Bash(cat:*)",
       "Bash(#{hive_bin}:*)"
     ]
+  end
+
+  # When generating settings from a running server, prefix hook commands
+  # with HIVE_SERVER so they use remote mode instead of booting a second app.
+  defp server_env_prefix do
+    case Hive.Web.Endpoint.config(:http) do
+      [_ | _] = http ->
+        port = Keyword.get(http, :port, 4000)
+        "HIVE_SERVER=http://localhost:#{port} "
+
+      _ ->
+        ""
+    end
+  rescue
+    # Endpoint not started (local mode, no server)
+    _ -> ""
   end
 
   defp hive_binary_path(hive_root) do

@@ -291,7 +291,7 @@ defmodule Hive.Queen do
 
   defp handle_waggle(%{subject: "job_complete"} = waggle, state) do
     Logger.info("Bee #{waggle.from} reports job complete. Initiating verification...")
-    
+
     # We remove from active_bees immediately so Queen doesn't think it's still "working"
     # but we don't advance quest yet.
     state = update_in(state.active_bees, &Map.delete(&1, waggle.from))
@@ -299,21 +299,31 @@ defmodule Hive.Queen do
     job_id = find_job_for_bee(waggle.from)
 
     if job_id do
-      # Async verification prevents blocking the Queen
-      Task.async(fn ->
-        case Hive.Verification.verify_job(job_id) do
-          {:ok, :pass, _result} -> {:verification_passed, waggle.from, job_id}
-          {:ok, :fail, result} -> {:verification_failed, waggle.from, job_id, result}
-          {:error, reason} -> {:verification_error, waggle.from, job_id, reason}
-        end
-      end)
+      # Phase jobs (research, design, etc.) don't need verification — skip straight to advance
+      case Hive.Jobs.get(job_id) do
+        {:ok, %{phase_job: true}} ->
+          Logger.info("Phase job #{job_id} completed, skipping verification")
+          state = advance_quest(waggle.from, state)
+          state
+
+        _ ->
+          # Implementation jobs go through verification
+          Task.async(fn ->
+            case Hive.Verification.verify_job(job_id) do
+              {:ok, :pass, _result} -> {:verification_passed, waggle.from, job_id}
+              {:ok, :fail, result} -> {:verification_failed, waggle.from, job_id, result}
+              {:error, reason} -> {:verification_error, waggle.from, job_id, reason}
+            end
+          end)
+
+          state
+      end
     else
       Logger.warning("Could not find job for bee #{waggle.from}, skipping verification")
       # Fallback: try to advance anyway if we can't verify (orphan bee?)
-      advance_quest(waggle.from, state)
+      state = advance_quest(waggle.from, state)
+      state
     end
-
-    state
   end
 
   defp handle_waggle(%{subject: "job_failed"} = waggle, state) do

@@ -4,15 +4,22 @@ defmodule Hive.DroneTest do
   alias Hive.Drone
 
   setup do
+    Hive.Test.StoreHelper.ensure_infrastructure()
+
     tmp_dir = Path.join(System.tmp_dir!(), "hive_test_#{:erlang.unique_integer([:positive])}")
     File.mkdir_p!(tmp_dir)
-    if Process.whereis(Hive.Store), do: GenServer.stop(Hive.Store)
+    Hive.Test.StoreHelper.stop_store()
     {:ok, _} = Hive.Store.start_link(data_dir: tmp_dir)
     on_exit(fn -> File.rm_rf!(tmp_dir) end)
 
     # Ensure no drone is running before each test
     case Drone.lookup() do
-      {:ok, pid} -> GenServer.stop(pid)
+      {:ok, pid} ->
+        try do
+          GenServer.stop(pid)
+        catch
+          :exit, _ -> :ok
+        end
       :error -> :ok
     end
 

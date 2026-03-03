@@ -5,6 +5,18 @@ defmodule Hive.Application do
 
   @impl true
   def start(_type, _args) do
+    if Hive.Client.remote?() do
+      # Remote mode: thin client, no local services needed
+      Supervisor.start_link([], strategy: :one_for_one, name: Hive.Supervisor)
+    else
+      start_full_app()
+    end
+  end
+
+  defp start_full_app do
+    # Ensure global storage directories exist
+    File.mkdir_p!(Path.join(System.user_home!(), ".hive/llm_db"))
+
     setup_file_logging()
     Hive.Runtime.Keys.load()
     Hive.Progress.init()
@@ -21,8 +33,8 @@ defmodule Hive.Application do
       # The Queen is the brain of the factory - starts automatically now
       {Hive.Queen, hive_root: Application.get_env(:hive, :store_dir, File.cwd!)},
       {Hive.Ingestion.Watchdog, hive_root: File.cwd!()},
-      {Hive.PubSubBridge, []},
-      {Hive.Web.Endpoint, []},
+      {Hive.PubSubBridge, []}
+    ] ++ endpoint_child() ++ [
       {Hive.CombSupervisor, []},
       {Hive.Budget.Watchdog, []},
       {Hive.Plugin.MCPSupervisor, []},
@@ -36,6 +48,34 @@ defmodule Hive.Application do
 
     opts = [strategy: :one_for_one, name: Hive.Supervisor]
     Supervisor.start_link(children, opts)
+  end
+
+  # Only start the web endpoint if the port is available.
+  # This allows CLI commands to work when a server is already running.
+  defp endpoint_child do
+    port = Application.get_env(:hive, Hive.Web.Endpoint)[:http][:port] || 4000
+
+    case :gen_tcp.listen(port, []) do
+      {:ok, socket} ->
+        :gen_tcp.close(socket)
+        [{Hive.Web.Endpoint, []}]
+
+      {:error, :eaddrinuse} ->
+        require Logger
+        Logger.info("Port #{port} already in use, skipping web endpoint. " <>
+          "A Hive server may already be running. Use HIVE_SERVER=http://localhost:#{port} for remote mode.")
+        []
+
+      {:error, :eacces} ->
+        require Logger
+        Logger.warning("Permission denied for port #{port}. Try a port above 1024.")
+        []
+
+      {:error, reason} ->
+        require Logger
+        Logger.warning("Cannot bind to port #{port}: #{inspect(reason)}. Skipping web endpoint.")
+        []
+    end
   end
 
   # Background monitoring processes — skip in test to avoid conflicts

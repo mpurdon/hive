@@ -8,7 +8,7 @@ defmodule Hive.Costs do
 
   alias Hive.Store
 
-  @default_model "claude-sonnet-4-20250514"
+  @default_model "google:gemini-2.5-flash"
 
   # -- Public API --------------------------------------------------------------
 
@@ -116,7 +116,8 @@ defmodule Hive.Costs do
     pricing = if map_size(pricing) > 0, do: pricing, else: default_pricing()
 
     model = Map.get(attrs, :model) || Map.get(attrs, "model") || @default_model
-    prices = Map.get(pricing, model, pricing[@default_model] || default_sonnet_prices())
+    default_prices = %{input: 0.15, output: 0.60, cache_read: 0.0375, cache_write: 0.0}
+    prices = Map.get(pricing, model, pricing[@default_model] || default_prices)
 
     input = token_count(attrs, :input_tokens) * prices.input
     output = token_count(attrs, :output_tokens) * prices.output
@@ -132,31 +133,17 @@ defmodule Hive.Costs do
   # Fallback pricing table — ensures existing tests pass without Plugin.Manager running
   defp default_pricing do
     %{
-      "claude-sonnet-4-20250514" => default_sonnet_prices(),
-      "claude-opus-4-20250514" => %{
-        input: 15.0,
-        output: 75.0,
-        cache_read: 1.50,
-        cache_write: 18.75
-      },
-      # API mode model names (provider:model format)
-      "anthropic:claude-opus-4-6" => %{
-        input: 15.0,
-        output: 75.0,
-        cache_read: 1.50,
-        cache_write: 18.75
-      },
-      "anthropic:claude-sonnet-4-6" => default_sonnet_prices(),
-      "anthropic:claude-haiku-4-5" => %{
-        input: 0.80,
-        output: 4.0,
-        cache_read: 0.08,
-        cache_write: 1.0
-      },
+      # Gemini models (primary defaults)
       "google:gemini-2.5-pro" => %{
         input: 1.25,
         output: 10.0,
         cache_read: 0.315,
+        cache_write: 0.0
+      },
+      "google:gemini-2.5-flash" => %{
+        input: 0.15,
+        output: 0.60,
+        cache_read: 0.0375,
         cache_write: 0.0
       },
       "google:gemini-2.0-flash" => %{
@@ -164,12 +151,40 @@ defmodule Hive.Costs do
         output: 0.40,
         cache_read: 0.025,
         cache_write: 0.0
+      },
+      # Anthropic models (available via reqllm or bedrock)
+      "anthropic:claude-opus-4-6" => %{
+        input: 15.0,
+        output: 75.0,
+        cache_read: 1.50,
+        cache_write: 18.75
+      },
+      "anthropic:claude-sonnet-4-6" => %{
+        input: 3.0,
+        output: 15.0,
+        cache_read: 0.30,
+        cache_write: 3.75
+      },
+      "anthropic:claude-haiku-4-5" => %{
+        input: 0.80,
+        output: 4.0,
+        cache_read: 0.08,
+        cache_write: 1.0
+      },
+      # Legacy CLI model names (backwards compat)
+      "claude-sonnet-4-20250514" => %{
+        input: 3.0,
+        output: 15.0,
+        cache_read: 0.30,
+        cache_write: 3.75
+      },
+      "claude-opus-4-20250514" => %{
+        input: 15.0,
+        output: 75.0,
+        cache_read: 1.50,
+        cache_write: 18.75
       }
     }
-  end
-
-  defp default_sonnet_prices do
-    %{input: 3.0, output: 15.0, cache_read: 0.30, cache_write: 3.75}
   end
 
   defp broadcast_cost_update(cost) do

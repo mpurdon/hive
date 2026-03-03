@@ -5,16 +5,10 @@ defmodule Hive.Queen.PlannerTest do
   alias Hive.Store
 
   setup do
-    # Stop any previously running Store to avoid stale data
-    try do
-      if pid = Process.whereis(Hive.Store), do: GenServer.stop(pid, :normal)
-    catch
-      :exit, _ -> :ok
-    end
-
     # Start store for tests with unique directory
     tmp_dir = System.tmp_dir!() |> Path.join("planner_test_#{:rand.uniform(1_000_000)}")
     File.mkdir_p!(tmp_dir)
+    Hive.Test.StoreHelper.stop_store()
     start_supervised!({Hive.Store, data_dir: tmp_dir})
     on_exit(fn -> File.rm_rf!(tmp_dir) end)
     

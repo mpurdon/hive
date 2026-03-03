@@ -73,11 +73,11 @@ defmodule Hive.CLI.CouncilHandler do
     end
   end
 
-  def dispatch([:council, :delete], result, helpers) do
+  def dispatch([:council, :remove], result, helpers) do
     id = helpers.result_get.(result, :args, :id)
 
     case Hive.Council.delete(id) do
-      :ok -> Format.success("Council #{id} deleted.")
+      :ok -> Format.success("Council #{id} removed.")
       {:error, reason} -> Format.error("Failed: #{inspect(reason)}")
     end
   end

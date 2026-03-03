@@ -15,15 +15,15 @@ defmodule Hive.Runtime.ModelResolver do
   1. `HIVE_EXECUTION_MODE` env var
   2. Hive config `execution_mode`
   3. Application config `:hive, :llm, :execution_mode`
-  4. Default: `:cli`
+  4. Default: `:api`
   """
 
   @default_models %{
-    "opus" => "anthropic:claude-opus-4-6",
-    "sonnet" => "anthropic:claude-sonnet-4-6",
-    "haiku" => "anthropic:claude-haiku-4-5",
+    "opus" => "google:gemini-2.5-pro",
+    "sonnet" => "google:gemini-2.5-flash",
+    "haiku" => "google:gemini-2.0-flash",
     "fast" => "google:gemini-2.0-flash",
-    # Legacy names (used by ModelSelector / existing code)
+    # Legacy Claude names (backwards compat for explicit requests)
     "claude-opus" => "anthropic:claude-opus-4-6",
     "claude-sonnet" => "anthropic:claude-sonnet-4-6",
     "claude-haiku" => "anthropic:claude-haiku-4-5",
@@ -61,7 +61,7 @@ defmodule Hive.Runtime.ModelResolver do
   1. `HIVE_EXECUTION_MODE` env var ("api" or "cli")
   2. Hive config file `execution_mode`
   3. Application config `:hive, :llm, :execution_mode`
-  4. Default: `:cli`
+  4. Default: `:api`
   """
   @spec execution_mode() :: :api | :cli
   def execution_mode do
@@ -73,7 +73,7 @@ defmodule Hive.Runtime.ModelResolver do
         :cli
 
       _ ->
-        hive_config_mode() || app_config_mode() || :cli
+        hive_config_mode() || app_config_mode() || :api
     end
   end
 
@@ -119,7 +119,7 @@ defmodule Hive.Runtime.ModelResolver do
 
     case String.split(resolved, ":", parts: 2) do
       [provider, _model] -> provider
-      _ -> "anthropic"
+      _ -> "google"
     end
   end
 

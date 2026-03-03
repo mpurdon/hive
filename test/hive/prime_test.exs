@@ -9,7 +9,7 @@ defmodule Hive.PrimeTest do
   setup do
     tmp_dir = Path.join(@tmp_dir, "hive_store_#{:erlang.unique_integer([:positive])}")
     File.mkdir_p!(tmp_dir)
-    if Process.whereis(Hive.Store), do: GenServer.stop(Hive.Store)
+    Hive.Test.StoreHelper.stop_store()
     {:ok, _} = Hive.Store.start_link(data_dir: tmp_dir)
     on_exit(fn -> File.rm_rf!(tmp_dir) end)
     :ok

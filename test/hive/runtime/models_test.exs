@@ -4,33 +4,34 @@ defmodule Hive.Runtime.ModelsTest do
   alias Hive.Runtime.Models
 
   describe "resolve_plugin/1" do
-    test "defaults to Claude plugin when no opts" do
-      assert {:ok, Hive.Plugin.Builtin.Models.Claude} = Models.resolve_plugin()
+    test "defaults to ReqLLMProvider plugin when no opts" do
+      assert {:ok, Hive.Plugin.Builtin.Models.ReqLLMProvider} = Models.resolve_plugin()
     end
 
     test "accepts explicit module in :model_plugin opt" do
-      assert {:ok, Hive.Plugin.Builtin.Models.Claude} =
-               Models.resolve_plugin(model_plugin: Hive.Plugin.Builtin.Models.Claude)
+      assert {:ok, Hive.Plugin.Builtin.Models.ReqLLMProvider} =
+               Models.resolve_plugin(model_plugin: Hive.Plugin.Builtin.Models.ReqLLMProvider)
     end
 
     test "accepts string name in :model_plugin opt" do
       # Falls back to default plugin when registry isn't running
-      assert {:ok, Hive.Plugin.Builtin.Models.Claude} =
-               Models.resolve_plugin(model_plugin: "claude")
+      assert {:ok, Hive.Plugin.Builtin.Models.ReqLLMProvider} =
+               Models.resolve_plugin(model_plugin: "reqllm")
     end
   end
 
   describe "default_name/0" do
-    test "returns 'claude' as default" do
-      assert Models.default_name() == "claude"
+    test "returns 'reqllm' as default" do
+      assert Models.default_name() == "reqllm"
     end
   end
 
   describe "parse_output/2" do
-    test "delegates to the plugin's parse_output" do
-      data = ~s({"type":"system","model":"claude-sonnet-4-20250514"}\n)
+    test "returns empty list from ReqLLMProvider (API mode)" do
+      # ReqLLMProvider doesn't parse CLI output streams
+      data = ~s({"type":"system","model":"gemini-2.5-flash"}\n)
       events = Models.parse_output(data)
-      assert [%{"type" => "system", "model" => "claude-sonnet-4-20250514"}] = events
+      assert [] = events
     end
 
     test "handles empty data" do
@@ -45,12 +46,10 @@ defmodule Hive.Runtime.ModelsTest do
         %{
           "type" => "result",
           "usage" => %{
-            "input_tokens" => 100,
-            "output_tokens" => 50,
-            "cache_read_tokens" => 10,
-            "cache_write_tokens" => 5
+            input_tokens: 100,
+            output_tokens: 50
           },
-          "model" => "claude-sonnet-4-20250514",
+          "model" => "google:gemini-2.5-flash",
           "cost_usd" => 0.001
         }
       ]
@@ -84,56 +83,53 @@ defmodule Hive.Runtime.ModelsTest do
 
   describe "progress_from_events/2" do
     test "extracts tool_use progress" do
-      events = [%{"type" => "tool_use", "name" => "Read", "input" => %{"file_path" => "/tmp/x"}}]
+      events = [%{"type" => "tool_use", "name" => "Read", "input" => %{"path" => "/tmp/x"}}]
       progress = Models.progress_from_events(events)
       assert [%{tool: "Read", file: "/tmp/x", message: "Using Read"}] = progress
     end
 
-    test "extracts assistant content progress" do
+    test "ignores non-tool_use events in API mode" do
       events = [%{"type" => "assistant", "content" => "Working on it..."}]
       progress = Models.progress_from_events(events)
-      assert [%{tool: nil, file: nil, message: "Working on it..."}] = progress
+      assert [] = progress
     end
 
     test "returns empty list for unrecognized events" do
-      events = [%{"type" => "system", "model" => "claude-sonnet-4-20250514"}]
+      events = [%{"type" => "system", "model" => "gemini-2.5-flash"}]
       assert [] = Models.progress_from_events(events)
     end
   end
 
   describe "find_executable/1" do
-    test "delegates to the plugin's find_executable" do
-      # Claude is likely installed on dev machines; just verify it returns the right shape
-      result = Models.find_executable()
-      assert match?({:ok, _}, result) or match?({:error, :not_found}, result)
+    test "returns not_found for API-mode plugin" do
+      # ReqLLMProvider doesn't have a CLI executable
+      assert {:error, :not_found} = Models.find_executable()
     end
   end
 
   describe "pricing/1" do
-    test "returns Claude pricing table by default" do
+    test "returns pricing table with Gemini and Anthropic models" do
       pricing = Models.pricing()
       assert is_map(pricing)
-      assert Map.has_key?(pricing, "claude-sonnet-4-20250514")
-      assert Map.has_key?(pricing, "claude-opus-4-20250514")
+      assert Map.has_key?(pricing, "google:gemini-2.5-pro")
+      assert Map.has_key?(pricing, "google:gemini-2.5-flash")
+      assert Map.has_key?(pricing, "anthropic:claude-sonnet-4-6")
 
-      sonnet = pricing["claude-sonnet-4-20250514"]
-      assert sonnet.input == 3.0
-      assert sonnet.output == 15.0
+      gemini_pro = pricing["google:gemini-2.5-pro"]
+      assert gemini_pro.input == 1.25
+      assert gemini_pro.output == 10.0
     end
   end
 
   describe "workspace_setup/3" do
-    test "returns settings map for a bee" do
-      settings = Models.workspace_setup("bee-test123", "/tmp/test-hive")
-      assert is_map(settings)
-      assert Map.has_key?(settings, "hooks")
-      assert Map.has_key?(settings, "permissions")
+    test "returns nil in API mode (ReqLLMProvider)" do
+      # ReqLLMProvider doesn't implement workspace_setup — API mode
+      # doesn't need CLI settings files
+      assert nil == Models.workspace_setup("bee-test123", "/tmp/test-hive")
     end
 
-    test "returns settings map for the queen" do
-      settings = Models.workspace_setup("queen", "/tmp/test-hive")
-      assert is_map(settings)
-      assert Map.has_key?(settings, "hooks")
+    test "returns nil for queen in API mode" do
+      assert nil == Models.workspace_setup("queen", "/tmp/test-hive")
     end
   end
 

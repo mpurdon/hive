@@ -10,10 +10,8 @@ defmodule Hive.CouncilTest do
     File.rm_rf!(@store_dir)
     File.mkdir_p!(@store_dir)
 
-    case Store.start_link(data_dir: @store_dir) do
-      {:ok, _pid} -> :ok
-      {:error, {:already_started, pid}} -> GenServer.stop(pid); Store.start_link(data_dir: @store_dir)
-    end
+    Hive.Test.StoreHelper.stop_store()
+    {:ok, _} = Store.start_link(data_dir: @store_dir)
 
     # Set HIVE_PATH so council_dir resolves
     hive_root = Path.join(System.tmp_dir!(), "hive_council_test_#{:erlang.unique_integer([:positive])}")

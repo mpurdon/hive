@@ -1,50 +1,61 @@
 defmodule Hive.Budget.WatchdogTest do
-  use ExUnit.Case
+  use ExUnit.Case, async: false
 
-  alias Hive.Budget.Watchdog
   alias Hive.Store
 
   setup do
-    # Ensure Watchdog is started.
-    # In tests, it might already be started by Hive.Application.
-    # We can check its status or restart it.
-    
-    # Create a dummy quest
-    quest_id = "q-test-budget"
+    Hive.Test.StoreHelper.ensure_infrastructure()
+
+    # Use a fresh store to avoid stale data from other tests
+    tmp_dir = Path.join(System.tmp_dir!(), "hive_budget_test_#{:erlang.unique_integer([:positive])}")
+    File.mkdir_p!(tmp_dir)
+    Hive.Test.StoreHelper.stop_store()
+    {:ok, _} = Store.start_link(data_dir: tmp_dir)
+    on_exit(fn -> File.rm_rf!(tmp_dir) end)
+
+    # Terminate Budget.Watchdog from supervisor to prevent auto-restart conflicts
+    try do
+      Supervisor.terminate_child(Hive.Supervisor, Hive.Budget.Watchdog)
+      Supervisor.delete_child(Hive.Supervisor, Hive.Budget.Watchdog)
+    catch
+      :exit, _ -> :ok
+    end
+    Hive.Test.StoreHelper.safe_stop(Hive.Budget.Watchdog)
+    Process.sleep(10)
+    {:ok, _} = Hive.Budget.Watchdog.start_link([])
+
+    # Use unique IDs to avoid collisions
+    suffix = :erlang.unique_integer([:positive])
+    quest_id = "q-test-budget-#{suffix}"
+    bee_id = "b-test-budget-#{suffix}"
+    job_id = "j-test-budget-#{suffix}"
+
+    # Create test data
     Store.insert(:quests, %{id: quest_id, status: "active", goal: "Test Budget"})
-    
-    # Create a dummy bee linked to this quest
-    bee_id = "b-test-budget"
-    job_id = "j-test-budget"
     Store.insert(:jobs, %{id: job_id, quest_id: quest_id, bee_id: bee_id, status: "assigned"})
     Store.insert(:bees, %{id: bee_id, job_id: job_id, status: "working", pid: "dummy"})
-
-    # Ensure cost is zero initially
-    Hive.Costs.record(bee_id, %{cost_usd: 0.0})
 
     {:ok, %{quest_id: quest_id, bee_id: bee_id}}
   end
 
   test "watchdog kills bee when budget exceeded", %{quest_id: quest_id, bee_id: bee_id} do
-    # 1. Artificially inflate the cost
-    Hive.Costs.record(bee_id, %{cost_usd: 100.0}) # Assuming default budget is 10.0
+    # 1. Artificially inflate the cost (default budget is 10.0)
+    Hive.Costs.record(bee_id, %{cost_usd: 100.0})
+
+    # Verify budget is actually exceeded
+    assert {:error, :budget_exceeded, _} = Hive.Budget.check(quest_id)
 
     # 2. Trigger watchdog check manually
-    Process.send(Hive.Budget.Watchdog, :check_budgets, [])
+    watchdog = Process.whereis(Hive.Budget.Watchdog)
+    assert watchdog != nil, "Budget.Watchdog is not running"
+    send(watchdog, :check_budgets)
 
-    # 3. Wait for reaction
-    Process.sleep(100)
+    # 3. Flush the message queue by doing a sync call
+    :sys.get_state(watchdog)
 
-    # 4. Check bee status (should be stopped/crashed)
-    # Note: In test, Hive.Bees.stop/1 calls Hive.Bee.Worker.stop/1.
-    # If the worker process doesn't exist, it might just update the DB record or error.
-    # The watchdog logic calls Bees.stop/1 then updates DB if it fails?
-    # No, Watchdog calls Bees.stop(bee.id).
-    
-    # Check if an alert was emitted (via PubSubBridge if configured)
-    # Or check if quest status was updated to "failed_budget"
-    
+    # 4. Quest should be marked as failed_budget or paused_budget
+    # (paused_budget when no active bees are running worker processes)
     quest = Store.get(:quests, quest_id)
-    assert quest.status == "failed_budget"
+    assert quest.status in ["failed_budget", "paused_budget"]
   end
 end

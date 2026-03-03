@@ -1,8 +1,10 @@
 defmodule Hive.TUI.Views.Activity do
   @moduledoc """
-  Renders the activity panel with quests and their bees grouped together.
+  Renders the activity panel with quests, phase progress, and their bees.
   """
   import Ratatouille.View
+
+  @phases ~w(research requirements design review planning implementation validation merge)
 
   def render(model) do
     %{activity: activity} = model
@@ -22,16 +24,60 @@ defmodule Hive.TUI.Views.Activity do
     Enum.flat_map(quests, fn quest ->
       quest_id = quest[:id]
       quest_bees = Map.get(bees_by_quest, quest_id, [])
-      phase = to_s(quest[:current_phase] || quest[:status])
+      current_phase = quest[:current_phase] || quest[:status]
       name = to_s(quest[:name] || quest[:goal] || quest[:title])
       short_name = String.slice(name, 0, 30)
+      artifacts = quest[:artifacts] || %{}
 
       [
         label do
           text(content: short_name, color: :yellow)
-          text(content: " [#{phase}]", color: :white)
         end
-      ] ++ render_bees(quest_bees, bee_logs, "  ") ++ [label(content: "")]
+      ] ++
+        render_phase_tracker(current_phase, artifacts, quest_bees, bee_logs) ++
+        [label(content: "")]
+    end)
+  end
+
+  defp render_phase_tracker(current_phase, artifacts, bees, bee_logs) do
+    Enum.flat_map(@phases, fn phase ->
+      {marker, color} =
+        cond do
+          Map.has_key?(artifacts, phase) -> {"v", :green}
+          phase == to_s(current_phase) -> {"~", :yellow}
+          true -> {".", :white}
+        end
+
+      phase_label = [
+        label do
+          text(content: " #{marker} ", color: color)
+          text(content: phase, color: color)
+        end
+      ]
+
+      # Show active bees under the current phase
+      bee_labels =
+        if phase == to_s(current_phase) do
+          Enum.flat_map(bees, fn bee ->
+            bee_id = to_s(bee[:id])
+            status = to_s(bee[:status] || bee[:state])
+            log_lines = Map.get(bee_logs, bee[:id], [])
+
+            [
+              label do
+                text(content: "   #{bee_id}", color: :cyan)
+                text(content: " [#{status}]", color: status_color(status))
+              end
+              | Enum.map(log_lines, fn line ->
+                  label(content: "     #{line}", color: :white)
+                end)
+            ]
+          end)
+        else
+          []
+        end
+
+      phase_label ++ bee_labels
     end)
   end
 
@@ -40,10 +86,6 @@ defmodule Hive.TUI.Views.Activity do
       [] -> []
       bees -> render_bees(bees, bee_logs, "")
     end
-  end
-
-  defp render_bees([], _bee_logs, indent) do
-    [label(content: indent <> "no active bees", color: :white)]
   end
 
   defp render_bees(bees, bee_logs, indent) do

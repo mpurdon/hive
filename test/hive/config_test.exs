@@ -48,8 +48,21 @@ defmodule Hive.ConfigTest do
       assert parsed["queen"]["max_bees"] == 10
     end
 
-    test "returns error for non-existent file" do
-      assert {:error, _} = Config.read_config("/nonexistent/path/config.toml")
+    test "round-trips nested maps and lists" do
+      path = tmp_path("nested.toml")
+      on_exit(fn -> File.rm(path) end)
+
+      custom = %{
+        "plugins" => %{"google" => %{"key" => "123", "models" => ["gemini"]}},
+        "list" => %{"items" => [1, 2, 3]}
+      }
+
+      assert :ok = Config.write_config(path, custom)
+      assert {:ok, parsed} = Config.read_config(path)
+
+      assert parsed["plugins"]["google"]["key"] == "123"
+      assert parsed["plugins"]["google"]["models"] == ["gemini"]
+      assert parsed["list"]["items"] == [1, 2, 3]
     end
   end
 end

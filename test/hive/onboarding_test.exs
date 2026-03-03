@@ -21,6 +21,7 @@ defmodule Hive.OnboardingTest do
     # Start Store
     store_dir = Path.join(tmp_dir, "store")
     File.mkdir_p!(store_dir)
+    Hive.Test.StoreHelper.stop_store()
     start_supervised!({Store, data_dir: store_dir})
     
     on_exit(fn -> File.rm_rf!(tmp_dir) end)

@@ -8,6 +8,7 @@ defmodule Hive.QuestPhasesTest do
     # Start store for each test with unique directory
     tmp_dir = System.tmp_dir!() |> Path.join("quest_phases_test_#{:rand.uniform(1000000)}")
     File.mkdir_p!(tmp_dir)
+    Hive.Test.StoreHelper.stop_store()
     start_supervised!({Store, data_dir: tmp_dir})
     on_exit(fn -> File.rm_rf!(tmp_dir) end)
     :ok

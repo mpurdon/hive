@@ -61,7 +61,11 @@ COPY --from=builder /app/_build/prod/rel/hive .
 RUN mkdir -p /data/hive/store /data/hive/worktrees
 ENV HIVE_HOME=/data/hive
 
-# Expose Dashboard port
+# Server configuration (overridable at runtime)
+ENV HIVE_PORT=4000
+ENV HIVE_HOST=0.0.0.0
+
+# Expose Dashboard + API port
 EXPOSE 4000
 
 # Set entrypoint

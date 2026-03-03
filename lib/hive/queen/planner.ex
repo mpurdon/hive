@@ -181,6 +181,173 @@ defmodule Hive.Queen.Planner do
   end
 
   @doc """
+  Generate an LLM-driven plan for a quest.
+
+  Loads existing artifacts (research, requirements, design, review) and builds
+  a prompt for the LLM. Returns a plan structure with tasks but does NOT create
+  job records — that happens on confirmation.
+  """
+  @spec generate_llm_plan(String.t(), map()) :: {:ok, map()} | {:error, term()}
+  def generate_llm_plan(quest_id, opts \\ %{}) do
+    with {:ok, quest} <- Hive.Quests.get(quest_id) do
+      # Gather existing artifacts
+      research = Hive.Quests.get_artifact(quest_id, "research")
+      requirements = Hive.Quests.get_artifact(quest_id, "requirements")
+      design = Hive.Quests.get_artifact(quest_id, "design")
+      review = Hive.Quests.get_artifact(quest_id, "review")
+
+      prompt = build_llm_plan_prompt(quest, research, requirements, design, review, opts)
+
+      case Hive.Runtime.Models.generate_text(prompt, model: "sonnet") do
+        {:ok, response} ->
+          text = extract_text(response)
+
+          case parse_plan_json(text) do
+            {:ok, tasks} ->
+              plan = %{
+                quest_id: quest_id,
+                goal: quest.goal,
+                tasks: tasks,
+                estimated_duration: estimate_duration(tasks),
+                created_at: DateTime.utc_now()
+              }
+
+              # Store as draft on the quest
+              quest_record = Store.get(:quests, quest_id)
+
+              if quest_record do
+                updated = Map.put(quest_record, :draft_plan, plan)
+                Store.put(:quests, updated)
+              end
+
+              {:ok, plan}
+
+            {:error, :parse_failed} ->
+              # Fallback: return raw text as a single-task plan
+              {:ok, %{
+                quest_id: quest_id,
+                goal: quest.goal,
+                tasks: [%{
+                  "title" => "Implementation",
+                  "description" => text,
+                  "target_files" => [],
+                  "model_recommendation" => "sonnet"
+                }],
+                estimated_duration: "unknown",
+                created_at: DateTime.utc_now()
+              }}
+          end
+
+        {:error, reason} ->
+          {:error, reason}
+      end
+    end
+  end
+
+  defp build_llm_plan_prompt(quest, research, requirements, design, review, opts) do
+    feedback = Map.get(opts, :feedback)
+
+    cond do
+      # Full artifacts available — use the detailed planning prompt
+      design && requirements && review ->
+        Hive.Queen.PhasePrompts.planning_prompt(quest, design, requirements, review)
+
+      # Some artifacts — build a simpler prompt with what we have
+      true ->
+        comb_path =
+          if quest[:comb_id] do
+            case Hive.Comb.get(quest.comb_id) do
+              {:ok, comb} -> comb[:path] || "unknown"
+              _ -> "unknown"
+            end
+          else
+            "unknown"
+          end
+
+        artifacts_section =
+          [
+            if(research, do: "## Research\n```json\n#{Jason.encode!(research, pretty: true)}\n```"),
+            if(requirements, do: "## Requirements\n```json\n#{Jason.encode!(requirements, pretty: true)}\n```"),
+            if(design, do: "## Design\n```json\n#{Jason.encode!(design, pretty: true)}\n```"),
+            if(review, do: "## Review\n```json\n#{Jason.encode!(review, pretty: true)}\n```")
+          ]
+          |> Enum.reject(&is_nil/1)
+          |> Enum.join("\n\n")
+
+        feedback_section = if feedback, do: "\n## Revision Feedback\n#{feedback}\n", else: ""
+
+        """
+        # Planning Phase
+
+        You are a project planner. Produce an ordered list of implementation jobs.
+
+        **Goal**: #{quest.goal}
+        **Project path**: #{comb_path}
+
+        #{artifacts_section}
+        #{feedback_section}
+
+        ## Instructions
+
+        1. Break the work into discrete, parallelizable jobs
+        2. Each job should be completable by a single developer in one session
+        3. Define clear acceptance criteria
+        4. Specify target files where possible
+        5. Set up dependencies (job indices, 0-based)
+        6. Recommend model complexity (sonnet for simple, opus for complex)
+
+        ## Output Format
+
+        Output ONLY a JSON array in a ```json fence:
+
+        ```json
+        [
+          {
+            "title": "Short descriptive title",
+            "description": "Detailed implementation instructions",
+            "target_files": ["path/to/file"],
+            "acceptance_criteria": ["Testable criterion 1"],
+            "depends_on_indices": [],
+            "model_recommendation": "sonnet"
+          }
+        ]
+        ```
+
+        Keep the number of jobs minimal. Prefer fewer, larger jobs over many small ones.
+        """
+    end
+  end
+
+  defp extract_text(%{text: text}), do: text
+  defp extract_text(text) when is_binary(text), do: text
+  defp extract_text(other), do: inspect(other)
+
+  defp parse_plan_json(text) do
+    # Try to extract JSON from ```json ... ``` fence first
+    json_str =
+      case Regex.run(~r/```json\s*\n(.*?)\n\s*```/s, text) do
+        [_, json] -> json
+        _ -> text
+      end
+
+    case Jason.decode(json_str) do
+      {:ok, tasks} when is_list(tasks) -> {:ok, tasks}
+      _ -> {:error, :parse_failed}
+    end
+  end
+
+  defp estimate_duration(tasks) do
+    count = length(tasks)
+
+    cond do
+      count <= 2 -> "30-60 minutes"
+      count <= 5 -> "1-2 hours"
+      count <= 10 -> "2-4 hours"
+      true -> "4+ hours"
+    end
+  end
+
+  @doc """
   Creates implementation jobs from phase-generated specs.
 
   Takes a list of job spec maps (from the planning phase bee output) and

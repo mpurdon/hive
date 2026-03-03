@@ -9,6 +9,13 @@ defmodule Hive.Queen.OrchestratorTest do
   setup :verify_on_exit!
 
   setup do
+    Hive.Test.StoreHelper.ensure_infrastructure()
+
+    # Ensure CombSupervisor is running (needed for bee spawning)
+    unless Process.whereis(Hive.CombSupervisor) do
+      DynamicSupervisor.start_link(strategy: :one_for_one, name: Hive.CombSupervisor)
+    end
+
     # Force API mode for mocking
     original_config = Application.get_env(:hive, :llm, [])
     Application.put_env(:hive, :llm, Keyword.merge(original_config, [execution_mode: :api]))
@@ -16,22 +23,13 @@ defmodule Hive.Queen.OrchestratorTest do
     # Use Mock LLM Client
     Application.put_env(:hive, :llm_client, Hive.Runtime.LLMClient.Mock)
 
-    # Stop any previously running Store to avoid stale data
-    try do
-      if pid = Process.whereis(Hive.Store) do
-        Supervisor.terminate_child(Hive.Supervisor, Hive.Store)
-        Supervisor.delete_child(Hive.Supervisor, Hive.Store)
-      end
-    catch
-      :exit, _ -> :ok
-    end
-
     # Start store for tests with unique directory
     tmp_dir = System.tmp_dir!() |> Path.join("orchestrator_test_#{:rand.uniform(1_000_000)}")
     File.mkdir_p!(tmp_dir)
-    start_supervised!({Hive.Store, data_dir: tmp_dir})
+    Hive.Test.StoreHelper.stop_store()
+    {:ok, _} = Hive.Store.start_link(data_dir: tmp_dir)
 
-    on_exit(fn -> 
+    on_exit(fn ->
       File.rm_rf!(tmp_dir)
       Application.put_env(:hive, :llm, original_config)
       Application.put_env(:hive, :llm_client, Hive.Runtime.LLMClient.Default)

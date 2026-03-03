@@ -6,7 +6,7 @@ defmodule Hive.CLI.VerifyTest do
   setup do
     store_dir = Path.join(@tmp_dir, "hive_store_#{:erlang.unique_integer([:positive])}")
     File.mkdir_p!(store_dir)
-    if Process.whereis(Hive.Store), do: GenServer.stop(Hive.Store)
+    Hive.Test.StoreHelper.stop_store()
     {:ok, _} = Hive.Store.start_link(data_dir: store_dir)
 
     on_exit(fn ->

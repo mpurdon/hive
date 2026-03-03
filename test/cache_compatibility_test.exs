@@ -11,7 +11,7 @@ defmodule CacheCompatibilityTest do
     # CacheControl.inject(msg, model)
     
     # If I try to call the current API:
-    msg = CacheControl.mark_system_prompt("test")
+    msg = CacheControl.mark_system_prompt(String.duplicate("test ", 1200), "anthropic:claude-3-5-sonnet")
     assert Map.has_key?(msg, :cache_control)
     
     # This is "generic" but Gemini might reject it or ignore it.

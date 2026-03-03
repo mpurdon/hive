@@ -31,7 +31,15 @@ defmodule Hive.Queen.Orchestrator do
   def start_quest(quest_id) do
     with {:ok, quest} <- Hive.Quests.get(quest_id),
          :ok <- validate_quest_ready(quest) do
-      start_research(quest)
+      # If a confirmed plan (planning artifact) already exists, skip to implementation
+      planning_artifact = Hive.Quests.get_artifact(quest_id, "planning")
+
+      if planning_artifact && is_list(planning_artifact) && planning_artifact != [] do
+        Logger.info("Quest #{quest_id} has pre-confirmed plan, skipping to implementation")
+        start_implementation(quest)
+      else
+        start_research(quest)
+      end
     end
   end
 

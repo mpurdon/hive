@@ -11,28 +11,48 @@ defmodule Hive.CLI.QuestHandler do
   def dispatch([:quest, :new], result, helpers) do
     goal = helpers.result_get.(result, :args, :goal)
 
-    case helpers.resolve_comb_id.(helpers.result_get.(result, :options, :comb)) do
-      {:ok, comb_id} ->
-        case Hive.Quests.create(%{goal: goal, comb_id: comb_id}) do
-          {:ok, quest} ->
-            Format.success("Quest created: #{quest.name} (#{quest.id})")
+    if Hive.Client.remote?() do
+      comb_opt = helpers.result_get.(result, :options, :comb)
+      attrs = if comb_opt, do: %{goal: goal, comb_id: comb_opt}, else: %{goal: goal}
 
-          {:error, reason} ->
-            Format.error("Failed to create quest: #{inspect(reason)}")
-        end
+      case Hive.Client.create_quest(attrs) do
+        {:ok, quest} -> Format.success("Quest created: #{quest.name} (#{quest.id})")
+        {:error, reason} -> Format.error("Failed to create quest: #{inspect(reason)}")
+      end
+    else
+      case helpers.resolve_comb_id.(helpers.result_get.(result, :options, :comb)) do
+        {:ok, comb_id} ->
+          case Hive.Quests.create(%{goal: goal, comb_id: comb_id}) do
+            {:ok, quest} ->
+              Format.success("Quest created: #{quest.name} (#{quest.id})")
 
-      {:error, :no_comb} ->
-        Format.error("No comb specified. Use --comb or set one with `hive comb use`.")
+            {:error, reason} ->
+              Format.error("Failed to create quest: #{inspect(reason)}")
+          end
+
+        {:error, :no_comb} ->
+          Format.error("No comb specified. Use --comb or set one with `hive comb use`.")
+      end
     end
   end
 
   def dispatch([:quest, :list], _result, _helpers) do
-    case Hive.Quests.list() do
+    quests =
+      if Hive.Client.remote?() do
+        case Hive.Client.list_quests() do
+          {:ok, q} -> q
+          {:error, reason} -> Format.error("Remote error: #{inspect(reason)}"); []
+        end
+      else
+        Hive.Quests.list()
+      end
+
+    case quests do
       [] ->
         Format.info("No quests yet. Create one with `hive quest new \"<goal>\"`")
 
       quests ->
-        headers = ["ID", "Name", "Status", "Jobs", "Created"]
+        headers = ["ID", "Name", "Phase", "Status", "Jobs", "Created"]
 
         rows =
           Enum.map(quests, fn q ->
@@ -42,7 +62,15 @@ defmodule Hive.CLI.QuestHandler do
                 jobs -> "#{length(jobs)}"
               end
 
-            [q.id, q.name, q.status, job_summary, Calendar.strftime(q.inserted_at, "%Y-%m-%d")]
+            created =
+              case q[:inserted_at] do
+                nil -> "-"
+                ts when is_binary(ts) -> String.slice(ts, 0, 10)
+                ts -> Calendar.strftime(ts, "%Y-%m-%d")
+              end
+
+            phase = q[:current_phase] || "-"
+            [q.id, q.name, phase, q.status, job_summary, created]
           end)
 
         Format.table(headers, rows)
@@ -52,19 +80,26 @@ defmodule Hive.CLI.QuestHandler do
   def dispatch([:quest, :show], result, helpers) do
     id = helpers.result_get.(result, :args, :id)
 
-    case Hive.Quests.get(id) do
+    quest_result =
+      if Hive.Client.remote?(),
+        do: Hive.Client.get_quest(id),
+        else: Hive.Quests.get(id)
+
+    case quest_result do
       {:ok, quest} ->
         IO.puts("Quest: #{quest.name}")
         IO.puts("ID:     #{quest.id}")
         IO.puts("Status: #{quest.status}")
-        IO.puts("Phase:  #{Map.get(quest, :current_phase, "pending")}")
+        IO.puts("Phase:  #{quest[:current_phase] || "pending"}")
         IO.puts("")
 
-        # Phase timeline
-        display_phase_timeline(quest)
+        unless Hive.Client.remote?() do
+          # Phase timeline
+          display_phase_timeline(quest)
 
-        # Artifact summaries
-        display_artifact_summaries(quest)
+          # Artifact summaries
+          display_artifact_summaries(quest)
+        end
 
         # Jobs table
         case quest[:jobs] do
@@ -87,9 +122,9 @@ defmodule Hive.CLI.QuestHandler do
                 Enum.map(impl_jobs, fn j ->
                   [
                     j.id,
-                    String.slice(j.title, 0, 50),
+                    String.slice(to_string(j.title), 0, 50),
                     j.status,
-                    j.bee_id || "-",
+                    j[:bee_id] || "-",
                     j[:assigned_model] || "-"
                   ]
                 end)
@@ -115,12 +150,17 @@ defmodule Hive.CLI.QuestHandler do
     end
   end
 
-  def dispatch([:quest, :delete], result, helpers) do
+  def dispatch([:quest, :remove], result, helpers) do
     id = helpers.result_get.(result, :args, :id)
 
-    case Hive.Quests.delete(id) do
-      :ok -> Format.success("Quest #{id} deleted.")
-      {:error, reason} -> Format.error("Failed to delete quest: #{inspect(reason)}")
+    del_result =
+      if Hive.Client.remote?(),
+        do: Hive.Client.delete_quest(id),
+        else: Hive.Quests.delete(id)
+
+    case del_result do
+      :ok -> Format.success("Quest #{id} removed.")
+      {:error, reason} -> Format.error("Failed to remove quest: #{inspect(reason)}")
     end
   end
 

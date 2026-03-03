@@ -7,6 +7,7 @@ defmodule Hive.Intelligence.SuccessPatternsTest do
   setup do
     store_dir = Path.join(System.tmp_dir!(), "hive-success-test-#{:rand.uniform(100000)}")
     File.mkdir_p!(store_dir)
+    Hive.Test.StoreHelper.stop_store()
     start_supervised!({Store, data_dir: store_dir})
     
     on_exit(fn -> File.rm_rf!(store_dir) end)

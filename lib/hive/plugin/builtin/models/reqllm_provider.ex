@@ -85,7 +85,17 @@ defmodule Hive.Plugin.Builtin.Models.ReqLLMProvider do
   @impl true
   def pricing do
     %{
-      # Anthropic models
+      # Google models (defaults)
+      "google:gemini-2.5-pro" => %{
+        input: 1.25, output: 10.0, cache_read: 0.315, cache_write: 0.0
+      },
+      "google:gemini-2.5-flash" => %{
+        input: 0.15, output: 0.60, cache_read: 0.0375, cache_write: 0.0
+      },
+      "google:gemini-2.0-flash" => %{
+        input: 0.10, output: 0.40, cache_read: 0.025, cache_write: 0.0
+      },
+      # Anthropic models (direct API)
       "anthropic:claude-opus-4-6" => %{
         input: 15.0, output: 75.0, cache_read: 1.50, cache_write: 18.75
       },
@@ -95,12 +105,18 @@ defmodule Hive.Plugin.Builtin.Models.ReqLLMProvider do
       "anthropic:claude-haiku-4-5" => %{
         input: 0.80, output: 4.0, cache_read: 0.08, cache_write: 1.0
       },
-      # Google models
-      "google:gemini-2.5-pro" => %{
-        input: 1.25, output: 10.0, cache_read: 0.315, cache_write: 0.0
+      # Bedrock models (AWS)
+      "bedrock:anthropic.claude-sonnet-4-6" => %{
+        input: 3.0, output: 15.0, cache_read: 0.30, cache_write: 3.75
       },
-      "google:gemini-2.0-flash" => %{
-        input: 0.10, output: 0.40, cache_read: 0.025, cache_write: 0.0
+      "bedrock:anthropic.claude-haiku-4-5" => %{
+        input: 0.80, output: 4.0, cache_read: 0.08, cache_write: 1.0
+      },
+      "bedrock:amazon.nova-pro" => %{
+        input: 0.80, output: 3.20, cache_read: 0.0, cache_write: 0.0
+      },
+      "bedrock:amazon.nova-lite" => %{
+        input: 0.06, output: 0.24, cache_read: 0.0, cache_write: 0.0
       },
       # OpenAI models
       "openai:gpt-4o" => %{
@@ -109,30 +125,44 @@ defmodule Hive.Plugin.Builtin.Models.ReqLLMProvider do
       "openai:gpt-4o-mini" => %{
         input: 0.15, output: 0.60, cache_read: 0.075, cache_write: 0.0
       }
+      # Ollama models (via OpenAI-compatible API) are free/local.
+      # Use "openai:llama3.3", "openai:qwen2.5-coder", etc.
+      # Configure with OPENAI_API_BASE=http://localhost:11434/v1
     }
   end
 
   @impl true
   def list_available_models do
     [
+      # Google (defaults)
+      "google:gemini-2.5-pro",
+      "google:gemini-2.5-flash",
+      "google:gemini-2.0-flash",
+      # Anthropic (direct API)
       "anthropic:claude-opus-4-6",
       "anthropic:claude-sonnet-4-6",
       "anthropic:claude-haiku-4-5",
-      "google:gemini-2.5-pro",
-      "google:gemini-2.0-flash",
+      # Bedrock (AWS)
+      "bedrock:anthropic.claude-sonnet-4-6",
+      "bedrock:anthropic.claude-haiku-4-5",
+      "bedrock:amazon.nova-pro",
+      "bedrock:amazon.nova-lite",
+      # OpenAI
       "openai:gpt-4o",
       "openai:gpt-4o-mini"
+      # Ollama: use "openai:<model>" with OPENAI_API_BASE=http://localhost:11434/v1
     ]
   end
 
   @impl true
   def get_model_info(model) do
     resolved = ModelResolver.resolve(model)
+    {:ok, ctx_limit} = get_context_limit(resolved)
 
     info = %{
       name: resolved,
       provider: ModelResolver.provider(resolved),
-      context_limit: 200_000,
+      context_limit: ctx_limit,
       capabilities: [:tool_calling, :streaming],
       cost_tier: infer_cost_tier(resolved)
     }
@@ -141,7 +171,22 @@ defmodule Hive.Plugin.Builtin.Models.ReqLLMProvider do
   end
 
   @impl true
-  def get_context_limit(_model), do: {:ok, 200_000}
+  def get_context_limit(model) do
+    limit =
+      cond do
+        String.contains?(model, "gemini-2.5") -> 1_048_576
+        String.contains?(model, "gemini-2.0") -> 1_048_576
+        String.contains?(model, "claude-opus") -> 200_000
+        String.contains?(model, "claude-sonnet") -> 200_000
+        String.contains?(model, "claude-haiku") -> 200_000
+        String.contains?(model, "gpt-4o") -> 128_000
+        String.contains?(model, "nova-pro") -> 300_000
+        String.contains?(model, "nova-lite") -> 300_000
+        true -> 200_000
+      end
+
+    {:ok, limit}
+  end
 
   @impl true
   def extract_costs(events) do
@@ -193,9 +238,10 @@ defmodule Hive.Plugin.Builtin.Models.ReqLLMProvider do
 
   defp infer_cost_tier(model) do
     cond do
-      String.contains?(model, "opus") or String.contains?(model, "pro") -> :high
+      String.contains?(model, "opus") or String.contains?(model, "gemini-2.5-pro") -> :high
       String.contains?(model, "haiku") or String.contains?(model, "flash") or
-        String.contains?(model, "mini") -> :low
+        String.contains?(model, "mini") or String.contains?(model, "nova-lite") or
+        String.contains?(model, "llama") or String.contains?(model, "qwen") -> :low
       true -> :medium
     end
   end

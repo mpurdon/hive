@@ -17,7 +17,7 @@ defmodule Hive.SpecsTest do
     # Start the store (some tests may need it indirectly)
     store_dir = Path.join(hive_dir, "store")
     File.mkdir_p!(store_dir)
-    if Process.whereis(Hive.Store), do: GenServer.stop(Hive.Store)
+    Hive.Test.StoreHelper.stop_store()
     {:ok, _} = Hive.Store.start_link(data_dir: store_dir)
 
     on_exit(fn ->

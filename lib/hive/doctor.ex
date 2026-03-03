@@ -26,7 +26,7 @@ defmodule Hive.Doctor do
 
   @checks [
     :git_installed,
-    :claude_installed,
+    :model_configured,
     :hive_initialized,
     :database_ok,
     :config_valid,
@@ -67,7 +67,7 @@ defmodule Hive.Doctor do
   """
   @spec check(atom()) :: check_result()
   def check(:git_installed), do: check_git_installed()
-  def check(:claude_installed), do: check_claude_installed()
+  def check(:model_configured), do: check_model_configured()
   def check(:hive_initialized), do: check_hive_initialized()
   def check(:database_ok), do: check_database_ok()
   def check(:config_valid), do: check_config_valid()
@@ -109,18 +109,53 @@ defmodule Hive.Doctor do
     end
   end
 
-  defp check_claude_installed do
-    case Hive.Runtime.Models.find_executable() do
-      {:ok, path} ->
-        result(:claude_installed, :ok, "Found at #{path}")
+  defp check_model_configured do
+    if Hive.Runtime.ModelResolver.api_mode?() do
+      # API mode: check that a relevant API key is set
+      provider = default_provider()
 
-      {:error, :not_found} ->
-        result(
-          :claude_installed,
-          :error,
-          "Claude CLI not found. Install from https://claude.ai/cli"
-        )
+      case provider do
+        "google" ->
+          if System.get_env("GOOGLE_API_KEY") || System.get_env("GEMINI_API_KEY") do
+            result(:model_configured, :ok, "API mode with Google (key set)")
+          else
+            result(:model_configured, :error, "GOOGLE_API_KEY not set. Required for Gemini models.")
+          end
+
+        "anthropic" ->
+          if System.get_env("ANTHROPIC_API_KEY") do
+            result(:model_configured, :ok, "API mode with Anthropic (key set)")
+          else
+            result(:model_configured, :error, "ANTHROPIC_API_KEY not set.")
+          end
+
+        "openai" ->
+          if System.get_env("OPENAI_API_KEY") do
+            result(:model_configured, :ok, "API mode with OpenAI (key set)")
+          else
+            result(:model_configured, :error, "OPENAI_API_KEY not set.")
+          end
+
+        _ ->
+          result(:model_configured, :ok, "API mode with provider: #{provider}")
+      end
+    else
+      # CLI mode: check that the configured CLI executable exists
+      case Hive.Runtime.Models.find_executable() do
+        {:ok, path} ->
+          result(:model_configured, :ok, "CLI mode, found at #{path}")
+
+        {:error, :not_found} ->
+          result(:model_configured, :error, "CLI executable not found. Switch to API mode or install the CLI.")
+      end
     end
+  end
+
+  defp default_provider do
+    model = Hive.Runtime.ModelResolver.resolve("sonnet")
+    Hive.Runtime.ModelResolver.provider(model)
+  rescue
+    _ -> "google"
   end
 
   defp check_hive_initialized do

@@ -333,10 +333,22 @@ defmodule Hive.Bees do
 
       hive_path = System.find_executable("hive") || "hive"
 
+      # When spawned from a running server, tell the bee's hive CLI calls
+      # to use remote mode so they don't try to boot a second server.
+      server_export =
+        case Hive.Web.Endpoint.config(:http) do
+          [_ | _] = http ->
+            port = Keyword.get(http, :port, 4000)
+            "export HIVE_SERVER=http://localhost:#{port}\n"
+
+          _ ->
+            ""
+        end
+
       script_content = """
       #!/bin/bash
       unset CLAUDECODE
-      cd #{escape_shell(cell.worktree_path)}
+      #{server_export}cd #{escape_shell(cell.worktree_path)}
       #{sandboxed_cmd_line} > #{escape_shell(log_path)} 2>&1
       EXIT_CODE=$?
       if [ $EXIT_CODE -eq 0 ]; then

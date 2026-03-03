@@ -76,7 +76,9 @@ defmodule Hive.Quests do
   """
   @spec list(keyword()) :: [map()]
   def list(opts \\ []) do
-    quests = Store.all(:quests)
+    quests =
+      Store.all(:quests)
+      |> Enum.map(&derive_status/1)
 
     quests =
       case Keyword.get(opts, :status) do
@@ -86,6 +88,14 @@ defmodule Hive.Quests do
 
     Enum.sort_by(quests, & &1.inserted_at, {:desc, DateTime})
   end
+
+  # Derives status from current_phase when the stored status is stale.
+  defp derive_status(%{current_phase: phase, status: "pending"} = quest)
+       when phase not in [nil, "pending"] do
+    %{quest | status: "active"}
+  end
+
+  defp derive_status(quest), do: quest
 
   @doc """
   Deletes a quest by ID.
@@ -309,7 +319,7 @@ defmodule Hive.Quests do
 
       quest ->
         from_phase = Map.get(quest, :current_phase, "pending")
-        
+
         # Record transition with monotonic sequence for ordering
         transition = %{
           quest_id: quest_id,
@@ -320,8 +330,19 @@ defmodule Hive.Quests do
         }
         Store.insert(:quest_phase_transitions, transition)
 
-        # Update quest
-        updated = Map.put(quest, :current_phase, to_phase)
+        # Update quest phase and derive status from the phase
+        status =
+          case to_phase do
+            "completed" -> quest.status
+            "pending" -> "pending"
+            _ -> "active"
+          end
+
+        updated =
+          quest
+          |> Map.put(:current_phase, to_phase)
+          |> Map.put(:status, status)
+
         Store.put(:quests, updated)
     end
   end

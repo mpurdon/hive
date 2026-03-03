@@ -5,12 +5,15 @@ defmodule Hive.Runtime.ContextMonitorTest do
   alias Hive.Store
 
   setup do
+    Hive.Test.StoreHelper.ensure_infrastructure()
+
     # Create a temporary store for testing
     store_dir = Path.join(System.tmp_dir!(), "hive_context_test_#{:erlang.unique_integer([:positive])}")
     File.mkdir_p!(store_dir)
-    
+
     on_exit(fn -> File.rm_rf!(store_dir) end)
-    
+
+    Hive.Test.StoreHelper.stop_store()
     {:ok, _pid} = Store.start_link(data_dir: store_dir)
     
     # Create a test bee

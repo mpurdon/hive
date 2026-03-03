@@ -92,39 +92,29 @@ defmodule Hive.Runtime.SettingsTest do
   end
 
   describe "generate_queen/2" do
-    test "writes queen settings to the workspace" do
+    test "skips writing settings in API mode" do
       workspace = tmp_workspace()
 
+      # In API mode, no CLI settings file is needed
       assert :ok = Settings.generate_queen("/tmp/hive-root", workspace)
 
       settings_path = Path.join([workspace, ".claude", "settings.json"])
-      assert File.exists?(settings_path)
-
-      {:ok, content} = File.read(settings_path)
-      {:ok, parsed} = Jason.decode(content)
-
-      assert parsed["permissions"]["allow"] != nil
-      assert parsed["hooks"]["SessionStart"] != nil
+      refute File.exists?(settings_path)
     end
   end
 
   describe "generate/3" do
-    test "writes .claude/settings.json to the working directory" do
+    test "skips writing settings in API mode" do
       working_dir = tmp_workspace()
 
+      # In API mode, no CLI settings file is needed
       assert :ok = Settings.generate("bee-test1", "/tmp/hive-root", working_dir)
 
       settings_path = Path.join([working_dir, ".claude", "settings.json"])
-      assert File.exists?(settings_path)
-
-      {:ok, content} = File.read(settings_path)
-      {:ok, parsed} = Jason.decode(content)
-
-      assert parsed["hooks"]["SessionStart"] != nil
-      assert parsed["hooks"]["Stop"] != nil
+      refute File.exists?(settings_path)
     end
 
-    test "creates the .claude directory if it does not exist" do
+    test "does not create .claude directory in API mode" do
       working_dir = tmp_workspace()
       claude_dir = Path.join(working_dir, ".claude")
 
@@ -132,7 +122,7 @@ defmodule Hive.Runtime.SettingsTest do
 
       :ok = Settings.generate("bee-test2", "/tmp/hive-root", working_dir)
 
-      assert File.dir?(claude_dir)
+      refute File.dir?(claude_dir)
     end
   end
 end

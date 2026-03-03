@@ -1,5 +1,5 @@
 defmodule HiveTest do
-  use ExUnit.Case, async: true
+  use ExUnit.Case, async: false
 
   describe "version/0" do
     test "returns the project version as a string" do

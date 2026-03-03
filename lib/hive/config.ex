@@ -11,6 +11,7 @@ defmodule Hive.Config do
     "queen" => %{"max_bees" => 5},
     "costs" => %{"warn_threshold_usd" => 5.0, "budget_usd" => 10.0},
     "github" => %{"token" => ""},
+    "server" => %{"url" => ""},
     "session" => %{"current_comb" => ""}
   }
 
@@ -50,6 +51,20 @@ defmodule Hive.Config do
     end
   end
 
+  @doc """
+  Returns the server URL from .hive/config.toml, or nil if not configured.
+  """
+  @spec server_url() :: String.t() | nil
+  def server_url do
+    with {:ok, root} <- Hive.hive_dir(),
+         {:ok, config} <- read_config(Path.join([root, ".hive", "config.toml"])),
+         url when is_binary(url) and url != "" <- get_in(config, ["server", "url"]) do
+      url
+    else
+      _ -> nil
+    end
+  end
+
   # -- Private: TOML encoding ------------------------------------------------
 
   # We encode a simple two-level map to TOML by hand rather than pulling in a
@@ -78,4 +93,14 @@ defmodule Hive.Config do
   defp encode_value(value) when is_integer(value), do: Integer.to_string(value)
   defp encode_value(value) when is_float(value), do: Float.to_string(value)
   defp encode_value(value) when is_boolean(value), do: Atom.to_string(value)
+
+  defp encode_value(value) when is_map(value) do
+    entries = Enum.map_join(value, ", ", fn {k, v} -> "#{k} = #{encode_value(v)}" end)
+    "{ #{entries} }"
+  end
+
+  defp encode_value(value) when is_list(value) do
+    entries = Enum.map_join(value, ", ", &encode_value/1)
+    "[#{entries}]"
+  end
 end

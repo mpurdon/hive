@@ -8,7 +8,17 @@ defmodule Hive.CLI.BeeHandler do
   alias Hive.CLI.Format
 
   def dispatch([:bee, :list], _result, _helpers) do
-    case Hive.Bees.list() do
+    bees =
+      if Hive.Client.remote?() do
+        case Hive.Client.list_bees() do
+          {:ok, b} -> b
+          {:error, reason} -> Format.error("Remote error: #{inspect(reason)}"); []
+        end
+      else
+        Hive.Bees.list()
+      end
+
+    case bees do
       [] ->
         Format.info("No bees. Bees are spawned when the Queen assigns jobs.")
 
@@ -18,12 +28,13 @@ defmodule Hive.CLI.BeeHandler do
         rows =
           Enum.map(bees, fn b ->
             context_pct =
-              case b.context_percentage do
+              case b[:context_percentage] do
                 nil -> "-"
-                pct -> "#{Float.round(pct * 100, 1)}%"
+                pct when is_number(pct) -> "#{Float.round(pct * 100, 1)}%"
+                _ -> "-"
               end
 
-            [b.id, b.name, b.status, b.job_id || "-", context_pct]
+            [b.id, b.name, b.status, b[:job_id] || "-", context_pct]
           end)
 
         Format.table(headers, rows)
@@ -31,42 +42,51 @@ defmodule Hive.CLI.BeeHandler do
   end
 
   def dispatch([:bee, :spawn], result, helpers) do
-    job_id = helpers.result_get.(result, :options, :job)
-    name = helpers.result_get.(result, :options, :name)
+    if Hive.Client.remote?() do
+      Format.error("Bee spawning is a server-side operation. Run it on the server directly.")
+    else
+      job_id = helpers.result_get.(result, :options, :job)
+      name = helpers.result_get.(result, :options, :name)
 
-    case helpers.resolve_comb_id.(helpers.result_get.(result, :options, :comb)) do
-      {:ok, comb_id} ->
-        with {:ok, hive_root} <- Hive.hive_dir(),
-             {:ok, comb} <- Hive.Comb.get(comb_id) do
-          opts = if name, do: [name: name], else: []
+      case helpers.resolve_comb_id.(helpers.result_get.(result, :options, :comb)) do
+        {:ok, comb_id} ->
+          with {:ok, hive_root} <- Hive.hive_dir(),
+               {:ok, comb} <- Hive.Comb.get(comb_id) do
+            opts = if name, do: [name: name], else: []
 
-          case Hive.Bees.spawn_detached(job_id, comb.id, hive_root, opts) do
-            {:ok, bee} ->
-              Format.success("Bee \"#{bee.name}\" spawned (#{bee.id})")
+            case Hive.Bees.spawn_detached(job_id, comb.id, hive_root, opts) do
+              {:ok, bee} ->
+                Format.success("Bee \"#{bee.name}\" spawned (#{bee.id})")
+
+              {:error, reason} ->
+                Format.error("Failed to spawn bee: #{inspect(reason)}")
+            end
+          else
+            {:error, :not_in_hive} ->
+              Format.error("Not inside a hive workspace. Run `hive init` first.")
+
+            {:error, :not_found} ->
+              Format.error("Comb not found: #{comb_id}")
 
             {:error, reason} ->
-              Format.error("Failed to spawn bee: #{inspect(reason)}")
+              Format.error("Failed: #{inspect(reason)}")
           end
-        else
-          {:error, :not_in_hive} ->
-            Format.error("Not inside a hive workspace. Run `hive init` first.")
 
-          {:error, :not_found} ->
-            Format.error("Comb not found: #{comb_id}")
-
-          {:error, reason} ->
-            Format.error("Failed: #{inspect(reason)}")
-        end
-
-      {:error, :no_comb} ->
-        Format.error("No comb specified. Use --comb or set one with `hive comb use`.")
+        {:error, :no_comb} ->
+          Format.error("No comb specified. Use --comb or set one with `hive comb use`.")
+      end
     end
   end
 
   def dispatch([:bee, :stop], result, helpers) do
     bee_id = helpers.result_get.(result, :options, :id)
 
-    case Hive.Bees.stop(bee_id) do
+    stop_result =
+      if Hive.Client.remote?(),
+        do: Hive.Client.stop_bee(bee_id),
+        else: Hive.Bees.stop(bee_id)
+
+    case stop_result do
       :ok ->
         Format.success("Bee #{bee_id} stopped.")
 

@@ -7,13 +7,26 @@ defmodule Hive.TranscriptWatcherTest do
   @tmp_dir System.tmp_dir!()
 
   setup do
+    Hive.Test.StoreHelper.ensure_infrastructure()
+
     store_dir = Path.join(@tmp_dir, "hive_store_#{:erlang.unique_integer([:positive])}")
     File.mkdir_p!(store_dir)
-    if Process.whereis(Hive.Store), do: GenServer.stop(Hive.Store)
+    Hive.Test.StoreHelper.stop_store()
     {:ok, _} = Hive.Store.start_link(data_dir: store_dir)
     on_exit(fn -> File.rm_rf!(store_dir) end)
 
     {:ok, bee} = Store.insert(:bees, %{name: "watcher-test-bee", status: "starting"})
+
+    # Stop any existing TranscriptWatcher before starting a new one
+    case TranscriptWatcher.lookup() do
+      {:ok, pid} ->
+        try do
+          GenServer.stop(pid, :normal, 1000)
+        catch
+          :exit, _ -> :ok
+        end
+      :error -> :ok
+    end
 
     # Start watcher with a fast poll interval for testing
     {:ok, pid} = TranscriptWatcher.start_link(poll_interval: 100)

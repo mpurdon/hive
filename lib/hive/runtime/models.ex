@@ -4,17 +4,17 @@ defmodule Hive.Runtime.Models do
 
   Resolves the active model plugin from config/options and delegates
   every call through it. All call sites should use this module instead
-  of calling `Hive.Runtime.Claude` directly.
+  of calling model plugins directly.
 
   ## Resolution order
 
   1. Explicit `:model_plugin` in opts (module or name string)
   2. Config `plugins.models.default` via `Hive.Config.Provider`
-  3. Fallback: `"claude"`
+  3. Fallback: `"reqllm"`
   """
 
-  @default_plugin_name "claude"
-  @default_plugin Hive.Plugin.Builtin.Models.Claude
+  @default_plugin_name "reqllm"
+  @default_plugin Hive.Plugin.Builtin.Models.ReqLLMProvider
 
   # -- Core dispatch -----------------------------------------------------------
 
@@ -179,7 +179,7 @@ defmodule Hive.Runtime.Models do
     if function_exported?(plugin, :get_context_limit, 1) do
       plugin.get_context_limit(model)
     else
-      # Default to 200k for Claude models
+      # Default context limit when plugin doesn't specify
       {:ok, 200_000}
     end
   end
@@ -298,7 +298,7 @@ defmodule Hive.Runtime.Models do
   Resolution order:
   1. `:model_plugin` option (module or name string)
   2. Config `plugins.models.default`
-  3. Hardcoded `"claude"` fallback
+  3. Hardcoded `"reqllm"` fallback
 
   Returns `{:ok, module}` or `{:error, :plugin_not_found}`.
   """

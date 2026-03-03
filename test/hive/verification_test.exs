@@ -1,14 +1,12 @@
 defmodule Hive.VerificationTest do
-  use ExUnit.Case, async: true
+  use ExUnit.Case, async: false
 
   alias Hive.{Store, Verification, Jobs}
 
   setup do
-    # Start store for testing (handle already started)
-    case Store.start_link(data_dir: System.tmp_dir!()) do
-      {:ok, _} -> :ok
-      {:error, {:already_started, _}} -> :ok
-    end
+    Hive.Test.StoreHelper.ensure_infrastructure()
+    Hive.Test.StoreHelper.stop_store()
+    {:ok, _} = Store.start_link(data_dir: System.tmp_dir!())
 
     # Create test data
     {:ok, comb} = Store.insert(:combs, %{name: "test-comb", path: "/tmp/test"})

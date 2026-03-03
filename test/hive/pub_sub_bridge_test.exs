@@ -1,9 +1,23 @@
 defmodule Hive.PubSubBridgeTest do
-  use ExUnit.Case
-  
+  use ExUnit.Case, async: false
+
   setup do
-    # Ensure PubSub is started (it should be part of the app, but safe to check)
-    # The Bridge is started by Application, so we just subscribe.
+    Hive.Test.StoreHelper.ensure_infrastructure()
+
+    # Ensure PubSubBridge is running. If it was killed by another test's cleanup
+    # or lost its PubSub connection, restart it.
+    unless Process.whereis(Hive.PubSubBridge) && Process.alive?(Process.whereis(Hive.PubSubBridge)) do
+      try do
+        Supervisor.terminate_child(Hive.Supervisor, Hive.PubSubBridge)
+        Supervisor.delete_child(Hive.Supervisor, Hive.PubSubBridge)
+      catch
+        :exit, _ -> :ok
+      end
+      Hive.Test.StoreHelper.safe_stop(Hive.PubSubBridge)
+      {:ok, _} = Hive.PubSubBridge.start_link([])
+    end
+
+    # Reattach telemetry handlers in case they were detached
     Hive.PubSubBridge.subscribe()
     :ok
   end
@@ -14,10 +28,12 @@ defmodule Hive.PubSubBridgeTest do
 
     # Assert we receive it
     assert_receive {:hive_event, payload}, 1000
-    
+
     assert payload.event == "hive.bee.spawned"
     assert payload.measurements == %{count: 1}
-    assert payload.metadata == %{bee_id: "test-bee"}
+    # PubSubBridge adds :node to metadata
+    assert payload.metadata.bee_id == "test-bee"
+    assert Map.has_key?(payload.metadata, :node)
     assert %DateTime{} = payload.timestamp
   end
 end

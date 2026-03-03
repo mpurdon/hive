@@ -80,7 +80,7 @@ defmodule Hive.Plugin.Builtin.Models.ReqLLMProviderTest do
 
     test "returns info for tier names" do
       assert {:ok, info} = ReqLLMProvider.get_model_info("sonnet")
-      assert info.provider == "anthropic"
+      assert info.provider == "google"
     end
   end
 

@@ -2,6 +2,7 @@ import Config
 
 config :hive, Hive.Web.Endpoint,
   http: [port: 4000],
+  server: true,
   debug_errors: true,
   code_reloader: true,
   check_origin: false,
@@ -14,12 +15,16 @@ config :hive, Hive.Web.Endpoint,
     layout: false
   ]
 
+config :llm_db,
+  data_dir: Path.join(System.user_home!(), ".hive/llm_db"),
+  compile_embed: true
+
 config :hive, :llm,
-  execution_mode: :cli,
+  execution_mode: :api,
   default_models: %{
-    opus: "anthropic:claude-opus-4-6",
-    sonnet: "anthropic:claude-sonnet-4-6",
-    haiku: "anthropic:claude-haiku-4-5",
+    opus: "google:gemini-2.5-pro",
+    sonnet: "google:gemini-2.5-flash",
+    haiku: "google:gemini-2.0-flash",
     fast: "google:gemini-2.0-flash"
   }
 
