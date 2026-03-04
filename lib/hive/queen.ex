@@ -99,7 +99,8 @@ defmodule Hive.Queen do
       max_bees: max_bees,
       max_retries: 3,
       last_checkpoint: %{},
-      stall_timeout: :timer.minutes(10)
+      stall_timeout: :timer.minutes(10),
+      pending_verifications: %{}
     }
 
     # Drone is now supervised by Application — just verify it's running
@@ -210,6 +211,7 @@ defmodule Hive.Queen do
   def handle_info({ref, {:verification_passed, bee_id, job_id}}, state) do
     # Flush task monitor
     Process.demonitor(ref, [:flush])
+    state = %{state | pending_verifications: Map.delete(state.pending_verifications, ref)}
     Logger.info("Verification passed for job #{job_id} (bee #{bee_id})")
     Hive.Reputation.update_after_job(job_id)
     state = advance_quest(bee_id, state)
@@ -218,13 +220,14 @@ defmodule Hive.Queen do
 
   def handle_info({ref, {:verification_failed, bee_id, job_id, result}}, state) do
     Process.demonitor(ref, [:flush])
+    state = %{state | pending_verifications: Map.delete(state.pending_verifications, ref)}
     Logger.warning("Verification failed for job #{job_id}: #{inspect(result[:output])}")
     Hive.Reputation.update_after_job(job_id)
-    
+
     # Treat as job failure -> trigger retry logic
     waggle = %{
-      from: bee_id, 
-      subject: "verification_failed", 
+      from: bee_id,
+      subject: "verification_failed",
       body: "Verification failed: #{result[:output]}"
     }
     state = maybe_retry_job(waggle, state)
@@ -233,12 +236,13 @@ defmodule Hive.Queen do
 
   def handle_info({ref, {:verification_error, bee_id, job_id, reason}}, state) do
     Process.demonitor(ref, [:flush])
+    state = %{state | pending_verifications: Map.delete(state.pending_verifications, ref)}
     Logger.error("Verification system error for job #{job_id}: #{inspect(reason)}")
-    
+
     # Fail safe: retry
     waggle = %{
-      from: bee_id, 
-      subject: "verification_error", 
+      from: bee_id,
+      subject: "verification_error",
       body: "System error during verification: #{inspect(reason)}"
     }
     state = maybe_retry_job(waggle, state)
@@ -328,9 +332,20 @@ defmodule Hive.Queen do
           state = advance_quest(waggle.from, state)
           state
 
+        {:ok, %{verification_status: vs}} when vs in ["passed", "failed"] ->
+          # Already verified (e.g., by worker inline) — skip Queen-side verification
+          Logger.info("Job #{job_id} already verified (#{vs}), skipping duplicate verification")
+          if vs == "passed" do
+            Hive.Reputation.update_after_job(job_id)
+            advance_quest(waggle.from, state)
+          else
+            waggle_msg = %{from: waggle.from, subject: "verification_failed", body: "Already failed verification"}
+            maybe_retry_job(waggle_msg, state)
+          end
+
         _ ->
           # Implementation jobs go through verification
-          Task.async(fn ->
+          task = Task.async(fn ->
             case Hive.Verification.verify_job(job_id) do
               {:ok, :pass, _result} -> {:verification_passed, waggle.from, job_id}
               {:ok, :fail, result} -> {:verification_failed, waggle.from, job_id, result}
@@ -338,7 +353,8 @@ defmodule Hive.Queen do
             end
           end)
 
-          state
+          pending = Map.put(state.pending_verifications, task.ref, {waggle.from, job_id})
+          %{state | pending_verifications: pending}
       end
     else
       Logger.warning("Could not find job for bee #{waggle.from}, skipping verification")
@@ -833,7 +849,7 @@ defmodule Hive.Queen do
     all_jobs = Hive.Store.all(:jobs)
 
     Enum.reduce(quests, state, fn quest, acc ->
-      if quest.status in ["active", "pending", "planning", "research", "implementation"] do
+      if quest.status in ["active", "pending", "planning", "research", "implementation", "awaiting_approval"] do
         # Check for deadlocks before spawning
         case Hive.Resilience.detect_deadlock(quest.id) do
           {:error, {:deadlock, cycles}} ->
@@ -876,7 +892,14 @@ defmodule Hive.Queen do
     Enum.reduce(unread, state, fn waggle, acc ->
       Logger.info("Recovering missed waggle: #{waggle.subject} from #{waggle.from}")
       Hive.Waggle.mark_read(waggle.id)
-      handle_waggle(waggle, acc)
+
+      try do
+        handle_waggle(waggle, acc)
+      rescue
+        e ->
+          Logger.warning("Failed to process recovered waggle #{waggle.id} (#{waggle.subject}): #{Exception.message(e)}")
+          acc
+      end
     end)
   rescue
     e ->

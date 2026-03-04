@@ -72,8 +72,9 @@ defmodule Hive.Verification do
             case Hive.Runtime.CrossModelAudit.audit_job(job_id) do
               {:ok, audit} ->
                 %{cross_audit_score: audit.score, cross_audit_issues: audit.issues}
-              {:error, _} ->
-                %{}
+              {:error, reason} ->
+                Logger.warning("Cross-model audit failed for job #{job_id}: #{inspect(reason)}")
+                %{cross_audit_error: inspect(reason)}
             end
           else
             %{}
@@ -194,24 +195,32 @@ defmodule Hive.Verification do
 
   defp run_quality_checks(job_id, cell, comb) do
     language = detect_language(comb)
-    
+
     # Run static analysis
-    {:ok, static_report} = Quality.analyze_static(job_id, cell.worktree_path, language)
-    static_result = %{static_score: static_report.score, static_issues: length(static_report.issues)}
+    static_result = case Quality.analyze_static(job_id, cell.worktree_path, language) do
+      {:ok, report} -> %{static_score: report.score, static_issues: length(report.issues)}
+      {:error, reason} ->
+        Logger.warning("Static analysis failed for job #{job_id}: #{inspect(reason)}")
+        %{static_score: 0, static_issues: 0, static_error: inspect(reason)}
+    end
 
     # Run security scan
-    {:ok, security_report} = Quality.analyze_security(job_id, cell.worktree_path, language)
-    security_result = %{security_score: security_report.score, security_findings: length(security_report.issues)}
+    security_result = case Quality.analyze_security(job_id, cell.worktree_path, language) do
+      {:ok, report} -> %{security_score: report.score, security_findings: length(report.issues)}
+      {:error, reason} ->
+        Logger.warning("Security scan failed for job #{job_id}: #{inspect(reason)}")
+        %{security_score: 0, security_findings: 0, security_error: inspect(reason)}
+    end
 
     # Run performance benchmarks (if configured)
     performance_result = case Quality.analyze_performance(job_id, cell.worktree_path, comb) do
       {:ok, report} -> %{performance_score: report.score, performance_metrics: length(report.issues)}
       {:error, _} -> %{performance_score: nil, performance_metrics: 0}
     end
-    
+
     # Calculate composite score
     composite = Quality.calculate_composite_score(job_id)
-    
+
     Map.merge(static_result, security_result)
     |> Map.merge(performance_result)
     |> Map.put(:quality_score, composite)

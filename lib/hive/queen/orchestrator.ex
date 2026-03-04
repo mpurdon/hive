@@ -18,6 +18,7 @@ defmodule Hive.Queen.Orchestrator do
 
   @phases ~w(research requirements design review planning implementation validation awaiting_approval merge)
   @max_redesign_iterations 2
+  @approval_timeout_hours 24
 
   # -- Public API --------------------------------------------------------------
 
@@ -260,8 +261,10 @@ defmodule Hive.Queen.Orchestrator do
             "status" => "failed",
             "error" => inspect(reason)
           })
-          Logger.warning("Quest #{quest.id} merge failed: #{inspect(reason)}")
-          {:ok, "merge"}
+          Logger.warning("Quest #{quest.id} merge failed: #{inspect(reason)}, completing as failed")
+          Hive.Quests.transition_phase(quest.id, "completed", "Merge failed: #{inspect(reason)}")
+          Hive.Quests.update_status!(quest.id)
+          {:ok, "completed"}
       end
     end
   end
@@ -286,11 +289,29 @@ defmodule Hive.Queen.Orchestrator do
         {:ok, "completed"}
 
       :pending ->
-        {:ok, "awaiting_approval"}
+        # Check for approval timeout
+        if approval_timed_out?(quest.id) do
+          Logger.warning("Quest #{quest.id} approval timed out after #{@approval_timeout_hours}h")
+          Hive.HumanGate.reject(quest.id, "Approval timeout (#{@approval_timeout_hours}h)")
+          Hive.Quests.transition_phase(quest.id, "completed", "Approval timed out")
+          Hive.Quests.update_status!(quest.id)
+          {:ok, "completed"}
+        else
+          {:ok, "awaiting_approval"}
+        end
 
       :not_required ->
         {:ok, quest} = Hive.Quests.get(quest.id)
         start_merge(quest)
+    end
+  end
+
+  defp approval_timed_out?(quest_id) do
+    case Store.find_one(:approval_requests, fn r -> r.quest_id == quest_id and r.status == "pending" end) do
+      nil -> false
+      request ->
+        hours_elapsed = DateTime.diff(DateTime.utc_now(), request.requested_at, :second) / 3600
+        hours_elapsed > @approval_timeout_hours
     end
   end
 
@@ -346,7 +367,13 @@ defmodule Hive.Queen.Orchestrator do
 
     cond do
       impl_jobs == [] ->
-        {:ok, "implementation"}
+        Logger.warning("Quest #{quest.id} has no implementation jobs, advancing to validation")
+        if Map.get(quest, :comb_id) do
+          {:ok, quest} = Hive.Quests.get(quest.id)
+          start_validation(quest)
+        else
+          complete_quest(quest.id)
+        end
 
       Enum.all?(impl_jobs, &(&1.status == "done")) ->
         # Only start validation if this is a new-style quest with comb_id

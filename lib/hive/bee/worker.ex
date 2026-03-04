@@ -660,11 +660,24 @@ defmodule Hive.Bee.Worker do
         Hive.Quests.store_artifact(job.quest_id, job.phase, artifact)
 
       {:error, reason} ->
-        Logger.warning("Phase output parse failed for #{job.phase}: #{inspect(reason)}")
+        Logger.warning("Phase output parse failed for #{job.phase}: #{inspect(reason)}, storing raw output as fallback")
+        fallback_artifact = %{
+          "raw_output" => String.slice(raw_output, 0, 50_000),
+          "parse_failed" => true,
+          "parse_error" => inspect(reason)
+        }
+        Hive.Quests.store_artifact(job.quest_id, job.phase, fallback_artifact)
     end
   rescue
     e ->
-      Logger.warning("Phase output collection error: #{inspect(e)}")
+      Logger.warning("Phase output collection error: #{inspect(e)}, storing minimal fallback")
+      raw_output = IO.iodata_to_binary(state.output)
+      fallback_artifact = %{
+        "raw_output" => String.slice(raw_output, 0, 50_000),
+        "parse_failed" => true,
+        "parse_error" => inspect(e)
+      }
+      Hive.Quests.store_artifact(job.quest_id, job.phase, fallback_artifact)
   end
 
   defp record_files_changed(state) do

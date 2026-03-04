@@ -35,7 +35,8 @@ defmodule Hive.HumanGate do
       jobs
       |> Enum.reject(& &1[:phase_job])
       |> Enum.any?(fn job ->
-        Map.get(job, :risk_level) in [:high, :critical]
+        risk = Map.get(job, :risk_level)
+        risk in [:high, :critical] or risk in ["high", "critical"]
       end)
 
     comb_requires? or high_risk_jobs?

@@ -305,6 +305,8 @@ defmodule Hive.Reputation do
   defp normalize_model(nil), do: nil
   defp normalize_model(model) when is_binary(model) do
     model
+    |> String.split(":")
+    |> List.last()
     |> String.replace("claude-", "")
     |> String.split("-")
     |> hd()
