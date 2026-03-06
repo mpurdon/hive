@@ -246,11 +246,16 @@ defmodule Hive.Queen.Planner do
 
   defp build_llm_plan_prompt(quest, research, requirements, design, review, opts) do
     feedback = Map.get(opts, :feedback)
+    strategy = Map.get(opts, :strategy)
+    strategy_hint = Map.get(opts, :strategy_hint)
+
+    strategy_section = strategy_instruction(strategy, strategy_hint)
 
     cond do
       # Full artifacts available — use the detailed planning prompt
       design && requirements && review ->
-        Hive.Queen.PhasePrompts.planning_prompt(quest, design, requirements, review)
+        base = Hive.Queen.PhasePrompts.planning_prompt(quest, design, requirements, review)
+        if strategy_section == "", do: base, else: base <> "\n" <> strategy_section <> "\n"
 
       # Some artifacts — build a simpler prompt with what we have
       true ->
@@ -286,6 +291,7 @@ defmodule Hive.Queen.Planner do
 
         #{artifacts_section}
         #{feedback_section}
+        #{strategy_section}
 
         ## Instructions
 
@@ -317,6 +323,12 @@ defmodule Hive.Queen.Planner do
         """
     end
   end
+
+  @doc false
+  def strategy_instruction(nil, _), do: ""
+  def strategy_instruction(name, hint) when is_binary(hint),
+    do: "STRATEGY: \"#{name}\" — #{hint}. Design the plan accordingly."
+  def strategy_instruction(_, _), do: ""
 
   defp extract_text(%{text: text}), do: text
   defp extract_text(text) when is_binary(text), do: text
@@ -405,24 +417,120 @@ defmodule Hive.Queen.Planner do
 
   # -- Multi-Plan Evaluation ---------------------------------------------------
 
+  @default_strategies [
+    %{name: "minimal", hint: "Bare-minimum implementation to achieve the goal"},
+    %{name: "normal", hint: "Standard implementation with reasonable completeness"},
+    %{name: "complex", hint: "Comprehensive implementation with thorough testing, edge cases, and documentation"}
+  ]
+
   @doc """
-  Generates 3 candidate plans (minimal, balanced, thorough), scores each,
+  Discover whether a quest goal involves fundamentally different approaches.
+
+  Calls haiku to classify the goal. If the goal involves a technology or
+  approach choice (e.g., native vs cross-platform), returns up to 3 named
+  alternative approaches. Otherwise returns the default scale tiers:
+  minimal / normal / complex.
+  """
+  @spec discover_strategies(map(), map()) :: [%{name: String.t(), hint: String.t()}]
+  def discover_strategies(quest, artifacts \\ %{}) do
+    artifacts_context =
+      artifacts
+      |> Enum.reject(fn {_k, v} -> is_nil(v) end)
+      |> Enum.map(fn {k, _v} -> "- #{k} artifact available" end)
+      |> Enum.join("\n")
+
+    artifacts_section = if artifacts_context != "", do: "\nAvailable artifacts:\n#{artifacts_context}\n", else: ""
+
+    prompt = """
+    You are classifying a project goal.
+
+    Goal: #{quest.goal}
+    #{artifacts_section}
+    Does this goal involve a fundamental technology or approach choice (e.g., native vs cross-platform,
+    different languages, different frameworks/SDKs)?
+
+    If YES — output up to 3 alternative approaches as JSON:
+    ```json
+    [
+      {"name": "short-kebab-name", "hint": "One-line description of this approach"},
+      ...
+    ]
+    ```
+
+    If NO — output exactly:
+    ```json
+    [
+      {"name": "minimal", "hint": "Bare-minimum implementation to achieve the goal"},
+      {"name": "normal",  "hint": "Standard implementation with reasonable completeness"},
+      {"name": "complex", "hint": "Comprehensive implementation with thorough testing, edge cases, and documentation"}
+    ]
+    ```
+    """
+
+    case Hive.Runtime.Models.generate_text(prompt, model: "haiku") do
+      {:ok, response} ->
+        text = extract_text(response)
+        parse_strategies(text)
+
+      {:error, _} ->
+        @default_strategies
+    end
+  end
+
+  defp parse_strategies(text) do
+    json_str =
+      case Regex.run(~r/```json\s*\n(.*?)\n\s*```/s, text) do
+        [_, json] -> json
+        _ -> text
+      end
+
+    case Jason.decode(json_str) do
+      {:ok, list} when is_list(list) and length(list) > 0 ->
+        Enum.map(list, fn item ->
+          %{
+            name: item["name"] || "unknown",
+            hint: item["hint"] || ""
+          }
+        end)
+
+      _ ->
+        @default_strategies
+    end
+  end
+
+  @doc """
+  Generates candidate plans using dynamically discovered strategies, scores each,
   stores all as `:plan_candidates` artifact, and returns the best one.
+
+  Phase 1: Calls haiku to discover whether the goal needs alternative approaches
+  or default scale tiers (minimal/normal/complex).
+  Phase 2: Generates a sonnet plan for each strategy.
 
   Falls back to `generate_llm_plan/1` single plan on failure.
   """
   @spec generate_candidate_plans(String.t(), map()) :: {:ok, map()} | {:error, term()}
   def generate_candidate_plans(quest_id, opts \\ %{}) do
-    with {:ok, _quest} <- Hive.Quests.get(quest_id) do
-      strategies = ["minimal", "balanced", "thorough"]
+    with {:ok, quest} <- Hive.Quests.get(quest_id) do
+      # Phase 1: Discover strategies
+      artifacts = %{
+        research: Hive.Quests.get_artifact(quest_id, "research"),
+        requirements: Hive.Quests.get_artifact(quest_id, "requirements"),
+        design: Hive.Quests.get_artifact(quest_id, "design")
+      }
 
+      strategies = discover_strategies(quest, artifacts)
+
+      # Phase 2: Generate a plan for each strategy
       candidates =
         strategies
-        |> Enum.map(fn strategy ->
-          case generate_llm_plan(quest_id, Map.put(opts, :strategy, strategy)) do
+        |> Enum.map(fn %{name: name, hint: hint} ->
+          plan_opts = opts |> Map.put(:strategy, name) |> Map.put(:strategy_hint, hint)
+
+          case generate_llm_plan(quest_id, plan_opts) do
             {:ok, plan} ->
-              scored = Map.put(plan, :score, score_plan(plan))
-              Map.put(scored, :strategy, strategy)
+              plan
+              |> Map.put(:score, score_plan(plan))
+              |> Map.put(:strategy, name)
 
             {:error, _} ->
               nil

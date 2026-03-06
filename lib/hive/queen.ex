@@ -560,8 +560,7 @@ defmodule Hive.Queen do
           Logger.info("Retrying job #{job_id} (attempt #{attempts + 1}/#{state.max_retries})")
 
           # Try intelligent retry first, fall back to simple retry
-          # TODO: Pass feedback to intelligent retry
-          case try_intelligent_retry(job_id, state) do
+          case try_intelligent_retry(job_id, feedback, state) do
             {:ok, _} -> state
             {:error, _} -> simple_retry(job_id, feedback, state)
           end
@@ -576,8 +575,8 @@ defmodule Hive.Queen do
     end
   end
 
-  defp try_intelligent_retry(job_id, state) do
-    case Hive.Intelligence.Retry.retry_with_strategy(job_id) do
+  defp try_intelligent_retry(job_id, feedback, state) do
+    case Hive.Intelligence.Retry.retry_with_strategy(job_id, feedback) do
       {:ok, new_job} ->
         case check_quest_budget(new_job.quest_id) do
           :ok ->

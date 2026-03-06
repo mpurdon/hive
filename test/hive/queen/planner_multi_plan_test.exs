@@ -152,20 +152,20 @@ defmodule Hive.Queen.PlannerMultiPlanTest do
 
       candidates = [
         %{strategy: "minimal", score: 0.6, tasks: [%{"title" => "Minimal task"}]},
-        %{strategy: "balanced", score: 0.8, tasks: [%{"title" => "Balanced task"}]},
-        %{strategy: "thorough", score: 0.7, tasks: [%{"title" => "Thorough task"}]}
+        %{strategy: "normal", score: 0.8, tasks: [%{"title" => "Normal task"}]},
+        %{strategy: "complex", score: 0.7, tasks: [%{"title" => "Complex task"}]}
       ]
 
       updated =
         quest_record
         |> Map.put(:plan_candidates, candidates)
-        |> Map.put(:tried_plans, [%{strategy: "balanced"}])
+        |> Map.put(:tried_plans, [%{strategy: "normal"}])
 
       Store.put(:quests, updated)
 
       {:ok, fallback} = Planner.select_fallback_plan(quest.id)
-      # Should return thorough (0.7) since balanced was tried
-      assert fallback.strategy == "thorough"
+      # Should return complex (0.7) since normal was tried
+      assert fallback.strategy == "complex"
     end
 
     test "returns error when all candidates tried", %{quest: quest} do
@@ -173,7 +173,7 @@ defmodule Hive.Queen.PlannerMultiPlanTest do
 
       candidates = [
         %{strategy: "minimal", score: 0.6, tasks: []},
-        %{strategy: "balanced", score: 0.8, tasks: []}
+        %{strategy: "normal", score: 0.8, tasks: []}
       ]
 
       updated =
@@ -181,12 +181,35 @@ defmodule Hive.Queen.PlannerMultiPlanTest do
         |> Map.put(:plan_candidates, candidates)
         |> Map.put(:tried_plans, [
           %{strategy: "minimal"},
-          %{strategy: "balanced"}
+          %{strategy: "normal"}
         ])
 
       Store.put(:quests, updated)
 
       assert {:error, :no_fallback} == Planner.select_fallback_plan(quest.id)
+    end
+  end
+
+  describe "strategy_instruction/2" do
+    test "returns empty string for nil name" do
+      assert Planner.strategy_instruction(nil, nil) == ""
+    end
+
+    test "returns instruction with name and hint" do
+      result = Planner.strategy_instruction("minimal", "Bare-minimum impl")
+      assert result =~ "minimal"
+      assert result =~ "Bare-minimum impl"
+      assert result =~ "STRATEGY:"
+    end
+
+    test "works with alternative approach names" do
+      result = Planner.strategy_instruction("electron", "Cross-platform Electron app")
+      assert result =~ "electron"
+      assert result =~ "Cross-platform Electron app"
+    end
+
+    test "returns empty string when hint is not a string" do
+      assert Planner.strategy_instruction("minimal", nil) == ""
     end
   end
 

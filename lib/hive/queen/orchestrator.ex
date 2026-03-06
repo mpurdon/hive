@@ -216,10 +216,26 @@ defmodule Hive.Queen.Orchestrator do
     planning_artifact = Hive.Quests.get_artifact(quest.id, "planning")
 
     with {:ok, _} <- Hive.Quests.transition_phase(quest.id, "implementation", "Planning complete") do
-      # Create real implementation jobs from the planning artifact
+      # Try multi-plan generation to produce 3 scored alternatives
+      # Falls back to raw planning artifact on failure
       case planning_artifact do
-        specs when is_list(specs) ->
-          Planner.create_jobs_from_specs(quest.id, specs)
+        specs when is_list(specs) and specs != [] ->
+          case Planner.generate_candidate_plans(quest.id) do
+            {:ok, best_plan} ->
+              best_tasks = best_plan[:tasks] || best_plan.tasks || []
+
+              if is_list(best_tasks) and best_tasks != [] do
+                Logger.info("Quest #{quest.id}: using multi-plan best candidate (#{best_plan[:strategy]})")
+                Planner.create_jobs_from_specs(quest.id, best_tasks)
+              else
+                Logger.info("Quest #{quest.id}: multi-plan returned empty tasks, using planning artifact")
+                Planner.create_jobs_from_specs(quest.id, specs)
+              end
+
+            {:error, reason} ->
+              Logger.info("Quest #{quest.id}: multi-plan failed (#{inspect(reason)}), using planning artifact")
+              Planner.create_jobs_from_specs(quest.id, specs)
+          end
 
         _ ->
           Logger.warning("Planning artifact is not a list, falling back to basic planning")
