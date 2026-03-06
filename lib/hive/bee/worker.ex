@@ -448,6 +448,7 @@ defmodule Hive.Bee.Worker do
     agent_opts =
       spawn_opts
       |> Keyword.put(:tool_set, tool_set)
+      |> Keyword.put(:include_dynamic, true)
       |> Keyword.put(:on_progress, fn event ->
         send(self(), {:agent_progress, bee_id, event})
       end)

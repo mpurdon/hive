@@ -29,6 +29,7 @@ defmodule Hive.TUI.App do
   @arrow_right key(:arrow_right)
   @arrow_up key(:arrow_up)
   @arrow_down key(:arrow_down)
+  @tab key(:tab)
 
   @impl true
   def init(_context) do
@@ -76,6 +77,16 @@ defmodule Hive.TUI.App do
 
       :tick ->
         refresh_activity(model)
+
+      {:chat_response, {:ok, {:switch_plan, plan_data}, _session_id}} ->
+        strategy = plan_data[:strategy] || plan_data.strategy || "?"
+        score = plan_data[:score] || plan_data.score
+        score_str = if score, do: " (#{Float.round(score, 2)})", else: ""
+        chat = Chat.add_message(model.chat, :system, "Switched to #{strategy}#{score_str} plan.")
+        plan = Plan.load_plan(model.plan, plan_data)
+        # Preserve candidate_index from before load_plan reset it
+        plan = %{plan | candidate_index: model.plan.candidate_index, candidates: model.plan.candidates}
+        %{model | chat: chat, plan: plan, busy: false, chat_scroll: chat_bottom(chat)}
 
       {:chat_response, {:ok, content, session_id}} ->
         sid = session_id || model.session_id
@@ -154,6 +165,13 @@ defmodule Hive.TUI.App do
           %{model | input: input}
         end
 
+      @tab ->
+        if plan_reviewing? and input_empty? and Plan.candidate_count(model.plan) > 1 do
+          handle_switch_candidate(model)
+        else
+          model
+        end
+
       _ ->
         model
     end
@@ -206,6 +224,51 @@ defmodule Hive.TUI.App do
     plan = Plan.dismiss(model.plan)
     chat = Chat.add_message(model.chat, :system, "Plan review cancelled.")
     %{model | plan: plan, chat: chat, chat_scroll: chat_bottom(chat)}
+  end
+
+  defp handle_switch_candidate(model) do
+    plan = Plan.next_candidate(model.plan)
+    quest_id = plan.quest_id
+
+    case Plan.current_strategy(plan) do
+      {strategy, _score} ->
+        chat = Chat.add_message(model.chat, :system, "Switching to #{strategy} plan...")
+        model = %{model | plan: plan, chat: chat, busy: true, chat_scroll: chat_bottom(chat)}
+
+        cmd = Command.new(fn ->
+          result =
+            if Hive.Client.remote?() do
+              Hive.Client.select_plan_candidate(quest_id, strategy)
+            else
+              # Local mode: find candidate from quest record
+              quest_record = Hive.Store.get(:quests, quest_id)
+              candidates = if quest_record, do: Map.get(quest_record, :plan_candidates, []), else: []
+
+              case Enum.find(candidates, fn c -> (c[:strategy] || c.strategy) == strategy end) do
+                nil -> {:error, "candidate not found"}
+                candidate ->
+                  if quest_record do
+                    updated = Map.put(quest_record, :draft_plan, candidate)
+                    Hive.Store.put(:quests, updated)
+                  end
+                  {:ok, candidate}
+              end
+            end
+
+          case result do
+            {:ok, plan_data} ->
+              {:ok, {:switch_plan, plan_data}, nil}
+
+            {:error, reason} ->
+              {:error, inspect(reason)}
+          end
+        end, :chat_response)
+
+        {model, cmd}
+
+      _ ->
+        model
+    end
   end
 
   # Estimate scroll offset to keep latest messages visible.
@@ -349,7 +412,7 @@ defmodule Hive.TUI.App do
     - hive comb list                       (list combs)
     - hive bee list                        (list bees)
     - hive quest list                      (list quests)
-    - hive quest start <id>                (start a quest's pipeline)
+    - hive quest show <id>                 (show quest details)
     - hive status                          (overall hive status)
 
     Workspace: #{cwd}

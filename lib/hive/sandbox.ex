@@ -50,8 +50,7 @@ defmodule Hive.Sandbox do
     cond do
       configured -> configured
       Hive.Sandbox.Bubblewrap.available?() -> Hive.Sandbox.Bubblewrap
-      # On macOS/Darwin, default to Local to avoid breaking flow with unconfigured Docker images
-      match?({:unix, :darwin}, :os.type()) -> Hive.Sandbox.Local
+      Hive.Sandbox.SandboxExec.available?() -> Hive.Sandbox.SandboxExec
       Hive.Sandbox.Docker.available?() -> Hive.Sandbox.Docker
       true -> Hive.Sandbox.Local
     end

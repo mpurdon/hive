@@ -10,7 +10,9 @@ defmodule Hive.TUI.Context.Plan do
             goal: nil,
             sections: [],
             selected: 0,
-            mode: :hidden
+            mode: :hidden,
+            candidates: [],
+            candidate_index: 0
 
   @type section :: %{
           title: String.t(),
@@ -24,7 +26,9 @@ defmodule Hive.TUI.Context.Plan do
           goal: String.t() | nil,
           sections: [section()],
           selected: non_neg_integer(),
-          mode: :hidden | :reviewing | :confirmed | :rejected
+          mode: :hidden | :reviewing | :confirmed | :rejected,
+          candidates: [map()],
+          candidate_index: non_neg_integer()
         }
 
   def new, do: %__MODULE__{}
@@ -34,6 +38,7 @@ defmodule Hive.TUI.Context.Plan do
     quest_id = plan[:quest_id] || plan["quest_id"]
     goal = plan[:goal] || plan["goal"]
     tasks = plan[:tasks] || plan["tasks"] || []
+    candidates = plan[:candidates] || plan["candidates"] || state.candidates
 
     sections =
       tasks
@@ -54,7 +59,9 @@ defmodule Hive.TUI.Context.Plan do
       goal: goal,
       sections: sections,
       selected: 0,
-      mode: :reviewing
+      mode: :reviewing,
+      candidates: candidates,
+      candidate_index: 0
     }
   end
 
@@ -107,8 +114,29 @@ defmodule Hive.TUI.Context.Plan do
     |> Enum.flat_map(& &1.tasks)
   end
 
+  @doc "Cycle to the next candidate plan (wraps around)."
+  def next_candidate(%{candidates: []} = state), do: state
+  def next_candidate(%{candidates: candidates, candidate_index: idx} = state) do
+    next_idx = rem(idx + 1, length(candidates))
+    %{state | candidate_index: next_idx}
+  end
+
+  @doc "Number of candidate plans available."
+  def candidate_count(%{candidates: candidates}), do: length(candidates)
+
+  @doc "Returns {strategy, score} for the current candidate index."
+  def current_strategy(%{candidates: [], candidate_index: _}), do: nil
+  def current_strategy(%{candidates: candidates, candidate_index: idx}) do
+    candidate = Enum.at(candidates, idx)
+    if candidate do
+      strategy = candidate[:strategy] || candidate.strategy
+      score = candidate[:score] || candidate.score
+      {strategy, score}
+    end
+  end
+
   @doc "Reset to hidden state."
   def dismiss(state) do
-    %{state | mode: :hidden, sections: [], selected: 0, quest_id: nil, goal: nil}
+    %{state | mode: :hidden, sections: [], selected: 0, quest_id: nil, goal: nil, candidates: [], candidate_index: 0}
   end
 end

@@ -72,6 +72,7 @@ defmodule Hive.Config.Provider do
     %{
       plugins: %{
         channels: %{},
+        mcp: %{},
         models: %{default: "reqllm", providers: %{}},
         themes: %{default: "default"}
       },

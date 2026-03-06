@@ -24,8 +24,18 @@ defmodule Hive.TUI.Views.Plan do
     end
   end
 
-  defp plan_title(%{quest_id: nil}), do: "Plan"
-  defp plan_title(%{quest_id: id}), do: "Plan: #{String.slice(id, 0, 12)}"
+  defp plan_title(plan) do
+    base = if plan.quest_id, do: "Plan: #{String.slice(plan.quest_id, 0, 12)}", else: "Plan"
+
+    case Plan.current_strategy(plan) do
+      {strategy, score} ->
+        suffix = if Plan.candidate_count(plan) > 1, do: " [Tab: switch]", else: ""
+        "#{base} (#{strategy}, #{Float.round(score, 2)})#{suffix}"
+
+      _ ->
+        base
+    end
+  end
 
   defp render_sections(sections, selected) do
     sections
@@ -94,6 +104,29 @@ defmodule Hive.TUI.Views.Plan do
         ]
 
       plan.mode == :reviewing ->
+        tab_hint =
+          if Plan.candidate_count(plan) > 1 do
+            [
+              label do
+                text(content: " Tab ", color: :cyan)
+                text(content: "switch plan  ", color: :white)
+                text(content: "a ", color: :cyan)
+                text(content: "accept all  ", color: :white)
+                text(content: "q ", color: :cyan)
+                text(content: "cancel", color: :white)
+              end
+            ]
+          else
+            [
+              label do
+                text(content: " a ", color: :cyan)
+                text(content: "accept all  ", color: :white)
+                text(content: "q ", color: :cyan)
+                text(content: "cancel", color: :white)
+              end
+            ]
+          end
+
         [
           label(content: "---", color: :white),
           label do
@@ -103,14 +136,8 @@ defmodule Hive.TUI.Views.Plan do
             text(content: "accept  ", color: :white)
             text(content: "n ", color: :red)
             text(content: "reject  ", color: :white)
-          end,
-          label do
-            text(content: " a ", color: :cyan)
-            text(content: "accept all  ", color: :white)
-            text(content: "q ", color: :cyan)
-            text(content: "cancel", color: :white)
           end
-        ]
+        ] ++ tab_hint
 
       true ->
         []

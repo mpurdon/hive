@@ -62,7 +62,11 @@ defmodule Hive.Runtime.AgentLoop do
 
     tools =
       Keyword.get(opts, :tools) ||
-        ToolBox.tools(working_dir: working_dir, tool_set: Keyword.get(opts, :tool_set, :standard))
+        ToolBox.tools(
+          working_dir: working_dir,
+          tool_set: Keyword.get(opts, :tool_set, :standard),
+          include_dynamic: Keyword.get(opts, :include_dynamic, false)
+        )
 
     system_prompt = build_system_prompt(Keyword.get(opts, :system_prompt), working_dir)
     max_iterations = Keyword.get(opts, :max_iterations, @default_max_iterations)
