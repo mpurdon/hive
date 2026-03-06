@@ -68,7 +68,7 @@ defmodule Hive.CLI do
         end
 
       :skip ->
-        Format.error("Not inside a hive workspace. Run `hive init` first.")
+        IO.puts(Hive.CLI.Errors.format_error(:store_not_initialized))
         System.halt(1)
     end
   end
@@ -360,7 +360,7 @@ defmodule Hive.CLI do
             Format.info("Quest #{quest_id} verification: #{passed} passed, #{failed} failed")
 
           {:error, :not_found} ->
-            Format.error("Quest not found: #{quest_id}")
+            show_not_found_error(:quest, quest_id)
         end
 
       true ->
@@ -1089,8 +1089,7 @@ defmodule Hive.CLI do
         Format.success("Comb \"#{comb.name}\" removed.")
 
       {:error, :not_found} ->
-        Format.error("Comb not found: #{name}")
-        Format.info("Hint: use `hive comb list` to see all combs.")
+        show_not_found_error(:comb, name)
     end
   end
 
@@ -1105,7 +1104,7 @@ defmodule Hive.CLI do
 
       case Hive.Client.use_comb(name) do
         {:ok, comb} -> Format.success("Current comb set to \"#{comb.name}\" (#{comb.id})")
-        {:error, :not_found} -> Format.error("Comb not found: #{name}")
+        {:error, :not_found} -> show_not_found_error(:comb, name)
         {:error, reason} -> Format.error("Failed to set current comb: #{inspect(reason)}")
       end
     else
@@ -1115,8 +1114,7 @@ defmodule Hive.CLI do
             Format.success("Current comb set to \"#{comb.name}\" (#{comb.id})")
 
           {:error, :not_found} ->
-            Format.error("Comb not found: #{name}")
-            Format.info("Hint: use `hive comb list` to see all combs.")
+            show_not_found_error(:comb, name)
 
           {:error, reason} ->
             Format.error("Failed to set current comb: #{inspect(reason)}")
@@ -1124,7 +1122,7 @@ defmodule Hive.CLI do
       else
         case Hive.Comb.list() do
           [] ->
-            Format.error("No combs registered. Use `hive comb add <path>` to register one.")
+            IO.puts(Hive.CLI.Errors.format_error(:no_combs))
 
           combs ->
             IO.puts("Registered combs:")
@@ -1167,8 +1165,7 @@ defmodule Hive.CLI do
         Format.success("Comb renamed to \"#{comb.name}\" (#{comb.id})")
 
       {:error, :not_found} ->
-        Format.error("Comb not found: #{name}")
-        Format.info("Hint: use `hive comb list` to see all combs.")
+        show_not_found_error(:comb, name)
 
       {:error, :name_already_taken} ->
         Format.error("A comb named \"#{new_name}\" already exists.")
@@ -1313,7 +1310,7 @@ defmodule Hive.CLI do
         end
 
       {:error, :not_in_hive} ->
-        Format.error("Not inside a hive workspace. Run `hive init` first.")
+        IO.puts(Hive.CLI.Errors.format_error(:store_not_initialized))
         Format.info("Hint: use `hive init` or `hive init --quick` to create a workspace.")
     end
   end
@@ -1371,10 +1368,10 @@ defmodule Hive.CLI do
           end
         else
           {:error, :not_in_hive} ->
-            Format.error("Not inside a hive workspace. Run `hive init` first.")
+            IO.puts(Hive.CLI.Errors.format_error(:store_not_initialized))
 
           {:error, :not_found} ->
-            Format.error("Comb not found: #{comb_id}")
+            show_not_found_error(:comb, comb_id)
 
           {:error, reason} ->
             Format.error("Failed: #{inspect(reason)}")
@@ -1398,8 +1395,7 @@ defmodule Hive.CLI do
         Format.success("Bee #{bee_id} stopped.")
 
       {:error, :not_found} ->
-        Format.error("Bee not found or not running: #{bee_id}")
-        Format.info("Hint: use `hive bee list` to see all bees.")
+        show_not_found_error(:bee, bee_id)
     end
   end
 
@@ -1431,7 +1427,7 @@ defmodule Hive.CLI do
           Format.success("Bee #{bee_id} marked as completed.")
 
         {:error, _} ->
-          Format.error("Bee not found: #{bee_id}")
+          show_not_found_error(:bee, bee_id)
       end
     end
   end
@@ -1458,7 +1454,7 @@ defmodule Hive.CLI do
           Format.success("Bee #{bee_id} marked as failed: #{reason}")
 
         {:error, _} ->
-          Format.error("Bee not found: #{bee_id}")
+          show_not_found_error(:bee, bee_id)
       end
     end
   end
@@ -1478,7 +1474,7 @@ defmodule Hive.CLI do
       end
     else
       {:error, :not_in_hive} ->
-        Format.error("Not inside a hive workspace. Run `hive init` first.")
+        IO.puts(Hive.CLI.Errors.format_error(:store_not_initialized))
     end
   end
 
@@ -1500,7 +1496,7 @@ defmodule Hive.CLI do
         end
 
       {:error, :not_found} ->
-        Format.error("Bee not found: #{bee_id}")
+        show_not_found_error(:bee, bee_id)
     end
   end
 
@@ -1518,7 +1514,7 @@ defmodule Hive.CLI do
           IO.puts(Hive.Report.format(report))
 
         {:error, :not_found} ->
-          Format.error("Quest not found: #{id}")
+          show_not_found_error(:quest, id)
 
         {:error, reason} ->
           Format.error("Report failed: #{format_error(reason)}")
@@ -1540,7 +1536,7 @@ defmodule Hive.CLI do
           Format.success("All bee branches merged into #{branch}")
 
         {:error, :not_found} ->
-          Format.error("Quest not found: #{id}")
+          show_not_found_error(:quest, id)
 
         {:error, :no_cells} ->
           Format.error("No active cells to merge for this quest.")
@@ -1567,8 +1563,7 @@ defmodule Hive.CLI do
         Format.success("Quest \"#{quest.name}\" closed. Associated cells removed.")
 
       {:error, :not_found} ->
-        Format.error("Quest not found: #{id}")
-        Format.info("Hint: use `hive quest list` to see all quests.")
+        show_not_found_error(:quest, id)
     end
   end
 
@@ -1630,8 +1625,7 @@ defmodule Hive.CLI do
         Format.success("Quest #{id} removed.")
 
       {:error, :not_found} ->
-        Format.error("Quest not found: #{id}")
-        Format.info("Hint: use `hive quest list` to see all quests.")
+        show_not_found_error(:quest, id)
     end
   end
 
@@ -1730,8 +1724,7 @@ defmodule Hive.CLI do
         end
 
       {:error, :not_found} ->
-        Format.error("Quest not found: #{id}")
-        Format.info("Hint: use `hive quest list` to see all quests.")
+        show_not_found_error(:quest, id)
     end
   end
 
@@ -1786,7 +1779,7 @@ defmodule Hive.CLI do
         end
 
       {:error, :not_found} ->
-        Format.error("Job not found: #{id}")
+        show_not_found_error(:job, id)
         Format.info("Hint: use `hive jobs list` to see all jobs.")
     end
   end
@@ -1831,7 +1824,7 @@ defmodule Hive.CLI do
         Format.success("Job \"#{job.title}\" reset to #{job.status} (#{job.id})")
 
       {:error, :not_found} ->
-        Format.error("Job not found: #{job_id}")
+        show_not_found_error(:job, job_id)
 
       {:error, :invalid_transition} ->
         Format.error("Job cannot be reset from its current status.")
@@ -2003,8 +1996,7 @@ defmodule Hive.CLI do
         Format.success("Handoff created for #{bee_id} (waggle #{waggle.id})")
 
       {:error, :bee_not_found} ->
-        Format.error("Bee not found: #{bee_id}")
-        Format.info("Hint: use `hive bee list` to see all bees.")
+        show_not_found_error(:bee, bee_id)
 
       {:error, reason} ->
         Format.error("Handoff failed: #{inspect(reason)}")
@@ -2204,7 +2196,7 @@ defmodule Hive.CLI do
           end
 
         {:error, :not_found} ->
-          Format.error("Bee not found: #{bee_id}")
+          show_not_found_error(:bee, bee_id)
       end
     else
       results = Hive.Conflict.check_all_active()
@@ -2274,7 +2266,7 @@ defmodule Hive.CLI do
           Format.error("No cell found for bee #{bee_id}")
 
         is_nil(comb) ->
-          Format.error("Comb not found")
+          show_not_found_error(:comb, "unknown")
 
         is_nil(Map.get(comb, :github_owner)) || is_nil(Map.get(comb, :github_repo)) ->
           Format.error(
@@ -2313,7 +2305,7 @@ defmodule Hive.CLI do
             end
 
           {:error, _} ->
-            Format.error("Comb not found: #{comb_id}")
+            show_not_found_error(:comb, comb_id)
         end
 
       {:error, :no_comb} ->
@@ -2336,7 +2328,7 @@ defmodule Hive.CLI do
             end
 
           {:error, _} ->
-            Format.error("Comb not found: #{comb_id}")
+            show_not_found_error(:comb, comb_id)
         end
 
       {:error, :no_comb} ->
@@ -2656,6 +2648,19 @@ defmodule Hive.CLI do
   def format_error(reason) when is_binary(reason), do: reason
   def format_error(reason), do: inspect(reason)
 
+  # Uses CLI.Errors for rich, contextual not-found messages with suggestions.
+  defp show_not_found_error(:bee, id),
+    do: IO.puts(Hive.CLI.Errors.format_error(:bee_not_found, %{bee_id: id}))
+
+  defp show_not_found_error(:quest, id),
+    do: IO.puts(Hive.CLI.Errors.format_error(:quest_not_found, %{quest_id: id}))
+
+  defp show_not_found_error(:job, id),
+    do: IO.puts(Hive.CLI.Errors.format_error(:job_not_found, %{job_id: id}))
+
+  defp show_not_found_error(:comb, id),
+    do: IO.puts(Hive.CLI.Errors.format_error(:comb_not_found, %{comb_id: id}))
+
   defp resolve_comb_id(explicit) when is_binary(explicit), do: {:ok, explicit}
 
   defp resolve_comb_id(nil) do
@@ -2683,14 +2688,14 @@ defmodule Hive.CLI do
         end
 
       {:error, :not_in_hive} ->
-        Format.error("Not inside a hive workspace.")
+        IO.puts(Hive.CLI.Errors.format_error(:store_not_initialized))
     end
   end
 
   defp do_prime_bee(bee_id) do
     case Hive.Prime.prime(:bee, bee_id) do
       {:ok, markdown} -> IO.puts(markdown)
-      {:error, :bee_not_found} -> Format.error("Bee not found: #{bee_id}")
+      {:error, :bee_not_found} -> show_not_found_error(:bee, bee_id)
       {:error, reason} -> Format.error("Prime failed: #{inspect(reason)}")
     end
   end

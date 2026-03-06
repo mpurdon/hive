@@ -195,14 +195,9 @@ defmodule Hive.TUI.App do
         {:error, reason} ->
           # Fallback to local if not remote
           unless Hive.Client.remote?() do
-            case Hive.Queen.Planner.create_jobs_from_specs(quest_id, specs) do
-              {:ok, jobs} ->
-                Hive.Quests.store_artifact(quest_id, "planning", specs)
-                {:ok, "Plan confirmed. #{length(jobs)} job(s) created.", nil}
-
-              {:error, inner} ->
-                {:error, inspect(inner)}
-            end
+            {:ok, jobs} = Hive.Queen.Planner.create_jobs_from_specs(quest_id, specs)
+            Hive.Quests.store_artifact(quest_id, "planning", specs)
+            {:ok, "Plan confirmed. #{length(jobs)} job(s) created.", nil}
           else
             {:error, inspect(reason)}
           end

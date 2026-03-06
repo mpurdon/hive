@@ -42,10 +42,6 @@ defmodule Hive.Dashboard.SmokeTest do
     :ok
   end
 
-  # These smoke tests require the Dashboard LiveViews to render successfully.
-  # They are skipped because the Dashboard.Endpoint lacks render_errors config,
-  # causing unrelated 500-page rendering failures that mask LiveView errors.
-  @tag :skip
   test "dashboard returns 200 OK with Hive HTML" do
     conn =
       :get
@@ -57,7 +53,6 @@ defmodule Hive.Dashboard.SmokeTest do
     assert String.contains?(conn.resp_body, "<html")
   end
 
-  @tag :skip
   test "response includes navigation links" do
     conn =
       :get

@@ -174,9 +174,9 @@ defmodule Hive.Observability.Metrics do
 
     %{
       total: length(quests),
-      active: Enum.count(quests, &(&1.status == "active")),
-      completed: Enum.count(quests, &(&1.status == "completed")),
-      failed: Enum.count(quests, &(&1.status == "failed"))
+      active: Enum.count(quests, &(Map.get(&1, :status) == "active")),
+      completed: Enum.count(quests, &(Map.get(&1, :status) == "completed")),
+      failed: Enum.count(quests, &(Map.get(&1, :status) == "failed"))
     }
   end
 
@@ -185,8 +185,8 @@ defmodule Hive.Observability.Metrics do
 
     %{
       total: length(bees),
-      active: Enum.count(bees, &(&1.status == "active")),
-      idle: Enum.count(bees, &(&1.status == "idle"))
+      active: Enum.count(bees, &(Map.get(&1, :status) == "active")),
+      idle: Enum.count(bees, &(Map.get(&1, :status) == "idle"))
     }
   end
 

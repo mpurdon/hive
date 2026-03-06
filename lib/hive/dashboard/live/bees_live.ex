@@ -66,12 +66,12 @@ defmodule Hive.Dashboard.BeesLive do
               <%= for bee <- @bees do %>
                 <tr>
                   <td style="width:1rem">
-                    <span style={"display:inline-block; width:8px; height:8px; border-radius:50%; background:#{status_dot_color(bee.status)}"} class={if bee.status == "working", do: "pulse"}></span>
+                    <span style={"display:inline-block; width:8px; height:8px; border-radius:50%; background:#{status_dot_color(Map.get(bee, :status, "unknown"))}"} class={if Map.get(bee, :status) == "working", do: "pulse"}></span>
                   </td>
                   <td style="font-family:monospace; font-size:0.8rem">{bee.id}</td>
-                  <td>{bee.name}</td>
-                  <td><span class={"badge #{status_badge(bee.status)}"}>{bee.status}</span></td>
-                  <td style="font-family:monospace; font-size:0.8rem">{bee.job_id || "-"}</td>
+                  <td>{Map.get(bee, :name, "-")}</td>
+                  <td><span class={"badge #{status_badge(Map.get(bee, :status, "unknown"))}"}>{Map.get(bee, :status, "unknown")}</span></td>
+                  <td style="font-family:monospace; font-size:0.8rem">{Map.get(bee, :job_id, "-")}</td>
                   <td style="font-size:0.8rem">{Map.get(bee, :assigned_model, "-")}</td>
                   <td>
                     <%= if Map.has_key?(bee, :context_percentage) do %>

@@ -38,8 +38,8 @@ defmodule Hive.Dashboard.OverviewLive do
     cost_summary = Hive.Costs.summary()
     recent_waggles = Hive.Waggle.list(limit: 5)
 
-    active_bees = Enum.count(bees, &(&1.status in ["working", "starting"]))
-    active_quests = Enum.count(quests, &(&1.status == "active"))
+    active_bees = Enum.count(bees, &(Map.get(&1, :status) in ["working", "starting"]))
+    active_quests = Enum.count(quests, &(Map.get(&1, :status) == "active"))
     
     # Context monitoring
     bees_with_context = Enum.filter(bees, &Map.has_key?(&1, :context_percentage))
@@ -54,7 +54,7 @@ defmodule Hive.Dashboard.OverviewLive do
     jobs = Hive.Jobs.list()
     verified_jobs = Enum.count(jobs, &(Map.get(&1, :verification_status) == "passed"))
     failed_verification = Enum.count(jobs, &(Map.get(&1, :verification_status) == "failed"))
-    pending_verification = Enum.count(jobs, &(Map.get(&1, :verification_status) == "pending" and &1.status == "done"))
+    pending_verification = Enum.count(jobs, &(Map.get(&1, :verification_status) == "pending" and Map.get(&1, :status) == "done"))
 
     # Quest phases
     research_quests = Enum.count(quests, &(Map.get(&1, :current_phase) == "research"))

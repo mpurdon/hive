@@ -30,6 +30,7 @@ defmodule Hive.Application do
       {Phoenix.PubSub, name: Hive.PubSub},
       {Hive.Store, data_dir: Application.get_env(:hive, :store_dir, Path.join(File.cwd!, ".hive/store"))},
       {Registry, keys: :unique, name: Hive.Registry},
+      {Hive.RateLimiter, name: Hive.RateLimiter, max_tokens: 30, refill_rate: 30, refill_interval: 1_000},
       # The Queen is the brain of the factory - starts automatically now
       {Hive.Queen, hive_root: Application.get_env(:hive, :store_dir, File.cwd!)},
       {Hive.Ingestion.Watchdog, hive_root: File.cwd!()},

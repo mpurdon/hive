@@ -102,11 +102,11 @@ defmodule Hive.Costs do
 
     %{
       total_cost: total(costs),
-      total_input_tokens: costs |> Enum.map(& &1.input_tokens) |> Enum.sum(),
-      total_output_tokens: costs |> Enum.map(& &1.output_tokens) |> Enum.sum(),
-      by_model: group_costs_by(costs, & &1.model),
-      by_bee: group_costs_by(costs, & &1.bee_id),
-      by_category: group_costs_by(costs, & &1.category)
+      total_input_tokens: costs |> Enum.map(&Map.get(&1, :input_tokens, 0)) |> Enum.sum(),
+      total_output_tokens: costs |> Enum.map(&Map.get(&1, :output_tokens, 0)) |> Enum.sum(),
+      by_model: group_costs_by(costs, &Map.get(&1, :model)),
+      by_bee: group_costs_by(costs, &Map.get(&1, :bee_id)),
+      by_category: group_costs_by(costs, &Map.get(&1, :category, "unknown"))
     }
   end
 

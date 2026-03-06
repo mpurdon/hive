@@ -126,7 +126,7 @@ defmodule Hive.Bee.Worker do
     hive_root = Keyword.fetch!(opts, :hive_root)
 
     # Set correlation IDs for structured logging
-    Logger.metadata(bee_id: bee_id, job_id: job_id, comb_id: comb_id)
+    Hive.Logger.set_bee_context(bee_id, job_id)
 
     state = %{
       bee_id: bee_id,
@@ -308,6 +308,12 @@ defmodule Hive.Bee.Worker do
   # -- Private: provisioning ---------------------------------------------------
 
   defp provision(state) do
+    # Rate limit agent spawning to avoid API throttling
+    case Hive.RateLimiter.acquire(Hive.RateLimiter) do
+      :ok -> :ok
+      {:ok, delay_ms} -> Process.sleep(delay_ms)
+    end
+
     if Keyword.get(state.opts, :revive, false) do
       provision_revive(state)
     else
@@ -320,7 +326,7 @@ defmodule Hive.Bee.Worker do
     is_phase_job =
       case Hive.Jobs.get(state.job_id) do
         {:ok, job} ->
-          Logger.metadata(quest_id: job.quest_id)
+          Hive.Logger.set_bee_context(state.bee_id, state.job_id, job.quest_id)
           Map.get(job, :phase_job, false)
 
         _ ->

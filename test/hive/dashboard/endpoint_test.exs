@@ -36,10 +36,6 @@ defmodule Hive.Dashboard.EndpointTest do
       assert Process.whereis(Hive.Dashboard.Endpoint) != nil
     end
 
-    # LiveView rendering tests require Hive.ErrorView to be defined in the
-    # Dashboard.Endpoint config (render_errors). Since we cannot modify lib code,
-    # these tests are skipped until the endpoint config is fixed.
-    @tag :skip
     test "serves the overview page at /" do
       conn = request(:get, "/")
 
@@ -48,7 +44,6 @@ defmodule Hive.Dashboard.EndpointTest do
       assert String.contains?(conn.resp_body, "Dashboard Overview")
     end
 
-    @tag :skip
     test "serves the quests page at /quests" do
       conn = request(:get, "/quests")
 
@@ -56,7 +51,6 @@ defmodule Hive.Dashboard.EndpointTest do
       assert String.contains?(conn.resp_body, "Quests")
     end
 
-    @tag :skip
     test "serves the bees page at /bees" do
       conn = request(:get, "/bees")
 
@@ -78,7 +72,6 @@ defmodule Hive.Dashboard.EndpointTest do
       assert String.contains?(conn.resp_body, "Waggle Messages")
     end
 
-    @tag :skip
     test "includes CDN script tags for LiveView JS" do
       conn = request(:get, "/")
 
@@ -87,14 +80,12 @@ defmodule Hive.Dashboard.EndpointTest do
       assert String.contains?(conn.resp_body, "LiveSocket")
     end
 
-    @tag :skip
     test "includes CSRF meta tag" do
       conn = request(:get, "/")
 
       assert String.contains?(conn.resp_body, "csrf-token")
     end
 
-    @tag :skip
     test "includes inline CSS (no external stylesheet)" do
       conn = request(:get, "/")
 

@@ -96,8 +96,8 @@ defmodule Hive.Dashboard.QuestsLive do
                 <tr class="detail-toggle" phx-click="toggle" phx-value-id={quest.id}>
                   <td style="width:1.5rem">{if MapSet.member?(@expanded, quest.id), do: "v", else: ">"}</td>
                   <td style="font-family:monospace; font-size:0.8rem">{quest.id}</td>
-                  <td>{quest.name}</td>
-                  <td><span class={"badge #{status_badge(quest.status)}"}>{quest.status}</span></td>
+                  <td>{Map.get(quest, :name, quest.goal)}</td>
+                  <td><span class={"badge #{status_badge(Map.get(quest, :status, "unknown"))}"}>{Map.get(quest, :status, "unknown")}</span></td>
                   <td><span class={"badge #{phase_badge(Map.get(quest, :current_phase, "pending"))}"}>
                     {Map.get(quest, :current_phase, "pending")}
                   </span></td>
@@ -123,7 +123,7 @@ defmodule Hive.Dashboard.QuestsLive do
                                 <tr>
                                   <td style="font-family:monospace; font-size:0.8rem">{job.id}</td>
                                   <td>{job.title}</td>
-                                  <td><span class={"badge #{status_badge(job.status)}"}>{job.status}</span></td>
+                                  <td><span class={"badge #{status_badge(Map.get(job, :status, "unknown"))}"}>{Map.get(job, :status, "unknown")}</span></td>
                                   <td>
                                     <%= if Map.get(job, :verification_status) do %>
                                       <span class={"badge #{verification_badge(job.verification_status)}"}>

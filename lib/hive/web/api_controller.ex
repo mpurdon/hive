@@ -267,15 +267,9 @@ defmodule Hive.Web.ApiController do
   def confirm_plan(conn, %{"id" => quest_id} = params) do
     specs = params["specs"] || []
 
-    case Hive.Queen.Planner.create_jobs_from_specs(quest_id, specs) do
-      {:ok, jobs} ->
-        # Store as planning artifact
-        Hive.Quests.store_artifact(quest_id, "planning", specs)
-        json(conn, %{data: %{quest_id: quest_id, jobs_created: length(jobs)}})
-
-      {:error, reason} ->
-        error(conn, 422, reason)
-    end
+    {:ok, jobs} = Hive.Queen.Planner.create_jobs_from_specs(quest_id, specs)
+    Hive.Quests.store_artifact(quest_id, "planning", specs)
+    json(conn, %{data: %{quest_id: quest_id, jobs_created: length(jobs)}})
   end
 
   def reject_plan(conn, %{"id" => quest_id} = params) do
@@ -518,23 +512,19 @@ defmodule Hive.Web.ApiController do
           if params["category"], do: Map.put(a, :category, params["category"]), else: a
         end)
 
-      case Hive.Costs.record(bee_id, attrs) do
-        {:ok, cost} ->
-          json(conn, %{
-            data: %{
-              id: cost.id,
-              bee_id: cost.bee_id,
-              cost_usd: cost.cost_usd,
-              input_tokens: cost.input_tokens,
-              output_tokens: cost.output_tokens,
-              model: cost.model,
-              category: cost.category
-            }
-          })
+      {:ok, cost} = Hive.Costs.record(bee_id, attrs)
 
-        {:error, reason} ->
-          error(conn, 422, reason)
-      end
+      json(conn, %{
+        data: %{
+          id: cost.id,
+          bee_id: cost.bee_id,
+          cost_usd: cost.cost_usd,
+          input_tokens: cost.input_tokens,
+          output_tokens: cost.output_tokens,
+          model: cost.model,
+          category: cost.category
+        }
+      })
     end
   end
 
@@ -608,9 +598,15 @@ defmodule Hive.Web.ApiController do
   end
 
   defp atomize_keys(map) do
-    Map.new(map, fn {k, v} -> {String.to_existing_atom(k), v} end)
-  rescue
-    ArgumentError -> Map.new(map, fn {k, v} -> {String.to_atom(k), v} end)
+    map
+    |> Enum.flat_map(fn {k, v} ->
+      try do
+        [{String.to_existing_atom(k), v}]
+      rescue
+        ArgumentError -> []
+      end
+    end)
+    |> Map.new()
   end
 
   defp serialize_quest(q) do

@@ -35,11 +35,6 @@ defmodule Hive.Web.DashboardTest do
     :ok
   end
 
-  # The LiveView mount calls Hive.Observability.Metrics.collect_metrics/0 which
-  # iterates over Store quests assuming they all have a :status field. When the
-  # persistent Store contains stale/test quests without :status, mount crashes.
-  # Skipped until the metrics code is made resilient to incomplete data.
-  @tag :skip
   test "dashboard renders successfully" do
     conn = Phoenix.ConnTest.build_conn()
     {:ok, _view, html} = live(conn, "/")

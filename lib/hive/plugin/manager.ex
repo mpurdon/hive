@@ -26,6 +26,9 @@ defmodule Hive.Plugin.Manager do
     Hive.Plugin.Builtin.Commands.PluginCmd,
     Hive.Plugin.Builtin.Commands.Council
   ]
+  @builtin_channels [
+    Hive.Plugin.Builtin.Channels.Telegram
+  ]
   @builtin_tool_providers [
     Hive.Plugin.Builtin.ToolProviders.ProjectContext,
     Hive.Plugin.Builtin.ToolProviders.Workspace
@@ -140,6 +143,7 @@ defmodule Hive.Plugin.Manager do
     for module <- @builtin_models, do: do_load(module)
     for module <- @builtin_themes, do: do_load(module)
     for module <- @builtin_commands, do: do_load(module)
+    for module <- @builtin_channels, do: do_load(module)
     for module <- @builtin_tool_providers, do: do_load(module)
     load_external_mcp_servers()
   end

@@ -84,7 +84,7 @@ defmodule Hive.Queen do
 
   @impl true
   def init(%{hive_root: hive_root}) do
-    Logger.metadata(component: :queen)
+    Hive.Logger.set_queen_context()
 
     # Subscribe to waggle messages addressed to the queen
     Hive.Waggle.subscribe("waggle:queen")

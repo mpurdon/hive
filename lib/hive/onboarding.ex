@@ -81,10 +81,7 @@ defmodule Hive.Onboarding do
     ]
     
     case Comb.add(path, comb_opts) do
-      {:ok, comb} -> 
-        # Store metadata separately for now
-        # TODO: Add metadata field to comb schema
-        {:ok, comb}
+      {:ok, comb} -> {:ok, comb}
       {:error, reason} -> {:error, "Failed to create comb: #{inspect(reason)}"}
     end
   end
@@ -93,13 +90,8 @@ defmodule Hive.Onboarding do
   defp suggest_merge_strategy(%{test_framework: nil}), do: :manual
   defp suggest_merge_strategy(_), do: :auto_merge
 
-  defp maybe_generate_research(_comb, opts) do
-    if Keyword.get(opts, :skip_research, false) do
-      {:ok, :skipped}
-    else
-      # Research generation will be added when we integrate with Phase 2
-      {:ok, :skipped}
-    end
+  defp maybe_generate_research(_comb, _opts) do
+    {:ok, :skipped}
   end
 
   @doc """

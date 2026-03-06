@@ -6,7 +6,10 @@ defmodule Hive.VerificationTest do
   setup do
     Hive.Test.StoreHelper.ensure_infrastructure()
     Hive.Test.StoreHelper.stop_store()
-    {:ok, _} = Store.start_link(data_dir: System.tmp_dir!())
+    tmp_dir = Path.join(System.tmp_dir!(), "hive_verify_#{System.unique_integer([:positive])}")
+    File.mkdir_p!(tmp_dir)
+    {:ok, _} = Store.start_link(data_dir: tmp_dir)
+    on_exit(fn -> File.rm_rf!(tmp_dir) end)
 
     # Create test data
     {:ok, comb} = Store.insert(:combs, %{name: "test-comb", path: "/tmp/test"})
