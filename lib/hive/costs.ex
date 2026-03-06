@@ -28,6 +28,8 @@ defmodule Hive.Costs do
       |> maybe_set_recorded_at()
       |> maybe_calculate_cost()
 
+    category = attrs[:category] || derive_category(attrs[:bee_id])
+
     record = %{
       bee_id: attrs[:bee_id],
       input_tokens: attrs[:input_tokens] || 0,
@@ -36,6 +38,7 @@ defmodule Hive.Costs do
       cache_write_tokens: attrs[:cache_write_tokens] || 0,
       cost_usd: attrs[:cost_usd],
       model: attrs[:model],
+      category: category,
       recorded_at: attrs[:recorded_at]
     }
 
@@ -102,7 +105,8 @@ defmodule Hive.Costs do
       total_input_tokens: costs |> Enum.map(& &1.input_tokens) |> Enum.sum(),
       total_output_tokens: costs |> Enum.map(& &1.output_tokens) |> Enum.sum(),
       by_model: group_costs_by(costs, & &1.model),
-      by_bee: group_costs_by(costs, & &1.bee_id)
+      by_bee: group_costs_by(costs, & &1.bee_id),
+      by_category: group_costs_by(costs, & &1.category)
     }
   end
 
@@ -129,6 +133,37 @@ defmodule Hive.Costs do
   end
 
   # -- Private helpers ---------------------------------------------------------
+
+  @planning_phases ~w(research requirements design planning)
+  @verification_phases ~w(review validation)
+
+  defp derive_category("queen"), do: "orchestration"
+
+  defp derive_category(bee_id) when is_binary(bee_id) do
+    with {:ok, bee} <- Hive.Bees.get(bee_id),
+         job_id when is_binary(job_id) <- Map.get(bee, :job_id),
+         {:ok, job} <- Hive.Jobs.get(job_id) do
+      cond do
+        is_list(job[:council_experts]) and job[:council_experts] != [] ->
+          "council"
+
+        Map.get(job, :phase_job, false) and job[:phase] in @planning_phases ->
+          "planning"
+
+        Map.get(job, :phase_job, false) and job[:phase] in @verification_phases ->
+          "verification"
+
+        true ->
+          "implementation"
+      end
+    else
+      _ -> "unknown"
+    end
+  rescue
+    _ -> "unknown"
+  end
+
+  defp derive_category(_), do: "unknown"
 
   # Fallback pricing table — ensures existing tests pass without Plugin.Manager running
   defp default_pricing do

@@ -181,7 +181,7 @@ defmodule Hive.CostsTest do
   end
 
   describe "summary/0" do
-    test "returns aggregate cost data", %{bee: bee} do
+    test "returns aggregate cost data with by_category", %{bee: bee} do
       {:ok, _} =
         Costs.record(bee.id, %{
           input_tokens: 1000,
@@ -195,14 +195,152 @@ defmodule Hive.CostsTest do
       assert summary.total_output_tokens >= 500
       assert is_map(summary.by_model)
       assert is_map(summary.by_bee)
+      assert is_map(summary.by_category)
     end
 
     test "returns zeroes when no costs recorded" do
-      # Clear any costs from other tests by checking empty state
       summary = Costs.summary()
       assert is_float(summary.total_cost)
       assert is_integer(summary.total_input_tokens)
       assert is_integer(summary.total_output_tokens)
+    end
+  end
+
+  describe "category derivation" do
+    test "queen bee_id maps to orchestration" do
+      {:ok, cost} = Costs.record("queen", %{input_tokens: 100, output_tokens: 50})
+      assert cost.category == "orchestration"
+    end
+
+    test "explicit category overrides auto-derivation" do
+      {:ok, cost} =
+        Costs.record("queen", %{input_tokens: 100, output_tokens: 50, category: "planning"})
+
+      assert cost.category == "planning"
+    end
+
+    test "unknown bee falls back to unknown" do
+      {:ok, cost} =
+        Costs.record("bee-nonexistent-#{:erlang.unique_integer([:positive])}", %{
+          input_tokens: 100,
+          output_tokens: 50
+        })
+
+      assert cost.category == "unknown"
+    end
+
+    test "phase job research maps to planning", %{bee: bee} do
+      {:ok, comb} =
+        Store.insert(:combs, %{name: "cat-comb-#{:erlang.unique_integer([:positive])}"})
+
+      {:ok, quest} =
+        Store.insert(:quests, %{
+          name: "cat-quest-#{:erlang.unique_integer([:positive])}",
+          status: "pending"
+        })
+
+      {:ok, job} =
+        Hive.Jobs.create(%{
+          title: "Research task",
+          quest_id: quest.id,
+          comb_id: comb.id,
+          bee_id: bee.id,
+          phase_job: true,
+          phase: "research"
+        })
+
+      # Update bee with job_id
+      Store.put(:bees, Map.put(bee, :job_id, job.id))
+
+      {:ok, cost} = Costs.record(bee.id, %{input_tokens: 100, output_tokens: 50})
+      assert cost.category == "planning"
+    end
+
+    test "phase job validation maps to verification", %{bee: bee} do
+      {:ok, comb} =
+        Store.insert(:combs, %{name: "cat-comb-#{:erlang.unique_integer([:positive])}"})
+
+      {:ok, quest} =
+        Store.insert(:quests, %{
+          name: "cat-quest-#{:erlang.unique_integer([:positive])}",
+          status: "pending"
+        })
+
+      {:ok, job} =
+        Hive.Jobs.create(%{
+          title: "Validation task",
+          quest_id: quest.id,
+          comb_id: comb.id,
+          bee_id: bee.id,
+          phase_job: true,
+          phase: "validation"
+        })
+
+      Store.put(:bees, Map.put(bee, :job_id, job.id))
+
+      {:ok, cost} = Costs.record(bee.id, %{input_tokens: 100, output_tokens: 50})
+      assert cost.category == "verification"
+    end
+
+    test "job with council_experts maps to council", %{bee: bee} do
+      {:ok, comb} =
+        Store.insert(:combs, %{name: "cat-comb-#{:erlang.unique_integer([:positive])}"})
+
+      {:ok, quest} =
+        Store.insert(:quests, %{
+          name: "cat-quest-#{:erlang.unique_integer([:positive])}",
+          status: "pending"
+        })
+
+      {:ok, job} =
+        Hive.Jobs.create(%{
+          title: "Council design task",
+          quest_id: quest.id,
+          comb_id: comb.id,
+          bee_id: bee.id,
+          phase_job: true,
+          phase: "design",
+          council_experts: ["security", "performance"]
+        })
+
+      Store.put(:bees, Map.put(bee, :job_id, job.id))
+
+      {:ok, cost} = Costs.record(bee.id, %{input_tokens: 100, output_tokens: 50})
+      assert cost.category == "council"
+    end
+
+    test "non-phase job maps to implementation", %{bee: bee} do
+      {:ok, comb} =
+        Store.insert(:combs, %{name: "cat-comb-#{:erlang.unique_integer([:positive])}"})
+
+      {:ok, quest} =
+        Store.insert(:quests, %{
+          name: "cat-quest-#{:erlang.unique_integer([:positive])}",
+          status: "pending"
+        })
+
+      {:ok, job} =
+        Hive.Jobs.create(%{
+          title: "Implementation task",
+          quest_id: quest.id,
+          comb_id: comb.id,
+          bee_id: bee.id,
+          phase_job: false
+        })
+
+      Store.put(:bees, Map.put(bee, :job_id, job.id))
+
+      {:ok, cost} = Costs.record(bee.id, %{input_tokens: 100, output_tokens: 50})
+      assert cost.category == "implementation"
+    end
+
+    test "summary includes by_category grouping" do
+      {:ok, _} =
+        Costs.record("queen", %{input_tokens: 500, output_tokens: 250})
+
+      summary = Costs.summary()
+      assert Map.has_key?(summary.by_category, "orchestration")
+      assert summary.by_category["orchestration"].input_tokens == 500
     end
   end
 end
