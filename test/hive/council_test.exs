@@ -18,6 +18,7 @@ defmodule Hive.CouncilTest do
     hive_dir = Path.join(hive_root, ".hive")
     councils_dir = Path.join(hive_dir, "councils")
     File.mkdir_p!(councils_dir)
+    File.write!(Path.join(hive_dir, "config.toml"), "")
     System.put_env("HIVE_PATH", hive_root)
 
     on_exit(fn ->

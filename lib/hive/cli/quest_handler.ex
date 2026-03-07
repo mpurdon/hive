@@ -33,19 +33,24 @@ defmodule Hive.CLI.QuestHandler do
           Format.error("Failed to create quest: #{inspect(reason)}")
       end
     else
-      discovery? = goal == nil or goal == ""
+      goal =
+        if goal == nil or goal == "" do
+          answer = IO.gets("What do you want to build? ") |> String.trim()
+          if answer == "", do: System.halt(0), else: answer
+        else
+          goal
+        end
 
-      {quest_result, _comb_id} =
+      quest_result =
         case helpers.resolve_comb_id.(helpers.result_get.(result, :options, :comb)) do
-          {:ok, cid} -> {Hive.Quests.create(%{goal: goal || "New quest", comb_id: cid}), cid}
-          {:error, :no_comb} -> {Hive.Quests.create(%{goal: goal || "New quest"}), nil}
+          {:ok, cid} -> Hive.Quests.create(%{goal: goal, comb_id: cid})
+          {:error, :no_comb} -> Hive.Quests.create(%{goal: goal})
         end
 
       case quest_result do
         {:ok, quest} ->
           Format.success("Quest created: #{quest.name} (#{quest.id})")
-          opts = if discovery?, do: [interactive_goal: true], else: []
-          Hive.CLI.PlanHandler.start_interactive_planning(quest, opts)
+          Hive.CLI.PlanHandler.start_interactive_planning(quest)
 
         {:error, reason} ->
           Format.error("Failed to create quest: #{inspect(reason)}")

@@ -142,7 +142,7 @@ defmodule Hive.CLI do
   defp expand_defaults(argv), do: argv
 
   # Commands that manage their own store lifecycle or don't need the store.
-  @no_auto_store [[:init], [:version], [:server]]
+  @no_auto_store [[:version], [:server]]
 
   defp maybe_ensure_store(subcommand_path) do
     unless subcommand_path in @no_auto_store do
@@ -199,7 +199,27 @@ defmodule Hive.CLI do
         end
 
       {:error, :not_in_hive} ->
-        :skip
+        prompt_init()
+    end
+  end
+
+  defp prompt_init do
+    IO.puts("hive v#{Hive.version()}")
+    IO.puts("")
+    answer = IO.gets("No hive workspace found. Initialize one here? [y/n] ") |> String.trim() |> String.downcase()
+
+    if answer in ["y", "yes"] do
+      case Hive.Init.init(".", force: false) do
+        {:ok, expanded} ->
+          Format.success("Hive initialized at #{expanded}")
+          ensure_store()
+
+        {:error, reason} ->
+          Format.error("Init failed: #{inspect(reason)}")
+          System.halt(1)
+      end
+    else
+      System.halt(0)
     end
   end
 
@@ -910,28 +930,6 @@ defmodule Hive.CLI do
     end
   end
 
-  defp dispatch([:init], result) do
-    IO.puts("hive v#{Hive.version()}")
-    path = result_get(result, :args, :path) || "."
-    force? = result_get(result, :flags, :force) || false
-    quick? = result_get(result, :flags, :quick) || false
-
-    if quick? do
-      do_quick_init(path, force?)
-    else
-      case Hive.Init.init(path, force: force?) do
-        {:ok, expanded} ->
-          Format.success("Hive initialized at #{expanded}")
-
-        {:error, :already_initialized} ->
-          Format.error("Already initialized. Use --force to reinitialize.")
-
-        {:error, reason} ->
-          Format.error("Init failed: #{inspect(reason)}")
-      end
-    end
-  end
-
   defp dispatch([:comb, :add], result) do
     path = result_get(result, :args, :path)
 
@@ -1592,19 +1590,23 @@ defmodule Hive.CLI do
           Format.error("Failed to create quest: #{inspect(reason)}")
       end
     else
-      discovery? = goal == nil or goal == ""
+      goal = if goal == nil or goal == "" do
+        answer = IO.gets("What do you want to build? ") |> String.trim()
+        if answer == "", do: System.halt(0), else: answer
+      else
+        goal
+      end
 
       quest_result =
         case resolve_comb_id(result_get(result, :options, :comb)) do
-          {:ok, cid} -> Hive.Quests.create(%{goal: goal || "New quest", comb_id: cid})
-          {:error, :no_comb} -> Hive.Quests.create(%{goal: goal || "New quest"})
+          {:ok, cid} -> Hive.Quests.create(%{goal: goal, comb_id: cid})
+          {:error, :no_comb} -> Hive.Quests.create(%{goal: goal})
         end
 
       case quest_result do
         {:ok, quest} ->
           Format.success("Quest \"#{quest.name}\" created (#{quest.id})")
-          opts = if discovery?, do: [interactive_goal: true], else: []
-          Hive.CLI.PlanHandler.start_interactive_planning(quest, opts)
+          Hive.CLI.PlanHandler.start_interactive_planning(quest)
 
         {:error, reason} ->
           Format.error("Failed to create quest: #{inspect(reason)}")
@@ -2700,42 +2702,6 @@ defmodule Hive.CLI do
     end
   end
 
-  defp do_quick_init(path, force?) do
-    case Hive.QuickStart.quick_init(path, force: force?) do
-      {:ok, summary} ->
-        Format.success("Hive initialized at #{summary.hive_path}")
-        IO.puts("")
-        IO.puts("Welcome to The Hive!")
-        IO.puts("")
-
-        env = summary.environment
-        IO.puts("Environment:")
-        IO.puts("  git:    #{if env.has_git, do: "found", else: "not found"}")
-        IO.puts("  claude: #{if env.has_claude, do: "found", else: "not found"}")
-        IO.puts("  repos:  #{length(env.git_repos)} discovered")
-        IO.puts("")
-
-        case summary.combs_registered do
-          [] ->
-            Format.info("No git repos found. Add one with `hive comb add <path>`.")
-
-          combs ->
-            IO.puts("Registered combs:")
-
-            Enum.each(combs, fn
-              {:ok, name} -> Format.success("  #{name}")
-              {:error, name} -> Format.error("  Failed: #{name}")
-            end)
-        end
-
-      {:error, :already_initialized} ->
-        Format.error("Already initialized. Use --force to reinitialize.")
-
-      {:error, reason} ->
-        Format.error("Quick init failed: #{inspect(reason)}")
-    end
-  end
-
   defp do_start_dashboard do
     case Hive.Dashboard.Endpoint.start_link() do
       {:ok, _pid} ->
@@ -2796,30 +2762,6 @@ defmodule Hive.CLI do
       version: Hive.version(),
       about: "Coordinate multiple Claude Code agents working on a shared codebase.",
       subcommands: [
-        init: [
-          name: "init",
-          about: "Initialize a new Hive project in the current directory",
-          args: [
-            path: [
-              value_name: "PATH",
-              help: "Directory to initialize (defaults to current directory)",
-              required: false,
-              parser: :string
-            ]
-          ],
-          flags: [
-            force: [
-              short: "-f",
-              long: "--force",
-              help: "Reinitialize even if .hive/ already exists"
-            ],
-            quick: [
-              short: "-q",
-              long: "--quick",
-              help: "Quick start: auto-detect and register git repos as combs"
-            ]
-          ]
-        ],
         doctor: [
           name: "doctor",
           about: "Check system prerequisites and Hive health",

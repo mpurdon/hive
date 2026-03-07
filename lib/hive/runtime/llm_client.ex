@@ -128,7 +128,19 @@ defmodule Hive.Runtime.LLMClient.Default do
   end
   
   defp get_api_key do
-    System.get_env("GOOGLE_API_KEY") || Application.get_env(:req_llm, :google_api_key)
+    System.get_env("GOOGLE_API_KEY") ||
+      Application.get_env(:req_llm, :google_api_key) ||
+      get_config_key("google_api_key")
+  end
+
+  defp get_config_key(key_name) do
+    with {:ok, root} <- Hive.hive_dir(),
+         {:ok, config} <- Hive.Config.read_config(Path.join([root, ".hive", "config.toml"])),
+         value when is_binary(value) and value != "" <- get_in(config, ["llm", "keys", key_name]) do
+      value
+    else
+      _ -> nil
+    end
   end
   
   defp extract_user_content(ctx) do

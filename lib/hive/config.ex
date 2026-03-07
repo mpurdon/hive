@@ -10,6 +10,7 @@ defmodule Hive.Config do
     "hive" => %{"version" => Hive.version()},
     "queen" => %{"max_bees" => 5},
     "costs" => %{"warn_threshold_usd" => 5.0, "budget_usd" => 10.0},
+    "llm" => %{"keys" => %{"google_api_key" => "", "anthropic_api_key" => ""}},
     "github" => %{"token" => ""},
     "server" => %{"url" => ""},
     "session" => %{"current_comb" => ""}

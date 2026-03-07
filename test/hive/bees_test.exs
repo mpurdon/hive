@@ -268,7 +268,9 @@ defmodule Hive.BeesTest do
   defp create_hive_workspace do
     name = "hive_bees_ws_#{:erlang.unique_integer([:positive])}"
     path = Path.join(@tmp_dir, name)
-    File.mkdir_p!(Path.join(path, ".hive"))
+    hive_dir = Path.join(path, ".hive")
+    File.mkdir_p!(hive_dir)
+    File.write!(Path.join(hive_dir, "config.toml"), "")
     on_exit(fn -> File.rm_rf!(path) end)
     path
   end

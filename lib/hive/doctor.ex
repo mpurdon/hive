@@ -116,21 +116,21 @@ defmodule Hive.Doctor do
 
       case provider do
         "google" ->
-          if System.get_env("GOOGLE_API_KEY") || System.get_env("GEMINI_API_KEY") do
+          if has_key?("GOOGLE_API_KEY") || has_key?("GEMINI_API_KEY") || config_key("google_api_key") do
             result(:model_configured, :ok, "API mode with Google (key set)")
           else
-            result(:model_configured, :error, "GOOGLE_API_KEY not set. Required for Gemini models.")
+            result(:model_configured, :error, "GOOGLE_API_KEY not set. Set env var or [llm] keys.google_api_key in .hive/config.toml.")
           end
 
         "anthropic" ->
-          if System.get_env("ANTHROPIC_API_KEY") do
+          if has_key?("ANTHROPIC_API_KEY") || config_key("anthropic_api_key") do
             result(:model_configured, :ok, "API mode with Anthropic (key set)")
           else
-            result(:model_configured, :error, "ANTHROPIC_API_KEY not set.")
+            result(:model_configured, :error, "ANTHROPIC_API_KEY not set. Set env var or [llm] keys.anthropic_api_key in .hive/config.toml.")
           end
 
         "openai" ->
-          if System.get_env("OPENAI_API_KEY") do
+          if has_key?("OPENAI_API_KEY") do
             result(:model_configured, :ok, "API mode with OpenAI (key set)")
           else
             result(:model_configured, :error, "OPENAI_API_KEY not set.")
@@ -156,6 +156,18 @@ defmodule Hive.Doctor do
     Hive.Runtime.ModelResolver.provider(model)
   rescue
     _ -> "google"
+  end
+
+  defp has_key?(env_var), do: System.get_env(env_var) not in [nil, ""]
+
+  defp config_key(key_name) do
+    with {:ok, root} <- Hive.hive_dir(),
+         {:ok, config} <- Hive.Config.read_config(Path.join([root, ".hive", "config.toml"])),
+         value when is_binary(value) and value != "" <- get_in(config, ["llm", "keys", key_name]) do
+      true
+    else
+      _ -> false
+    end
   end
 
   defp check_hive_initialized do

@@ -93,14 +93,18 @@ defmodule Hive.QuickStartTest do
 
     test "returns error when already initialized and not forced" do
       path = create_temp_dir("qs_init_dup")
-      File.mkdir_p!(Path.join(path, ".hive"))
+      hive_dir = Path.join(path, ".hive")
+      File.mkdir_p!(hive_dir)
+      File.write!(Path.join(hive_dir, "config.toml"), "")
 
       assert {:error, :already_initialized} = QuickStart.quick_init(path)
     end
 
     test "reinitializes with force option" do
       path = create_temp_dir("qs_init_force")
-      File.mkdir_p!(Path.join(path, ".hive"))
+      hive_dir = Path.join(path, ".hive")
+      File.mkdir_p!(hive_dir)
+      File.write!(Path.join(hive_dir, "config.toml"), "")
 
       assert {:ok, _summary} = QuickStart.quick_init(path, force: true)
     end

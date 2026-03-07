@@ -21,7 +21,7 @@ defmodule Hive do
   end
 
   defp validate_hive_path(expanded) do
-    if File.dir?(Path.join(expanded, ".hive")),
+    if initialized?(expanded),
       do: {:ok, expanded},
       else: {:error, :not_in_hive}
   end
@@ -29,8 +29,12 @@ defmodule Hive do
   defp find_hive_dir("/"), do: {:error, :not_in_hive}
 
   defp find_hive_dir(path) do
-    if File.dir?(Path.join(path, ".hive")),
+    if initialized?(path),
       do: {:ok, path},
       else: find_hive_dir(Path.dirname(path))
+  end
+
+  defp initialized?(path) do
+    File.exists?(Path.join([path, ".hive", "config.toml"]))
   end
 end

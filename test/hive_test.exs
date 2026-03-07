@@ -36,6 +36,7 @@ defmodule HiveTest do
       hive_root = Path.join(tmp, "hive_test_#{:erlang.unique_integer([:positive])}")
       hive_marker = Path.join(hive_root, ".hive")
       File.mkdir_p!(hive_marker)
+      File.write!(Path.join(hive_marker, "config.toml"), "")
 
       on_exit(fn -> File.rm_rf!(hive_root) end)
 

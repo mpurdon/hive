@@ -255,7 +255,9 @@ defmodule Hive.Init do
   # -- Pipeline steps --------------------------------------------------------
 
   defp validate_path(hive_dir, false) do
-    if File.dir?(hive_dir) do
+    config_path = Path.join(hive_dir, "config.toml")
+
+    if File.exists?(config_path) do
       {:error, :already_initialized}
     else
       :ok

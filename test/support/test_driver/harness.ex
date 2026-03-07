@@ -38,6 +38,7 @@ defmodule Hive.TestDriver.Harness do
 
     File.mkdir_p!(store_dir)
     File.mkdir_p!(Path.join([hive_root, ".hive", "queen"]))
+    File.write!(Path.join([hive_root, ".hive", "config.toml"]), "")
     File.write!(Path.join([hive_root, ".hive", "queen", "QUEEN.md"]), "# Queen\n")
     File.mkdir_p!(mock_dir)
 
