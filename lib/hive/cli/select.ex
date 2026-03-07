@@ -357,6 +357,11 @@ defmodule Hive.CLI.Select do
           [:binary, :stream, :exit_status]
         )
 
+      # Wait for cat to start, then drain any buffered input
+      # (e.g. trailing newline from the previous IO.gets)
+      Process.sleep(30)
+      drain(port)
+
       try do
         fun.(port)
       after
@@ -370,6 +375,14 @@ defmodule Hive.CLI.Select do
       end
     else
       fun.(nil)
+    end
+  end
+
+  defp drain(port) do
+    receive do
+      {^port, {:data, _}} -> drain(port)
+    after
+      0 -> :ok
     end
   end
 
