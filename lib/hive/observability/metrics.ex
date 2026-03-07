@@ -121,6 +121,7 @@ defmodule Hive.Observability.Metrics do
     %{
       system: system_metrics(),
       quests: quest_metrics(),
+      jobs: job_metrics(),
       bees: bee_metrics(),
       quality: quality_metrics(),
       costs: cost_metrics()
@@ -162,10 +163,13 @@ defmodule Hive.Observability.Metrics do
   end
 
   defp system_metrics do
+    bees = Store.all(:bees)
+    workers = Enum.count(bees, &(Map.get(&1, :status) in ["working", "starting"]))
+
     %{
       uptime: System.monotonic_time(:second),
       memory_mb: :erlang.memory(:total) / 1_024 / 1_024,
-      process_count: :erlang.system_info(:process_count)
+      worker_count: workers
     }
   end
 
@@ -174,9 +178,21 @@ defmodule Hive.Observability.Metrics do
 
     %{
       total: length(quests),
-      active: Enum.count(quests, &(Map.get(&1, :status) == "active")),
+      active: Enum.count(quests, &(Map.get(&1, :status) in ["active", "pending"])),
       completed: Enum.count(quests, &(Map.get(&1, :status) == "completed")),
       failed: Enum.count(quests, &(Map.get(&1, :status) == "failed"))
+    }
+  end
+
+  defp job_metrics do
+    jobs = Store.all(:jobs)
+
+    %{
+      total: length(jobs),
+      pending: Enum.count(jobs, &(Map.get(&1, :status) == "pending")),
+      running: Enum.count(jobs, &(Map.get(&1, :status) == "running")),
+      done: Enum.count(jobs, &(Map.get(&1, :status) == "done")),
+      failed: Enum.count(jobs, &(Map.get(&1, :status) == "failed"))
     }
   end
 
@@ -185,8 +201,9 @@ defmodule Hive.Observability.Metrics do
 
     %{
       total: length(bees),
-      active: Enum.count(bees, &(Map.get(&1, :status) == "active")),
-      idle: Enum.count(bees, &(Map.get(&1, :status) == "idle"))
+      active: Enum.count(bees, &(Map.get(&1, :status) in ["working", "starting"])),
+      idle: Enum.count(bees, &(Map.get(&1, :status) == "idle")),
+      stopped: Enum.count(bees, &(Map.get(&1, :status) in ["stopped", "crashed"]))
     }
   end
 
