@@ -8,6 +8,7 @@ defmodule Hive.CLI.Chat do
   """
 
   alias Hive.CLI.Format
+  alias Hive.CLI.Select
 
   @image_exts ~w(.png .jpg .jpeg .gif .webp .bmp)
 
@@ -298,19 +299,19 @@ defmodule Hive.CLI.Chat do
     end
   end
 
+  defp do_ask_choice(%{"question" => question, "options" => options, "multi" => true})
+       when is_list(options) do
+    case Select.multi_select(question, options) do
+      nil -> "No preference, please decide for me."
+      items -> Enum.join(items, ", ")
+    end
+  end
+
   defp do_ask_choice(%{"question" => question, "options" => options}) when is_list(options) do
-    IO.puts("")
-    IO.puts(color(:cyan) <> "  " <> question <> reset())
-    IO.puts("")
-
-    options
-    |> Enum.with_index(1)
-    |> Enum.each(fn {opt, idx} ->
-      IO.puts("  " <> color(:bright) <> "#{idx})" <> reset() <> " #{opt}")
-    end)
-
-    IO.puts("")
-    read_choice(options)
+    case Select.select(question, options) do
+      nil -> "No preference, please decide for me."
+      chosen -> chosen
+    end
   end
 
   defp do_ask_choice(_bad_args) do
@@ -373,26 +374,6 @@ defmodule Hive.CLI.Chat do
       :eof -> :eof
       {:error, _} -> :eof
       data -> String.trim(data)
-    end
-  end
-
-  defp read_choice(options) do
-    input = read_input()
-
-    case Integer.parse(input || "") do
-      {n, ""} when n >= 1 and n <= length(options) ->
-        chosen = Enum.at(options, n - 1)
-        IO.puts(dim("  Selected: #{chosen}"))
-        chosen
-
-      _ ->
-        # Free-form answer instead of picking a number
-        if input != "" and input != :eof do
-          input
-        else
-          IO.puts(dim("  Enter 1-#{length(options)} or type your answer:"))
-          read_choice(options)
-        end
     end
   end
 
@@ -511,7 +492,8 @@ defmodule Hive.CLI.Chat do
       %{
         "name" => "ask_choice",
         "description" =>
-          "Present a multiple-choice question. The user sees numbered options and picks one, or types a free-form answer.",
+          "Present a selection prompt. The user navigates with arrow keys and presses enter. " <>
+            "For multi=true, the user can toggle multiple items with space before confirming.",
         "parameters" => %{
           "type" => "object",
           "properties" => %{
@@ -520,6 +502,11 @@ defmodule Hive.CLI.Chat do
               "type" => "array",
               "items" => %{"type" => "string"},
               "description" => "2-6 options to choose from"
+            },
+            "multi" => %{
+              "type" => "boolean",
+              "description" =>
+                "If true, user can select multiple options. Default false (single select)."
             }
           },
           "required" => ["question", "options"]
@@ -624,8 +611,7 @@ defmodule Hive.CLI.Chat do
     IO.puts("  /quit          Cancel planning")
     IO.puts("  /help          Show this help")
     IO.puts("")
-    IO.puts(dim("For multiple choice, type a number or a free-form answer."))
-    IO.puts(dim("You can drag-and-drop image files into the terminal."))
+    IO.puts(dim("Use arrow keys for selections. Drag-and-drop image files into the terminal."))
     IO.puts("")
   end
 end
