@@ -1,4 +1,4 @@
-store_path = "/Users/mp/Projects/hive-workspace/.hive/store/hive.etf"
+store_path = "/Users/mp/Projects/gitf-workspace/.gitf/store/gitf.etf"
 data = File.read!(store_path) |> :erlang.binary_to_term()
 
 job = get_in(data, [:jobs, "job-0208de"])

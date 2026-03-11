@@ -1,5 +1,5 @@
-defmodule Hive.E2E.QueenOrchestrationTest do
-  use Hive.TestDriver.Scenario
+defmodule GiTF.E2E.QueenOrchestrationTest do
+  use GiTF.TestDriver.Scenario
 
   scenario "Queen advances quest and spawns next job after completion" do
     {:ok, env, comb} = Harness.add_comb(env)
@@ -27,7 +27,7 @@ defmodule Hive.E2E.QueenOrchestrationTest do
     # may spawn Claude for diff assessment (up to 60s timeout), so be very generous
     await(
       fn ->
-        waggles = Hive.Store.all(:waggles)
+        waggles = GiTF.Store.all(:waggles)
         Enum.any?(waggles, &(&1.from == bee1.id))
       end,
       timeout: 15_000
@@ -42,7 +42,7 @@ defmodule Hive.E2E.QueenOrchestrationTest do
     # Quest status should reflect the state of jobs.
     # Queen attempts to spawn for job2 but without claude_executable,
     # the bee can't find Claude and fails. After retries, quest may be "failed".
-    {:ok, updated_quest} = Hive.Quests.get(quest.id)
+    {:ok, updated_quest} = GiTF.Quests.get(quest.id)
     assert updated_quest.status in ["pending", "active", "completed", "failed"]
   end
 
@@ -67,7 +67,7 @@ defmodule Hive.E2E.QueenOrchestrationTest do
     # Wait for any waggle from the bee.
     await(
       fn ->
-        waggles = Hive.Store.all(:waggles)
+        waggles = GiTF.Store.all(:waggles)
         Enum.any?(waggles, &(&1.from == bee1.id))
       end,
       timeout: 15_000
@@ -76,7 +76,7 @@ defmodule Hive.E2E.QueenOrchestrationTest do
     # If job_complete waggle was sent, Queen auto-advances the quest.
     # If validation_failed waggle was sent, Queen treats it as failure.
     # Check which waggle was sent and verify accordingly.
-    waggles = Hive.Store.filter(:waggles, fn w -> w.from == bee1.id end)
+    waggles = GiTF.Store.filter(:waggles, fn w -> w.from == bee1.id end)
     waggle = hd(waggles)
 
     case waggle.subject do

@@ -1,7 +1,7 @@
 defmodule CacheIntegrationTest do
   use ExUnit.Case
 
-  alias Hive.Runtime.CacheControl
+  alias GiTF.Runtime.CacheControl
 
   test "identifies large content for caching" do
     large_content = String.duplicate("a", 5000)

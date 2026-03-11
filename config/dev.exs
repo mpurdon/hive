@@ -1,13 +1,13 @@
 import Config
 
-config :hive, Hive.Repo, database: ".hive/hive.db"
+config :gitf, GiTF.Repo, database: ".gitf/gitf.db"
 
-config :hive, Hive.Web.Endpoint,
+config :gitf, GiTF.Web.Endpoint,
   code_reloader: true,
   live_reload: [
     patterns: [
-      ~r"lib/hive/web/live/.*(ex)$",
-      ~r"lib/hive/web/layout.*(ex)$"
+      ~r"lib/gitf/web/live/.*(ex)$",
+      ~r"lib/gitf/web/layout.*(ex)$"
     ]
   ]
 

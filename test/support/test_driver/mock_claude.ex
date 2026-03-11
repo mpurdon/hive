@@ -1,11 +1,11 @@
-defmodule Hive.TestDriver.MockClaude do
+defmodule GiTF.TestDriver.MockClaude do
   @moduledoc """
   Generates executable bash scripts that simulate Claude Code output.
 
-  Scripts emit valid stream-json matching `Hive.Runtime.StreamParser.parse_chunk/1`
+  Scripts emit valid stream-json matching `GiTF.Runtime.StreamParser.parse_chunk/1`
   format, with configurable exit codes, output content, and delays.
 
-  The mock scripts are used via the `claude_executable` option in `Hive.Bee.Worker`
+  The mock scripts are used via the `claude_executable` option in `GiTF.Bee.Worker`
   to test the full Worker -> Port -> StreamParser pipeline without calling real Claude.
   """
 

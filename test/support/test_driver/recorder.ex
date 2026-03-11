@@ -1,10 +1,10 @@
-defmodule Hive.TestDriver.Recorder do
+defmodule GiTF.TestDriver.Recorder do
   @moduledoc """
   GenServer that captures all system activity into an ordered timeline.
 
   Attaches to:
-  - All `Hive.Telemetry.events()` via `:telemetry.attach_many/4`
-  - PubSub topics: `waggle:queen`, `hive:progress`, `hive:costs`, `hive:system`
+  - All `GiTF.Telemetry.events()` via `:telemetry.attach_many/4`
+  - PubSub topics: `waggle:queen`, `section:progress`, `section:costs`, `section:system`
   - Store polling every 200ms, diffing snapshots for changes
 
   The timeline is a list of entries ordered by timestamp:
@@ -15,7 +15,7 @@ defmodule Hive.TestDriver.Recorder do
 
   use GenServer
 
-  @pubsub_topics ["waggle:queen", "hive:progress", "hive:costs", "hive:system"]
+  @pubsub_topics ["waggle:queen", "section:progress", "section:costs", "section:system"]
   @poll_interval_ms 200
 
   # -- Client API --------------------------------------------------------------
@@ -73,17 +73,17 @@ defmodule Hive.TestDriver.Recorder do
 
   @impl true
   def init(_opts) do
-    handler_id = "hive-test-recorder-#{:erlang.unique_integer([:positive])}"
+    handler_id = "section-test-recorder-#{:erlang.unique_integer([:positive])}"
 
     :telemetry.attach_many(
       handler_id,
-      Hive.Telemetry.events(),
+      GiTF.Telemetry.events(),
       &__MODULE__.handle_telemetry_event/4,
       %{recorder: self()}
     )
 
     Enum.each(@pubsub_topics, fn topic ->
-      Phoenix.PubSub.subscribe(Hive.PubSub, topic)
+      Phoenix.PubSub.subscribe(GiTF.PubSub, topic)
     end)
 
     # Take initial store snapshot
@@ -216,7 +216,7 @@ defmodule Hive.TestDriver.Recorder do
 
     Map.new(collections, fn col ->
       records =
-        Hive.Store.all(col)
+        GiTF.Store.all(col)
         |> Map.new(fn r -> {r.id, r} end)
 
       {col, records}

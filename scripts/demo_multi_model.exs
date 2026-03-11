@@ -5,11 +5,11 @@
 
 Mix.install([])
 
-Code.require_file("lib/hive/runtime/model_selector.ex")
-Code.require_file("lib/hive/jobs/classifier.ex")
+Code.require_file("lib/gitf/runtime/model_selector.ex")
+Code.require_file("lib/gitf/jobs/classifier.ex")
 
-alias Hive.Runtime.ModelSelector
-alias Hive.Jobs.Classifier
+alias GiTF.Runtime.ModelSelector
+alias GiTF.Jobs.Classifier
 
 IO.puts("\n=== Multi-Model Selection Demo ===\n")
 

@@ -1,20 +1,20 @@
-defmodule Hive.TestDriver.Harness do
+defmodule GiTF.TestDriver.Harness do
   @moduledoc """
   Creates and manages isolated test environments for E2E scenarios.
 
   Each scenario gets its own temp Store directory, git repository,
-  and hive workspace. Patterns extracted from existing test suites
+  and gitf workspace. Patterns extracted from existing test suites
   (`queen_test.exs`, `bees_test.exs`).
   """
 
-  alias Hive.Store
-  alias Hive.TestDriver.MockClaude
+  alias GiTF.Store
+  alias GiTF.TestDriver.MockClaude
 
   @tmp_dir System.tmp_dir!()
 
   @type env :: %{
           store_dir: String.t(),
-          hive_root: String.t(),
+          gitf_root: String.t(),
           repos: %{String.t() => String.t()},
           combs: %{String.t() => map()},
           mock_dir: String.t(),
@@ -24,7 +24,7 @@ defmodule Hive.TestDriver.Harness do
   @doc """
   Boots an isolated environment for a scenario.
 
-  Creates temp directories for the Store, hive workspace, and mock scripts.
+  Creates temp directories for the Store, gitf workspace, and mock scripts.
   Restarts the Store GenServer pointing at the temp directory.
 
   Returns an env map for use with other harness functions.
@@ -32,23 +32,23 @@ defmodule Hive.TestDriver.Harness do
   @spec boot(keyword()) :: env()
   def boot(opts \\ []) do
     suffix = :erlang.unique_integer([:positive])
-    store_dir = Path.join(@tmp_dir, "hive_e2e_store_#{suffix}")
-    hive_root = Path.join(@tmp_dir, "hive_e2e_ws_#{suffix}")
-    mock_dir = Path.join(@tmp_dir, "hive_e2e_mocks_#{suffix}")
+    store_dir = Path.join(@tmp_dir, "gitf_e2e_store_#{suffix}")
+    gitf_root = Path.join(@tmp_dir, "gitf_e2e_ws_#{suffix}")
+    mock_dir = Path.join(@tmp_dir, "gitf_e2e_mocks_#{suffix}")
 
     File.mkdir_p!(store_dir)
-    File.mkdir_p!(Path.join([hive_root, ".hive", "queen"]))
-    File.write!(Path.join([hive_root, ".hive", "config.toml"]), "")
-    File.write!(Path.join([hive_root, ".hive", "queen", "QUEEN.md"]), "# Queen\n")
+    File.mkdir_p!(Path.join([gitf_root, ".gitf", "queen"]))
+    File.write!(Path.join([gitf_root, ".gitf", "config.toml"]), "")
+    File.write!(Path.join([gitf_root, ".gitf", "queen", "QUEEN.md"]), "# Queen\n")
     File.mkdir_p!(mock_dir)
 
     # Restart Store with isolated directory
-    Hive.Test.StoreHelper.stop_store()
+    GiTF.Test.StoreHelper.stop_store()
     {:ok, _} = Store.start_link(data_dir: store_dir)
 
     env = %{
       store_dir: store_dir,
-      hive_root: hive_root,
+      gitf_root: gitf_root,
       repos: %{},
       combs: %{},
       mock_dir: mock_dir,
@@ -74,7 +74,7 @@ defmodule Hive.TestDriver.Harness do
     :exit, _ -> :ok
   after
     File.rm_rf(env.store_dir)
-    File.rm_rf(env.hive_root)
+    File.rm_rf(env.gitf_root)
     File.rm_rf(env.mock_dir)
 
     Enum.each(env.repos, fn {_name, path} -> File.rm_rf(path) end)
@@ -92,7 +92,7 @@ defmodule Hive.TestDriver.Harness do
     name = Keyword.get(opts, :name, "test-comb-#{:erlang.unique_integer([:positive])}")
     repo_path = create_temp_git_repo(name)
 
-    {:ok, comb} = Hive.Comb.add(repo_path, name: name)
+    {:ok, comb} = GiTF.Comb.add(repo_path, name: name)
 
     env = %{
       env
@@ -124,14 +124,14 @@ defmodule Hive.TestDriver.Harness do
     quest_attrs = %{goal: goal}
     quest_attrs = if name, do: Map.put(quest_attrs, :name, name), else: quest_attrs
 
-    {:ok, quest} = Hive.Quests.create(quest_attrs)
+    {:ok, quest} = GiTF.Quests.create(quest_attrs)
 
     job_specs = Keyword.get(opts, :jobs, [%{title: "Default test job"}])
 
     jobs =
       Enum.map(job_specs, fn job_attrs ->
         attrs = Map.merge(job_attrs, %{quest_id: quest.id, comb_id: comb_id})
-        {:ok, job} = Hive.Jobs.create(attrs)
+        {:ok, job} = GiTF.Jobs.create(attrs)
         job
       end)
 
@@ -141,7 +141,7 @@ defmodule Hive.TestDriver.Harness do
     Enum.each(deps, fn {job_idx, dep_idx} ->
       job = Enum.at(jobs, job_idx)
       dep = Enum.at(jobs, dep_idx)
-      {:ok, _} = Hive.Jobs.add_dependency(job.id, dep.id)
+      {:ok, _} = GiTF.Jobs.add_dependency(job.id, dep.id)
     end)
 
     {:ok, quest, jobs}
@@ -173,7 +173,7 @@ defmodule Hive.TestDriver.Harness do
       [claude_executable: script_path, prompt: "test prompt"] ++
         Keyword.take(opts, [:name])
 
-    Hive.Bees.spawn(job_id, comb_id, env.hive_root, spawn_opts)
+    GiTF.Bees.spawn(job_id, comb_id, env.gitf_root, spawn_opts)
   end
 
   @doc """
@@ -185,16 +185,16 @@ defmodule Hive.TestDriver.Harness do
   def start_queen(env) do
     # Terminate Queen from supervisor to prevent auto-restart conflicts
     try do
-      Supervisor.terminate_child(Hive.Supervisor, Hive.Queen)
-      Supervisor.delete_child(Hive.Supervisor, Hive.Queen)
+      Supervisor.terminate_child(GiTF.Supervisor, GiTF.Queen)
+      Supervisor.delete_child(GiTF.Supervisor, GiTF.Queen)
     catch
       :exit, _ -> :ok
     end
-    safe_stop(Process.whereis(Hive.Queen))
+    safe_stop(Process.whereis(GiTF.Queen))
     Process.sleep(10)
 
-    {:ok, pid} = Hive.Queen.start_link(hive_root: env.hive_root)
-    Hive.Queen.start_session()
+    {:ok, pid} = GiTF.Queen.start_link(gitf_root: env.gitf_root)
+    GiTF.Queen.start_session()
     %{env | queen_pid: pid}
   end
 
@@ -203,7 +203,7 @@ defmodule Hive.TestDriver.Harness do
   """
   @spec send_waggle_to_queen(map()) :: :ok
   def send_waggle_to_queen(waggle) do
-    case Process.whereis(Hive.Queen) do
+    case Process.whereis(GiTF.Queen) do
       nil -> :ok
       pid -> send(pid, {:waggle_received, waggle})
     end
@@ -214,11 +214,11 @@ defmodule Hive.TestDriver.Harness do
   # -- Private -----------------------------------------------------------------
 
   defp create_temp_git_repo(name) do
-    path = Path.join(@tmp_dir, "hive_e2e_repo_#{name}_#{:erlang.unique_integer([:positive])}")
+    path = Path.join(@tmp_dir, "gitf_e2e_repo_#{name}_#{:erlang.unique_integer([:positive])}")
     File.mkdir_p!(path)
 
     System.cmd("git", ["init"], cd: path, stderr_to_stdout: true)
-    System.cmd("git", ["config", "user.email", "test@hive.local"], cd: path)
+    System.cmd("git", ["config", "user.email", "test@gitf.local"], cd: path)
     System.cmd("git", ["config", "user.name", "Test"], cd: path)
 
     readme = Path.join(path, "README.md")

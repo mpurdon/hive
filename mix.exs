@@ -1,11 +1,11 @@
-defmodule Hive.MixProject do
+defmodule GiTF.MixProject do
   use Mix.Project
 
-  @version "0.24.0"
+  @version "0.24.1"
 
   def project do
     [
-      app: :hive,
+      app: :gitf,
       version: @version,
       elixir: "~> 1.15",
       elixirc_paths: elixirc_paths(Mix.env()),
@@ -17,7 +17,7 @@ defmodule Hive.MixProject do
   end
 
   def cli do
-    [preferred_envs: ["hive.test.e2e": :test]]
+    [preferred_envs: ["gitf.test.e2e": :test]]
   end
 
   defp elixirc_paths(:test), do: ["lib", "test/support"]
@@ -26,20 +26,20 @@ defmodule Hive.MixProject do
   def application do
     [
       extra_applications: [:logger, :crypto],
-      mod: {Hive.Application, []}
+      mod: {GiTF.Application, []}
     ]
   end
 
   defp escript do
     [
-      main_module: Hive.CLI,
-      name: "hive"
+      main_module: GiTF.CLI,
+      name: "gitf"
     ]
   end
 
   defp releases do
     [
-      hive: [
+      gitf: [
         steps: [:assemble],
         applications: [runtime_tools: :permanent]
       ]

@@ -2,18 +2,18 @@ defmodule AgentLoopCacheTest do
   use ExUnit.Case, async: false
   import Mox
 
-  alias Hive.Runtime.AgentLoop
-  alias Hive.Runtime.LLMClient
+  alias GiTF.Runtime.AgentLoop
+  alias GiTF.Runtime.LLMClient
 
   # Mock the LLM Client
   setup :verify_on_exit!
 
   setup do
     # Ensure mock is used for all tests
-    Application.put_env(:hive, :llm_client, Hive.Runtime.LLMClient.Mock)
+    Application.put_env(:gitf, :llm_client, GiTF.Runtime.LLMClient.Mock)
 
     on_exit(fn ->
-      Application.put_env(:hive, :llm_client, Hive.Runtime.LLMClient.Default)
+      Application.put_env(:gitf, :llm_client, GiTF.Runtime.LLMClient.Default)
     end)
 
     :ok
@@ -23,7 +23,7 @@ defmodule AgentLoopCacheTest do
     large_prompt = String.duplicate("a", 5000)
 
     # We expect generate_text to receive messages with cache_control
-    Hive.Runtime.LLMClient.Mock
+    GiTF.Runtime.LLMClient.Mock
     |> expect(:generate_text, fn _model, messages, _opts ->
       # Verify system message has cache_control
       system_msg = Enum.find(messages, fn m -> m.role == :system end)
@@ -47,7 +47,7 @@ defmodule AgentLoopCacheTest do
     # making it impossible to test without a real API key.
     short_prompt = "test prompt"
 
-    Hive.Runtime.LLMClient.Mock
+    GiTF.Runtime.LLMClient.Mock
     |> expect(:generate_text, fn _model, messages, _opts ->
       system_msg = Enum.find(messages, fn m -> m.role == :system end)
       refute Map.has_key?(system_msg, :cache_control)

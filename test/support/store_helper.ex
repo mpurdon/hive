@@ -1,32 +1,32 @@
-defmodule Hive.Test.StoreHelper do
+defmodule GiTF.Test.StoreHelper do
   @moduledoc """
   Helpers for restarting GenServers in tests.
 
-  The application starts Hive.Store, Hive.Queen, Hive.Drone, etc. automatically.
+  The application starts GiTF.Store, GiTF.Queen, GiTF.Drone, etc. automatically.
   Tests that need isolated instances must stop the existing ones first.
   """
 
   @doc """
-  Stops any running Hive.Store and starts a fresh one with the given data_dir.
+  Stops any running GiTF.Store and starts a fresh one with the given data_dir.
   Returns `{:ok, pid}`.
   """
   def restart_store!(data_dir) do
     stop_store()
-    Hive.Store.start_link(data_dir: data_dir)
+    GiTF.Store.start_link(data_dir: data_dir)
   end
 
-  @doc "Stops the currently running Hive.Store, if any."
+  @doc "Stops the currently running GiTF.Store, if any."
   def stop_store do
     # First try to terminate and remove from the supervisor to prevent auto-restart
     try do
-      Supervisor.terminate_child(Hive.Supervisor, Hive.Store)
-      Supervisor.delete_child(Hive.Supervisor, Hive.Store)
+      Supervisor.terminate_child(GiTF.Supervisor, GiTF.Store)
+      Supervisor.delete_child(GiTF.Supervisor, GiTF.Store)
     catch
       :exit, _ -> :ok
     end
 
     # Also try direct stop in case it was started outside the supervisor
-    safe_stop(Hive.Store)
+    safe_stop(GiTF.Store)
 
     # Brief pause to ensure the process is fully down
     Process.sleep(10)
@@ -51,19 +51,19 @@ defmodule Hive.Test.StoreHelper do
   def ensure_infrastructure do
     # Ensure PubSub is running and functional
     pubsub_ok? =
-      case Process.whereis(Hive.PubSub) do
+      case Process.whereis(GiTF.PubSub) do
         nil -> false
         pid -> Process.alive?(pid)
       end
 
     unless pubsub_ok? do
-      Phoenix.PubSub.Supervisor.start_link(name: Hive.PubSub)
+      Phoenix.PubSub.Supervisor.start_link(name: GiTF.PubSub)
     end
 
     # Ensure Registry is running and functional
     registry_ok? =
       try do
-        Registry.lookup(Hive.Registry, :__health_check__)
+        Registry.lookup(GiTF.Registry, :__health_check__)
         true
       rescue
         ArgumentError -> false
@@ -71,7 +71,7 @@ defmodule Hive.Test.StoreHelper do
 
     unless registry_ok? do
       # Kill any zombie process
-      case Process.whereis(Hive.Registry) do
+      case Process.whereis(GiTF.Registry) do
         nil -> :ok
         pid ->
           try do
@@ -81,7 +81,7 @@ defmodule Hive.Test.StoreHelper do
           end
       end
       Process.sleep(10)
-      Registry.start_link(keys: :unique, name: Hive.Registry)
+      Registry.start_link(keys: :unique, name: GiTF.Registry)
     end
 
     :ok

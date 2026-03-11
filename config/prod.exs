@@ -1,5 +1,5 @@
 import Config
 
-config :hive, Hive.Repo, database: ".hive/hive.db"
+config :gitf, GiTF.Repo, database: ".gitf/gitf.db"
 
 config :logger, level: :info

@@ -1,5 +1,5 @@
 # Reset the stuck job directly on disk, bypassing Store GenServer
-path = "/Users/mp/Projects/hive-workspace/.hive/store/hive.etf"
+path = "/Users/mp/Projects/gitf-workspace/.gitf/store/gitf.etf"
 data = File.read!(path) |> :erlang.binary_to_term()
 
 job = data[:jobs]["job-c54c34"]

@@ -1,5 +1,5 @@
-defmodule Hive.E2E.ConcurrentBeesTest do
-  use Hive.TestDriver.Scenario
+defmodule GiTF.E2E.ConcurrentBeesTest do
+  use GiTF.TestDriver.Scenario
 
   scenario "three concurrent bees all complete without store corruption" do
     {:ok, env, comb} = Harness.add_comb(env)
@@ -31,9 +31,9 @@ defmodule Hive.E2E.ConcurrentBeesTest do
     await({:bee_stopped, bee3.id}, timeout: 5_000)
 
     # Verify no store corruption — all records should be retrievable
-    {:ok, final_job1} = Hive.Jobs.get(job1.id)
-    {:ok, final_job2} = Hive.Jobs.get(job2.id)
-    {:ok, final_job3} = Hive.Jobs.get(job3.id)
+    {:ok, final_job1} = GiTF.Jobs.get(job1.id)
+    {:ok, final_job2} = GiTF.Jobs.get(job2.id)
+    {:ok, final_job3} = GiTF.Jobs.get(job3.id)
 
     assert final_job1.status == "done"
     assert final_job2.status == "done"
@@ -45,7 +45,7 @@ defmodule Hive.E2E.ConcurrentBeesTest do
 
     await(
       fn ->
-        all_waggles = Hive.Store.all(:waggles)
+        all_waggles = GiTF.Store.all(:waggles)
         bee_waggles = Enum.filter(all_waggles, &(&1.from in bee_ids))
         length(bee_waggles) >= 3
       end,
@@ -53,8 +53,8 @@ defmodule Hive.E2E.ConcurrentBeesTest do
     )
 
     # Quest should be completable
-    Hive.Quests.update_status!(quest.id)
-    {:ok, final_quest} = Hive.Quests.get(quest.id)
+    GiTF.Quests.update_status!(quest.id)
+    {:ok, final_quest} = GiTF.Quests.get(quest.id)
     assert final_quest.status == "completed"
   end
 
@@ -71,8 +71,8 @@ defmodule Hive.E2E.ConcurrentBeesTest do
         ]
       )
 
-    events1 = Hive.TestDriver.MockClaude.events_with_costs(100, 50, 0.001)
-    events2 = Hive.TestDriver.MockClaude.events_with_costs(300, 150, 0.005)
+    events1 = GiTF.TestDriver.MockClaude.events_with_costs(100, 50, 0.001)
+    events2 = GiTF.TestDriver.MockClaude.events_with_costs(300, 150, 0.005)
 
     {:ok, bee1} =
       Harness.spawn_mock_bee(env, job1.id, comb.id,
@@ -93,14 +93,14 @@ defmodule Hive.E2E.ConcurrentBeesTest do
     Process.sleep(100)
 
     # Each bee should have its own cost records, not mixed
-    costs1 = Hive.Costs.for_bee(bee1.id)
-    costs2 = Hive.Costs.for_bee(bee2.id)
+    costs1 = GiTF.Costs.for_bee(bee1.id)
+    costs2 = GiTF.Costs.for_bee(bee2.id)
 
     assert length(costs1) > 0
     assert length(costs2) > 0
 
-    total1 = Hive.Costs.total(costs1)
-    total2 = Hive.Costs.total(costs2)
+    total1 = GiTF.Costs.total(costs1)
+    total2 = GiTF.Costs.total(costs2)
 
     # Costs should be different (different token counts)
     assert total1 != total2

@@ -1,15 +1,15 @@
-defmodule Hive.TestDriver.Scenario do
+defmodule GiTF.TestDriver.Scenario do
   @moduledoc """
-  DSL for writing Hive E2E test scenarios.
+  DSL for writing GiTF E2E test scenarios.
 
-  `use Hive.TestDriver.Scenario` sets up ExUnit with harness boot/teardown
+  `use GiTF.TestDriver.Scenario` sets up ExUnit with harness boot/teardown
   and imports assertion helpers. The `scenario` macro wraps a test body
   with recorder lifecycle management.
 
   ## Example
 
       defmodule MyE2ETest do
-        use Hive.TestDriver.Scenario
+        use GiTF.TestDriver.Scenario
 
         scenario "quest completes with two jobs" do
           {:ok, env, comb} = Harness.add_comb(env)
@@ -32,32 +32,32 @@ defmodule Hive.TestDriver.Scenario do
     quote do
       use ExUnit.Case, async: false
 
-      alias Hive.TestDriver.Harness
-      alias Hive.TestDriver.Recorder
-      alias Hive.TestDriver.MockClaude
+      alias GiTF.TestDriver.Harness
+      alias GiTF.TestDriver.Recorder
+      alias GiTF.TestDriver.MockClaude
 
-      import Hive.TestDriver.Assertions
-      import Hive.TestDriver.Scenario, only: [scenario: 2]
+      import GiTF.TestDriver.Assertions
+      import GiTF.TestDriver.Scenario, only: [scenario: 2]
 
       @moduletag :e2e
 
       setup do
-        Hive.Test.StoreHelper.ensure_infrastructure()
+        GiTF.Test.StoreHelper.ensure_infrastructure()
 
         # Ensure CombSupervisor is running (needed for bee spawning)
-        unless Process.whereis(Hive.CombSupervisor) do
-          DynamicSupervisor.start_link(strategy: :one_for_one, name: Hive.CombSupervisor)
+        unless Process.whereis(GiTF.CombSupervisor) do
+          DynamicSupervisor.start_link(strategy: :one_for_one, name: GiTF.CombSupervisor)
         end
 
         # E2E mock scripts emit Claude Code stream-json format.
         # Start Config.Provider if not running, then override to use Claude plugin.
-        unless Process.whereis(Hive.Config.Provider) do
-          Hive.Config.Provider.start_link([])
+        unless Process.whereis(GiTF.Config.Provider) do
+          GiTF.Config.Provider.start_link([])
         end
 
         original_config =
           try do
-            [{:config, c}] = :ets.lookup(:hive_config, :config)
+            [{:config, c}] = :ets.lookup(:gitf_config, :config)
             c
           rescue
             _ -> nil
@@ -65,7 +65,7 @@ defmodule Hive.TestDriver.Scenario do
 
         if original_config do
           updated = put_in(original_config, [:plugins, :models, :default], "claude")
-          :ets.insert(:hive_config, {:config, updated})
+          :ets.insert(:gitf_config, {:config, updated})
         end
 
         # Hide real Claude from the Validator's find_executable lookup.
@@ -96,7 +96,7 @@ defmodule Hive.TestDriver.Scenario do
           # Restore original config (may fail if Config.Provider was stopped)
           try do
             if original_config do
-              :ets.insert(:hive_config, {:config, original_config})
+              :ets.insert(:gitf_config, {:config, original_config})
             end
           rescue
             ArgumentError -> :ok

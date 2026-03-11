@@ -1,5 +1,5 @@
-defmodule Hive.E2E.CostTrackingTest do
-  use Hive.TestDriver.Scenario
+defmodule GiTF.E2E.CostTrackingTest do
+  use GiTF.TestDriver.Scenario
 
   scenario "cost data is recorded from mock Claude output" do
     {:ok, env, comb} = Harness.add_comb(env)
@@ -16,7 +16,7 @@ defmodule Hive.E2E.CostTrackingTest do
     cost_usd = 0.0045
 
     events =
-      Hive.TestDriver.MockClaude.events_with_costs(input_tokens, output_tokens, cost_usd,
+      GiTF.TestDriver.MockClaude.events_with_costs(input_tokens, output_tokens, cost_usd,
         model: "claude-sonnet-4-20250514"
       )
 
@@ -31,7 +31,7 @@ defmodule Hive.E2E.CostTrackingTest do
     await({:bee_stopped, bee1.id}, timeout: 5_000)
 
     # Verify costs were recorded
-    bee_costs = Hive.Costs.for_bee(bee1.id)
+    bee_costs = GiTF.Costs.for_bee(bee1.id)
     assert length(bee_costs) > 0
 
     cost = hd(bee_costs)
@@ -55,10 +55,10 @@ defmodule Hive.E2E.CostTrackingTest do
       )
 
     events1 =
-      Hive.TestDriver.MockClaude.events_with_costs(100, 50, 0.001)
+      GiTF.TestDriver.MockClaude.events_with_costs(100, 50, 0.001)
 
     events2 =
-      Hive.TestDriver.MockClaude.events_with_costs(200, 100, 0.002)
+      GiTF.TestDriver.MockClaude.events_with_costs(200, 100, 0.002)
 
     {:ok, bee1} =
       Harness.spawn_mock_bee(env, job1.id, comb.id,
@@ -76,7 +76,7 @@ defmodule Hive.E2E.CostTrackingTest do
     await({:job_done, job2.id}, timeout: 15_000)
 
     # Check aggregate summary
-    summary = Hive.Costs.summary()
+    summary = GiTF.Costs.summary()
     assert summary.total_cost > 0
     assert summary.total_input_tokens >= 300
     assert summary.total_output_tokens >= 150

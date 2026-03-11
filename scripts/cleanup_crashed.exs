@@ -1,5 +1,5 @@
 # Remove all crashed/stopped bees from the Store
-path = "/Users/mp/Projects/hive-workspace/.hive/store/hive.etf"
+path = "/Users/mp/Projects/gitf-workspace/.gitf/store/gitf.etf"
 data = File.read!(path) |> :erlang.binary_to_term()
 
 bees = data[:bees] || %{}

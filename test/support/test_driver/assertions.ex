@@ -1,4 +1,4 @@
-defmodule Hive.TestDriver.Assertions do
+defmodule GiTF.TestDriver.Assertions do
   @moduledoc """
   Playwright-style auto-waiting assertions for E2E tests.
 
@@ -6,7 +6,7 @@ defmodule Hive.TestDriver.Assertions do
   raising `ExUnit.AssertionError` with diagnostic info on failure.
   """
 
-  alias Hive.TestDriver.Recorder
+  alias GiTF.TestDriver.Recorder
 
   @default_timeout 10_000
   @default_interval 100
@@ -133,42 +133,42 @@ defmodule Hive.TestDriver.Assertions do
   # -- Private: condition checking ---------------------------------------------
 
   defp check_condition({:job_done, job_id}) do
-    case Hive.Jobs.get(job_id) do
+    case GiTF.Jobs.get(job_id) do
       {:ok, %{status: "done"}} -> true
       _ -> false
     end
   end
 
   defp check_condition({:job_failed, job_id}) do
-    case Hive.Jobs.get(job_id) do
+    case GiTF.Jobs.get(job_id) do
       {:ok, %{status: "failed"}} -> true
       _ -> false
     end
   end
 
   defp check_condition({:quest_completed, quest_id}) do
-    case Hive.Quests.get(quest_id) do
+    case GiTF.Quests.get(quest_id) do
       {:ok, %{status: "completed"}} -> true
       _ -> false
     end
   end
 
   defp check_condition({:quest_failed, quest_id}) do
-    case Hive.Quests.get(quest_id) do
+    case GiTF.Quests.get(quest_id) do
       {:ok, %{status: "failed"}} -> true
       _ -> false
     end
   end
 
   defp check_condition({:bee_stopped, bee_id}) do
-    case Hive.Bees.get(bee_id) do
+    case GiTF.Bees.get(bee_id) do
       {:ok, %{status: status}} when status in ["stopped", "crashed"] -> true
       _ -> false
     end
   end
 
   defp check_condition({:waggle, filter}) when is_map(filter) do
-    waggles = Hive.Store.all(:waggles)
+    waggles = GiTF.Store.all(:waggles)
 
     Enum.any?(waggles, fn w ->
       Enum.all?(filter, fn {k, v} -> Map.get(w, k) == v end)
@@ -193,7 +193,7 @@ defmodule Hive.TestDriver.Assertions do
   end
 
   defp check_condition({:store_count, collection, expected}) do
-    Hive.Store.count(collection) == expected
+    GiTF.Store.count(collection) == expected
   rescue
     _ -> false
   end

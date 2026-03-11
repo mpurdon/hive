@@ -1,5 +1,5 @@
-defmodule Hive.E2E.QuestLifecycleTest do
-  use Hive.TestDriver.Scenario
+defmodule GiTF.E2E.QuestLifecycleTest do
+  use GiTF.TestDriver.Scenario
 
   scenario "quest completes when all jobs finish" do
     {:ok, env, comb} = Harness.add_comb(env)
@@ -32,15 +32,15 @@ defmodule Hive.E2E.QuestLifecycleTest do
 
     await(
       fn ->
-        waggles = Hive.Store.all(:waggles)
+        waggles = GiTF.Store.all(:waggles)
         Enum.any?(waggles, &(&1.from in bee_ids))
       end,
       timeout: 15_000
     )
 
     # Both jobs done means quest should be completed
-    Hive.Quests.update_status!(quest.id)
-    {:ok, final_quest} = Hive.Quests.get(quest.id)
+    GiTF.Quests.update_status!(quest.id)
+    {:ok, final_quest} = GiTF.Quests.get(quest.id)
     assert final_quest.status == "completed"
 
     # Verify timeline captured telemetry events
@@ -70,8 +70,8 @@ defmodule Hive.E2E.QuestLifecycleTest do
     await({:job_done, job1.id}, timeout: 15_000)
 
     # Update quest status
-    Hive.Quests.update_status!(quest.id)
-    {:ok, updated_quest} = Hive.Quests.get(quest.id)
+    GiTF.Quests.update_status!(quest.id)
+    {:ok, updated_quest} = GiTF.Quests.get(quest.id)
 
     # job2 is still pending, so quest shouldn't be completed
     assert updated_quest.status != "completed"

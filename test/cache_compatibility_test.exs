@@ -1,6 +1,6 @@
 defmodule CacheCompatibilityTest do
   use ExUnit.Case
-  alias Hive.Runtime.CacheControl
+  alias GiTF.Runtime.CacheControl
 
   test "only applies anthropic caching to anthropic models" do
     # Current implementation is naive and doesn't take model arg.

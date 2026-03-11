@@ -1,5 +1,5 @@
-defmodule Hive.E2E.FailureRetryTest do
-  use Hive.TestDriver.Scenario
+defmodule GiTF.E2E.FailureRetryTest do
+  use GiTF.TestDriver.Scenario
 
   scenario "failed bee sends job_failed waggle" do
     {:ok, env, comb} = Harness.add_comb(env)
@@ -16,7 +16,7 @@ defmodule Hive.E2E.FailureRetryTest do
       Harness.spawn_mock_bee(env, job1.id, comb.id,
         exit_code: 1,
         delay_ms: 100,
-        mock_opts: [events: Hive.TestDriver.MockClaude.failure_events()]
+        mock_opts: [events: GiTF.TestDriver.MockClaude.failure_events()]
       )
 
     # Job should transition to failed
@@ -45,7 +45,7 @@ defmodule Hive.E2E.FailureRetryTest do
       Harness.spawn_mock_bee(env, job1.id, comb.id,
         exit_code: 1,
         delay_ms: 100,
-        mock_opts: [events: Hive.TestDriver.MockClaude.failure_events()]
+        mock_opts: [events: GiTF.TestDriver.MockClaude.failure_events()]
       )
 
     # Wait for the bee to stop (it exited with code 1)
@@ -77,15 +77,15 @@ defmodule Hive.E2E.FailureRetryTest do
 
     # Create a bee record and transition the job to failed state manually
     {:ok, bee} =
-      Hive.Store.insert(:bees, %{name: "exhaust-bee", status: "working", job_id: job1.id})
+      GiTF.Store.insert(:bees, %{name: "exhaust-bee", status: "working", job_id: job1.id})
 
-    {:ok, _} = Hive.Jobs.assign(job1.id, bee.id)
-    {:ok, _} = Hive.Jobs.start(job1.id)
-    {:ok, _} = Hive.Jobs.fail(job1.id)
+    {:ok, _} = GiTF.Jobs.assign(job1.id, bee.id)
+    {:ok, _} = GiTF.Jobs.start(job1.id)
+    {:ok, _} = GiTF.Jobs.fail(job1.id)
 
     # Set retry_count on job record to max so next failure triggers exhaustion
-    job_record = Hive.Store.get(:jobs, job1.id)
-    Hive.Store.put(:jobs, Map.put(job_record, :retry_count, 3))
+    job_record = GiTF.Store.get(:jobs, job1.id)
+    GiTF.Store.put(:jobs, Map.put(job_record, :retry_count, 3))
 
     # Send failure waggle directly to Queen
     waggle = %{
