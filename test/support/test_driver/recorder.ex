@@ -4,7 +4,7 @@ defmodule GiTF.TestDriver.Recorder do
 
   Attaches to:
   - All `GiTF.Telemetry.events()` via `:telemetry.attach_many/4`
-  - PubSub topics: `waggle:queen`, `section:progress`, `section:costs`, `section:system`
+  - PubSub topics: `waggle:major`, `section:progress`, `section:costs`, `section:system`
   - Store polling every 200ms, diffing snapshots for changes
 
   The timeline is a list of entries ordered by timestamp:
@@ -15,7 +15,7 @@ defmodule GiTF.TestDriver.Recorder do
 
   use GenServer
 
-  @pubsub_topics ["waggle:queen", "section:progress", "section:costs", "section:system"]
+  @pubsub_topics ["link:major", "section:progress", "section:costs", "section:system"]
   @poll_interval_ms 200
 
   # -- Client API --------------------------------------------------------------

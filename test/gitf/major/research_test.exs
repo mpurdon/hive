@@ -1,7 +1,7 @@
-defmodule GiTF.Queen.ResearchTest do
+defmodule GiTF.Major.ResearchTest do
   use ExUnit.Case, async: false
 
-  alias GiTF.Queen.Research
+  alias GiTF.Major.Research
   alias GiTF.Store
 
   setup do

@@ -129,7 +129,7 @@ defmodule GiTF.Runtime.ModelsTest do
     end
 
     test "returns nil for queen in API mode" do
-      assert nil == Models.workspace_setup("queen", "/tmp/test-gitf")
+      assert nil == Models.workspace_setup("major", "/tmp/test-gitf")
     end
   end
 

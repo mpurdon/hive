@@ -38,7 +38,7 @@ defmodule GiTF.Plugin.Model do
 
   # Optional callbacks
   @callback find_executable() :: {:ok, String.t()} | {:error, :not_found}
-  @callback workspace_setup(bee_or_queen :: String.t(), gitf_root :: String.t()) :: map() | nil
+  @callback workspace_setup(bee_or_major :: String.t(), gitf_root :: String.t()) :: map() | nil
   @callback pricing() :: %{
               String.t() => %{
                 input: float(),

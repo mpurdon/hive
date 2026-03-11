@@ -156,10 +156,10 @@ defmodule GiTF.Budget.Watchdog do
           Logger.info("Quest #{quest.id} budget restored, resuming")
           update_quest_status(quest.id, "active")
 
-          # Notify Queen to re-evaluate
+          # Notify Major to re-evaluate
           GiTF.Waggle.send(
             "watchdog",
-            "queen",
+            "major",
             "quest_advance",
             quest.id
           )

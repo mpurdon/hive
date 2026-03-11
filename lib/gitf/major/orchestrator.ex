@@ -1,20 +1,20 @@
-defmodule GiTF.Queen.Orchestrator do
+defmodule GiTF.Major.Orchestrator do
   @moduledoc """
-  Queen's orchestration capabilities for the expert-driven pipeline.
+  Major's orchestration capabilities for the expert-driven pipeline.
 
   Manages the full phase pipeline:
   pending → research → requirements → design → review → planning → implementation → validation → completed
 
   Each phase spawns a bee that produces a structured JSON artifact stored
   on the quest record. When a phase bee's "job_complete" waggle arrives,
-  the Queen calls `advance_quest`, which checks for the artifact and
+  the Major calls `advance_quest`, which checks for the artifact and
   spawns the next phase's bee.
   """
 
   require Logger
 
   alias GiTF.Store
-  alias GiTF.Queen.{FastPath, PhasePrompts, Planner}
+  alias GiTF.Major.{FastPath, PhasePrompts, Planner}
 
   @phases ~w(research requirements design review planning implementation validation awaiting_approval merge)
   @max_redesign_iterations 2
@@ -75,7 +75,7 @@ defmodule GiTF.Queen.Orchestrator do
   @doc """
   Advance quest to next phase if current phase is complete.
 
-  Called by the Queen when a bee completes. Checks if the current phase's
+  Called by the Major when a bee completes. Checks if the current phase's
   artifact exists, and if so, transitions to the next phase.
   """
   @spec advance_quest(String.t()) :: {:ok, String.t()} | {:error, term()}
@@ -270,7 +270,7 @@ defmodule GiTF.Queen.Orchestrator do
           generate_synthetic_jobs(quest)
       end
 
-      # Spawn ready jobs — the Queen's spawn_ready_jobs handles this
+      # Spawn ready jobs — the Major's spawn_ready_jobs handles this
       {:ok, quest} = GiTF.Quests.get(quest.id)
       spawn_implementation_jobs(quest)
 
@@ -580,7 +580,7 @@ defmodule GiTF.Queen.Orchestrator do
         attempt_fallback_plan(quest)
 
       Enum.any?(impl_jobs, &(&1.status == "failed")) ->
-        # Let the Queen's retry logic handle failures
+        # Let the Major's retry logic handle failures
         {:ok, "implementation"}
 
       true ->

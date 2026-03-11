@@ -3,7 +3,7 @@ defmodule GiTF.Run do
   Context module for coordinated run management.
 
   A run represents a single execution attempt of a quest -- all the bees
-  spawned to work on its jobs during one pass. Tracking runs lets the Queen
+  spawned to work on its jobs during one pass. Tracking runs lets the Major
   know when every job in a batch has finished (completed or failed) so it
   can trigger quest completion or the next phase automatically.
 

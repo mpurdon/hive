@@ -40,7 +40,7 @@ defmodule GiTF.Plugin.Builtin.Channels.Telegram do
 
   @impl GiTF.Plugin.Channel
   def subscriptions do
-    ["waggle:queen", "section:system"]
+    ["link:major", "section:system"]
   end
 
   # -- GenServer callbacks ---------------------------------------------------

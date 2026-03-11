@@ -13,7 +13,7 @@ defmodule GiTF.CLI.Help do
     IO.puts("💡 Next steps:")
     IO.puts("   1. Add a codebase:    section comb add /path/to/repo --auto")
     IO.puts("   2. Create a quest:    section quest new \"Build feature X\"")
-    IO.puts("   3. Start the Queen:   section queen")
+    IO.puts("   3. Start the Major:   section queen")
     IO.puts("   4. Monitor progress:  section watch")
   end
 
@@ -28,7 +28,7 @@ defmodule GiTF.CLI.Help do
   def show_tip(:quest_created) do
     IO.puts("")
     IO.puts("💡 To start working on this quest:")
-    IO.puts("   • Start the Queen:    section queen")
+    IO.puts("   • Start the Major:    section queen")
     IO.puts("   • Monitor progress:   section watch")
     IO.puts("   • View in dashboard:  section dashboard")
   end
@@ -77,7 +77,7 @@ defmodule GiTF.CLI.Help do
       # Quest with budget limit
       $ section quest new "Refactor module" --budget 5.00
 
-    The Queen will analyze your goal, research the codebase, create a plan,
+    The Major will analyze your goal, research the codebase, create a plan,
     and spawn bees to execute the work.
     """
   end
@@ -159,7 +159,7 @@ defmodule GiTF.CLI.Help do
       section quest new "goal"            Create quest
       section quest list                  List all quests
       section quest show <id>             Show quest details
-      section queen                       Start Queen coordinator
+      section queen                       Start Major coordinator
 
     Monitoring:
       section watch                       Live progress monitor

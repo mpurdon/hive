@@ -39,8 +39,8 @@ defmodule GiTF.Runtime.ToolBoxTest do
       refute "run_bash" in names
     end
 
-    test "returns queen tools for :queen set", %{dir: dir} do
-      tools = ToolBox.tools(working_dir: dir, tool_set: :queen)
+    test "returns queen tools for :major set", %{dir: dir} do
+      tools = ToolBox.tools(working_dir: dir, tool_set: :major)
       names = Enum.map(tools, & &1.name)
 
       # Has standard tools

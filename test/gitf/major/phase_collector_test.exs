@@ -1,7 +1,7 @@
-defmodule GiTF.Queen.PhaseCollectorTest do
+defmodule GiTF.Major.PhaseCollectorTest do
   use ExUnit.Case, async: true
 
-  alias GiTF.Queen.PhaseCollector
+  alias GiTF.Major.PhaseCollector
 
   describe "extract_json/1" do
     test "parses raw JSON object" do

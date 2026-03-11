@@ -2,7 +2,7 @@ defmodule GiTF.Waggle do
   @moduledoc """
   Context module for the waggle messaging system.
 
-  Waggles are inter-agent messages that flow between the Queen and her bees.
+  Waggles are inter-agent messages that flow between the Major and her bees.
   Each waggle is persisted to the store for auditability and also broadcast
   via PubSub for real-time subscribers.
   """
@@ -115,7 +115,7 @@ defmodule GiTF.Waggle do
   @spec send_checkpoint(String.t(), map()) :: {:ok, map()} | {:error, term()}
   def send_checkpoint(bee_id, %{} = data) do
     body = Jason.encode!(data)
-    __MODULE__.send(bee_id, "queen", "checkpoint", body)
+    __MODULE__.send(bee_id, "major", "checkpoint", body)
   end
 
   @doc """
@@ -126,7 +126,7 @@ defmodule GiTF.Waggle do
   @spec send_resource_warning(String.t(), map()) :: {:ok, map()} | {:error, term()}
   def send_resource_warning(bee_id, %{} = data) do
     body = Jason.encode!(data)
-    __MODULE__.send(bee_id, "queen", "resource_warning", body)
+    __MODULE__.send(bee_id, "major", "resource_warning", body)
   end
 
   @doc """
@@ -139,7 +139,7 @@ defmodule GiTF.Waggle do
   def send_clarification(bee_id, %{question: question} = data) do
     context = Map.get(data, :context, "")
     body = Jason.encode!(%{question: question, context: context})
-    __MODULE__.send(bee_id, "queen", "clarification_needed", body)
+    __MODULE__.send(bee_id, "major", "clarification_needed", body)
   end
 
   @doc "Subscribes the calling process to a PubSub topic."
@@ -151,8 +151,8 @@ defmodule GiTF.Waggle do
   @doc """
   Builds a canonical topic string for a given entity type and identifier.
   """
-  @spec topic(:queen | :bee | :comb, String.t() | nil) :: String.t()
-  def topic(:queen, _), do: "waggle:queen"
+  @spec topic(:major | :bee | :comb, String.t() | nil) :: String.t()
+  def topic(:major, _), do: "link:major"
   def topic(:bee, id), do: "waggle:bee:#{id}"
   def topic(:comb, name), do: "waggle:comb:#{name}"
 

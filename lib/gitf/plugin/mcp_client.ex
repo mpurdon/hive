@@ -3,7 +3,7 @@ defmodule GiTF.Plugin.MCPClient do
   JSON-RPC client for MCP servers.
 
   Handles communication with MCP servers over stdio or SSE transport.
-  Exposes discovered tools to the Queen's context.
+  Exposes discovered tools to the Major's context.
   """
 
   use GenServer

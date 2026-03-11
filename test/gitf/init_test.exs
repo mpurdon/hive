@@ -26,9 +26,9 @@ defmodule GiTF.InitTest do
       assert {:ok, ^workspace} = GiTF.Init.init(workspace)
 
       assert File.dir?(Path.join(workspace, ".gitf"))
-      assert File.dir?(Path.join([workspace, ".gitf", "queen"]))
+      assert File.dir?(Path.join([workspace, ".gitf", "major"]))
       assert File.exists?(Path.join([workspace, ".gitf", "config.toml"]))
-      assert File.exists?(Path.join([workspace, ".gitf", "queen", "QUEEN.md"]))
+      assert File.exists?(Path.join([workspace, ".gitf", "major", "QUEEN.md"]))
     end
 
     test "writes a valid TOML config" do
@@ -38,7 +38,7 @@ defmodule GiTF.InitTest do
 
       config_path = Path.join([workspace, ".gitf", "config.toml"])
       assert {:ok, config} = GiTF.Config.read_config(config_path)
-      assert config["queen"]["max_bees"] == 5
+      assert config["major"]["max_bees"] == 5
     end
 
     test "writes QUEEN.md with delegation instructions" do
@@ -46,10 +46,10 @@ defmodule GiTF.InitTest do
 
       {:ok, _} = GiTF.Init.init(workspace)
 
-      queen_path = Path.join([workspace, ".gitf", "queen", "QUEEN.md"])
+      queen_path = Path.join([workspace, ".gitf", "major", "QUEEN.md"])
       content = File.read!(queen_path)
 
-      assert content =~ "Queen Instructions"
+      assert content =~ "Major Instructions"
       assert content =~ "COORDINATION, not coding"
       assert content =~ "NEVER write the code yourself"
     end

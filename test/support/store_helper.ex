@@ -2,7 +2,7 @@ defmodule GiTF.Test.StoreHelper do
   @moduledoc """
   Helpers for restarting GenServers in tests.
 
-  The application starts GiTF.Store, GiTF.Queen, GiTF.Drone, etc. automatically.
+  The application starts GiTF.Store, GiTF.Major, GiTF.Drone, etc. automatically.
   Tests that need isolated instances must stop the existing ones first.
   """
 

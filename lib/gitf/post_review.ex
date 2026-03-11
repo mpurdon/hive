@@ -15,7 +15,7 @@ defmodule GiTF.PostReview do
   @doc """
   Starts a post-merge review window for a completed quest.
 
-  Inserts a review record that will be checked periodically by the Queen.
+  Inserts a review record that will be checked periodically by the Major.
   """
   @spec start_review(String.t()) :: {:ok, map()} | {:error, term()}
   def start_review(quest_id) do

@@ -1,11 +1,11 @@
-defmodule GiTF.Queen do
+defmodule GiTF.Major do
   @moduledoc """
-  GenServer for the Queen orchestrator process.
+  GenServer for the Major orchestrator process.
 
-  The Queen coordinates work across bees by subscribing to waggle messages
+  The Major coordinates work across bees by subscribing to waggle messages
   and reacting to status updates. This is a thin GenServer -- the business
   logic for waggle processing lives in `GiTF.Waggle` and `GiTF.Prime`,
-  while the Queen merely maintains session state and dispatches reactions.
+  while the Major merely maintains session state and dispatches reactions.
 
   ## State
 
@@ -17,7 +17,7 @@ defmodule GiTF.Queen do
 
   ## Lifecycle
 
-  The Queen is NOT auto-started by the Application supervisor. It is
+  The Major is NOT auto-started by the Application supervisor. It is
   started on-demand when the user runs `gitf major`, and uses a
   `:transient` restart strategy so it stays down if stopped gracefully.
   """
@@ -25,14 +25,14 @@ defmodule GiTF.Queen do
   use GenServer
   require Logger
 
-  @name GiTF.Queen
+  @name GiTF.Major
   @waggle_recovery_interval :timer.seconds(30)
   @waggle_stale_seconds 30
 
   # -- Client API ------------------------------------------------------------
 
   @doc """
-  Starts the Queen GenServer.
+  Starts the Major GenServer.
 
   ## Options
 
@@ -44,20 +44,20 @@ defmodule GiTF.Queen do
     GenServer.start_link(__MODULE__, %{gitf_root: gitf_root}, name: @name)
   end
 
-  @doc "Activates the Queen session. Sets status to `:active`."
+  @doc "Activates the Major session. Sets status to `:active`."
   @spec start_session() :: :ok
   def start_session do
     GenServer.call(@name, :start_session)
   end
 
-  @doc "Deactivates the Queen session. Sets status to `:idle`."
+  @doc "Deactivates the Major session. Sets status to `:idle`."
   @spec stop_session() :: :ok
   def stop_session do
     GenServer.call(@name, :stop_session)
   end
 
   @doc """
-  Launches an interactive Claude session for the Queen.
+  Launches an interactive Claude session for the Major.
 
   Sets up the queen workspace with settings, then spawns Claude
   interactively. The GenServer monitors the port and handles its
@@ -68,13 +68,13 @@ defmodule GiTF.Queen do
     GenServer.call(@name, :launch)
   end
 
-  @doc "Returns the current Queen state for inspection."
+  @doc "Returns the current Major state for inspection."
   @spec status() :: map()
   def status do
     GenServer.call(@name, :status)
   end
 
-  @doc "Blocks until the Queen's Claude session exits."
+  @doc "Blocks until the Major's Claude session exits."
   @spec await_session_end() :: :ok
   def await_session_end do
     GenServer.call(@name, :await_session_end, :infinity)
@@ -84,10 +84,10 @@ defmodule GiTF.Queen do
 
   @impl true
   def init(%{gitf_root: gitf_root}) do
-    GiTF.Logger.set_queen_context()
+    GiTF.Logger.set_major_context()
 
     # Subscribe to waggle messages addressed to the queen
-    GiTF.Waggle.subscribe("waggle:queen")
+    GiTF.Waggle.subscribe("link:major")
 
     max_bees = read_max_bees(gitf_root)
 
@@ -109,7 +109,7 @@ defmodule GiTF.Queen do
       :error -> Logger.warning("Drone is not running")
     end
 
-    Logger.info("Queen initialized at #{gitf_root}")
+    Logger.info("Major initialized at #{gitf_root}")
 
     # Recover stuck jobs whose worker processes died
     recover_stuck_jobs()
@@ -141,12 +141,12 @@ defmodule GiTF.Queen do
 
   @impl true
   def handle_call(:start_session, _from, state) do
-    Logger.info("Queen session started")
+    Logger.info("Major session started")
     {:reply, :ok, %{state | status: :active}}
   end
 
   def handle_call(:stop_session, _from, state) do
-    Logger.info("Queen session stopped")
+    Logger.info("Major session stopped")
     {:reply, :ok, %{state | status: :idle}}
   end
 
@@ -175,7 +175,7 @@ defmodule GiTF.Queen do
   end
 
   def handle_info({port, {:exit_status, _status}}, %{port: port} = state) when is_port(port) do
-    Logger.info("Queen's Claude session ended")
+    Logger.info("Major's Claude session ended")
 
     if state[:awaiter] do
       GenServer.reply(state.awaiter, :ok)
@@ -187,7 +187,7 @@ defmodule GiTF.Queen do
   # API mode: Task completion
   def handle_info({ref, {:ok, _result}}, state) when is_reference(ref) do
     Process.demonitor(ref, [:flush])
-    Logger.info("Queen's API session completed")
+    Logger.info("Major's API session completed")
 
     if state[:awaiter] do
       GenServer.reply(state.awaiter, :ok)
@@ -198,7 +198,7 @@ defmodule GiTF.Queen do
 
   def handle_info({ref, {:error, reason}}, state) when is_reference(ref) do
     Process.demonitor(ref, [:flush])
-    Logger.warning("Queen's API session failed: #{inspect(reason)}")
+    Logger.warning("Major's API session failed: #{inspect(reason)}")
 
     if state[:awaiter] do
       GenServer.reply(state.awaiter, :ok)
@@ -208,7 +208,7 @@ defmodule GiTF.Queen do
   end
 
   def handle_info({:DOWN, ref, :process, _pid, reason}, state) when is_reference(ref) do
-    Logger.warning("Queen's API session process died: #{inspect(reason)}")
+    Logger.warning("Major's API session process died: #{inspect(reason)}")
 
     if state[:awaiter] do
       GenServer.reply(state.awaiter, :ok)
@@ -308,7 +308,7 @@ defmodule GiTF.Queen do
   end
 
   def handle_info(msg, state) do
-    Logger.debug("Queen received unexpected message: #{inspect(msg)}")
+    Logger.debug("Major received unexpected message: #{inspect(msg)}")
     {:noreply, state}
   end
 
@@ -384,14 +384,14 @@ defmodule GiTF.Queen do
   end
 
   # -- Private: waggle handling ----------------------------------------------
-  # Business logic is deliberately minimal here. The Queen GenServer
+  # Business logic is deliberately minimal here. The Major GenServer
   # dispatches to pattern-matched handlers. Heavier orchestration logic
   # will move to dedicated context modules as the system grows.
 
   defp handle_waggle(%{subject: "job_complete"} = waggle, state) do
     Logger.info("Bee #{waggle.from} reports job complete. Initiating verification...")
 
-    # We remove from active_bees immediately so Queen doesn't think it's still "working"
+    # We remove from active_bees immediately so Major doesn't think it's still "working"
     # but we don't advance quest yet.
     state = update_in(state.active_bees, &Map.delete(&1, waggle.from))
 
@@ -407,7 +407,7 @@ defmodule GiTF.Queen do
           state
 
         {:ok, %{verification_status: vs}} when vs in ["passed", "failed"] ->
-          # Already verified (e.g., by worker inline) — skip Queen-side verification
+          # Already verified (e.g., by worker inline) — skip Major-side verification
           Logger.info("Job #{job_id} already verified (#{vs}), skipping duplicate verification")
           if vs == "passed" do
             notify_run_job_completed(job_id)
@@ -635,7 +635,7 @@ defmodule GiTF.Queen do
   defp handle_waggle(%{subject: "quest_advance"} = waggle, state) do
     # Handle quest phase advancement requests
     quest_id = waggle.body
-    case GiTF.Queen.Orchestrator.advance_quest(quest_id) do
+    case GiTF.Major.Orchestrator.advance_quest(quest_id) do
       {:ok, new_phase} ->
         Logger.info("Quest #{quest_id} advanced to #{new_phase} phase")
       {:error, reason} ->
@@ -652,12 +652,12 @@ defmodule GiTF.Queen do
           notes: Map.get(data, "notes")
         }
         GiTF.HumanGate.approve(quest_id, opts)
-        GiTF.Queen.Orchestrator.advance_quest(quest_id)
+        GiTF.Major.Orchestrator.advance_quest(quest_id)
 
       {:ok, %{"action" => "reject", "quest_id" => quest_id} = data} ->
         reason = Map.get(data, "reason", "Rejected via waggle")
         GiTF.HumanGate.reject(quest_id, reason)
-        GiTF.Queen.Orchestrator.advance_quest(quest_id)
+        GiTF.Major.Orchestrator.advance_quest(quest_id)
 
       _ ->
         Logger.warning("Invalid human_approval waggle body: #{waggle.body}")
@@ -683,7 +683,7 @@ defmodule GiTF.Queen do
   end
 
   defp handle_waggle(waggle, state) do
-    Logger.debug("Queen received waggle from #{waggle.from}: #{waggle.subject}")
+    Logger.debug("Major received waggle from #{waggle.from}: #{waggle.subject}")
     state
   end
 
@@ -695,7 +695,7 @@ defmodule GiTF.Queen do
         job_id = bee.job_id
         feedback = waggle.body
 
-        # Read persisted retry count from job record (survives Queen restarts)
+        # Read persisted retry count from job record (survives Major restarts)
         attempts =
           case GiTF.Jobs.get(job_id) do
             {:ok, job} -> Map.get(job, :retry_count, 0)
@@ -767,8 +767,8 @@ defmodule GiTF.Queen do
             Logger.warning("Budget exceeded for quest #{job.quest_id}, skipping retry")
 
             GiTF.Waggle.send(
-              "queen",
-              "queen",
+              "major",
+              "major",
               "budget_exceeded",
               "Quest #{job.quest_id} budget exceeded, job #{job_id} retry skipped"
             )
@@ -792,12 +792,12 @@ defmodule GiTF.Queen do
       GiTF.Quests.update_status!(quest_id)
 
       # Try to advance quest through orchestrator
-      case GiTF.Queen.Orchestrator.advance_quest(quest_id) do
+      case GiTF.Major.Orchestrator.advance_quest(quest_id) do
         {:ok, "completed"} ->
           Logger.info("Quest completed: #{quest_id}")
           GiTF.Waggle.send(
             "system",
-            "queen",
+            "major",
             "quest_completed",
             "Quest #{quest_id} — all jobs done"
           )
@@ -812,7 +812,7 @@ defmodule GiTF.Queen do
               Logger.info("Quest completed: #{quest.name} (#{quest_id})")
               GiTF.Waggle.send(
                 "system",
-                "queen",
+                "major",
                 "quest_completed",
                 "Quest \"#{quest.name}\" (#{quest_id}) — all jobs done"
               )
@@ -832,7 +832,7 @@ defmodule GiTF.Queen do
               Logger.info("Quest completed: #{quest.name} (#{quest_id})")
               GiTF.Waggle.send(
                 "system",
-                "queen",
+                "major",
                 "quest_completed",
                 "Quest \"#{quest.name}\" (#{quest_id}) — all jobs done"
               )
@@ -880,7 +880,7 @@ defmodule GiTF.Queen do
 
         active_count = GiTF.Bees.list(status: "working") |> length()
         available_slots = max(state.max_bees - active_count, 0)
-        stagger_delay = GiTF.Config.Provider.get([:queen, :stagger_delay_ms], 2000)
+        stagger_delay = GiTF.Config.Provider.get([:major, :stagger_delay_ms], 2000)
 
         jobs_to_spawn = Enum.take(pending_jobs, available_slots)
 
@@ -1039,7 +1039,7 @@ defmodule GiTF.Queen do
 
       if Enum.empty?(quest_jobs) do
         Logger.info("Resuming stalled quest #{quest.id} (phase: #{quest[:current_phase]}, no active jobs)")
-        GiTF.Queen.Orchestrator.advance_quest(quest.id)
+        GiTF.Major.Orchestrator.advance_quest(quest.id)
       end
     end)
   rescue
@@ -1058,7 +1058,7 @@ defmodule GiTF.Queen do
     |> Enum.each(fn quest ->
       current_phase = quest[:current_phase]
 
-      case GiTF.Queen.Orchestrator.advance_quest(quest.id) do
+      case GiTF.Major.Orchestrator.advance_quest(quest.id) do
         {:ok, new_phase} ->
           if new_phase != current_phase do
             Logger.info("Periodic phase check advanced quest #{quest.id} to #{new_phase}")
@@ -1185,7 +1185,7 @@ defmodule GiTF.Queen do
     cutoff = DateTime.add(DateTime.utc_now(), -@waggle_stale_seconds, :second)
 
     unread =
-      GiTF.Waggle.list(to: "queen", read: false)
+      GiTF.Waggle.list(to: "major", read: false)
       |> Enum.filter(fn w ->
         DateTime.compare(w.inserted_at, cutoff) == :lt
       end)
@@ -1223,7 +1223,7 @@ defmodule GiTF.Queen do
 
     with :ok <- File.mkdir_p(queen_workspace),
          :ok <- setup_sparse_checkout(queen_workspace, state.gitf_root),
-         :ok <- maybe_generate_settings(:queen, state.gitf_root, queen_workspace) do
+         :ok <- maybe_generate_settings(:major, state.gitf_root, queen_workspace) do
       GiTF.Runtime.Models.spawn_interactive(queen_workspace)
     end
   end
@@ -1235,10 +1235,10 @@ defmodule GiTF.Queen do
     # In API mode, start an agent loop task with queen tools
     task = Task.async(fn ->
       GiTF.Runtime.AgentLoop.run(
-        "You are the Queen orchestrator for a GiTF of AI coding agents. " <>
+        "You are the Major orchestrator for a GiTF of AI coding agents. " <>
           "Monitor active quests, manage bee workers, and coordinate work.",
         queen_workspace,
-        tool_set: :queen,
+        tool_set: :major,
         max_iterations: 200,
         model: GiTF.Runtime.ModelResolver.resolve("opus")
       )
@@ -1270,11 +1270,11 @@ defmodule GiTF.Queen do
   end
 
   defp queen_workspace_path(gitf_root) do
-    Path.join([gitf_root, ".gitf", "queen"])
+    Path.join([gitf_root, ".gitf", "major"])
   end
 
-  defp maybe_generate_settings(:queen, gitf_root, workspace) do
-    case GiTF.Runtime.Models.workspace_setup("queen", gitf_root) do
+  defp maybe_generate_settings(:major, gitf_root, workspace) do
+    case GiTF.Runtime.Models.workspace_setup("major", gitf_root) do
       nil ->
         :ok
 
@@ -1382,7 +1382,7 @@ defmodule GiTF.Queen do
     config_path = Path.join([gitf_root, ".gitf", "config.toml"])
 
     case GiTF.Config.read_config(config_path) do
-      {:ok, config} -> get_in(config, ["queen", "max_bees"]) || 5
+      {:ok, config} -> get_in(config, ["major", "max_bees"]) || 5
       {:error, _} -> 5
     end
   end

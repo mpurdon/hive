@@ -103,7 +103,7 @@ defmodule GiTF.Reputation do
   @doc """
   Recomputes reputations relevant to a completed/failed job.
 
-  Called by Queen after verification pass/fail.
+  Called by Major after verification pass/fail.
   """
   @spec update_after_job(String.t()) :: :ok
   def update_after_job(job_id) do

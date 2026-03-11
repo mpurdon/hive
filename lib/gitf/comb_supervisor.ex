@@ -3,7 +3,7 @@ defmodule GiTF.CombSupervisor do
   DynamicSupervisor for bee processes.
 
   Each bee runs as a temporary child under this supervisor. When a bee
-  crashes or finishes, it is not automatically restarted -- the Queen
+  crashes or finishes, it is not automatically restarted -- the Major
   decides whether to respawn.
 
   The supervisor itself uses `:one_for_one` strategy and lives in the

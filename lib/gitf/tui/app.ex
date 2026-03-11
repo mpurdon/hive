@@ -297,7 +297,7 @@ defmodule GiTF.TUI.App do
         {:error, reason} ->
           # Fallback to local if not remote
           unless GiTF.Client.remote?() do
-            {:ok, jobs} = GiTF.Queen.Planner.create_jobs_from_specs(quest_id, specs)
+            {:ok, jobs} = GiTF.Major.Planner.create_jobs_from_specs(quest_id, specs)
             GiTF.Quests.store_artifact(quest_id, "planning", specs)
             {:ok, "Plan confirmed. #{length(jobs)} job(s) created.", nil}
           else
@@ -416,7 +416,7 @@ defmodule GiTF.TUI.App do
 
     case GiTF.Runtime.AgentLoop.run(text, cwd,
            system_prompt: system_prompt,
-           tool_set: :queen,
+           tool_set: :major,
            max_iterations: 20,
            max_tokens: 8192
          ) do
@@ -489,7 +489,7 @@ defmodule GiTF.TUI.App do
       end)
 
     """
-    You are the Queen's assistant running inside the GiTF TUI dashboard.
+    You are the Major's assistant running inside the GiTF TUI dashboard.
     You help the user monitor and control their autonomous coding swarm.
     Keep responses brief — this is a terminal chat panel, not a document.
     IMPORTANT: Do NOT use markdown, tables, bold, headers, or emojis. Plain text only.
@@ -500,7 +500,7 @@ defmodule GiTF.TUI.App do
     - Job: a discrete unit of work within a quest
     - Bee: an autonomous AI coding agent that works on jobs in isolated git worktrees (cells)
     - Waggle: a message between agents (like bee-to-queen status updates)
-    - Queen: the central coordinator that manages quests, spawns bees, handles retries
+    - Major: the central coordinator that manages quests, spawns bees, handles retries
     - Drone: autonomous watchdog that monitors quality
 
     CLI commands the user can run outside the TUI:
@@ -834,15 +834,15 @@ defmodule GiTF.TUI.App do
       if bee[:job_id] do
         GiTF.Jobs.complete(bee[:job_id])
         GiTF.Jobs.unblock_dependents(bee[:job_id])
-        GiTF.Waggle.send(bee[:id], "queen", "job_complete", "Job #{bee[:job_id]} completed (reaped)")
+        GiTF.Waggle.send(bee[:id], "major", "job_complete", "Job #{bee[:job_id]} completed (reaped)")
 
-        # Tell Queen to advance
-        case Process.whereis(GiTF.Queen) do
+        # Tell Major to advance
+        case Process.whereis(GiTF.Major) do
           nil -> :ok
           _pid ->
             try do
               {:ok, job} = GiTF.Jobs.get(bee[:job_id])
-              GiTF.Queen.Orchestrator.advance_quest(job.quest_id)
+              GiTF.Major.Orchestrator.advance_quest(job.quest_id)
             rescue
               _ -> :ok
             end
@@ -860,7 +860,7 @@ defmodule GiTF.TUI.App do
 
       if bee[:job_id] do
         GiTF.Jobs.fail(bee[:job_id])
-        GiTF.Waggle.send(bee[:id], "queen", "job_failed", "Job #{bee[:job_id]} failed: #{reason}")
+        GiTF.Waggle.send(bee[:id], "major", "job_failed", "Job #{bee[:job_id]} failed: #{reason}")
       end
     rescue
       _ -> :ok

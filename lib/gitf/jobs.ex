@@ -90,7 +90,7 @@ defmodule GiTF.Jobs do
         verified_at: nil,
         # Risk level for adaptive permissions
         risk_level: classification[:risk_level] || attrs[:risk_level] || :low,
-        # Retry tracking (persisted, survives Queen restarts)
+        # Retry tracking (persisted, survives Major restarts)
         retry_count: attrs[:retry_count] || 0,
         # Per-job verification contract
         verification_contract: attrs[:verification_contract],

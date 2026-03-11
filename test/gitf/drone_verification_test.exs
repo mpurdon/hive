@@ -10,7 +10,7 @@ defmodule GiTF.DroneVerificationTest do
     GiTF.Test.StoreHelper.stop_store()
     {:ok, _} = Store.start_link(data_dir: System.tmp_dir!())
 
-    # Stop any existing drone (e.g. started by Queen during test setup)
+    # Stop any existing drone (e.g. started by Major during test setup)
     case Registry.lookup(GiTF.Registry, :drone) do
       [{pid, _}] ->
         try do

@@ -4,7 +4,7 @@ defmodule GiTF.Plugin.MCP do
 
   MCP servers run as child processes under `GiTF.Plugin.MCPSupervisor`.
   The MCP client handles JSON-RPC over stdio/SSE and exposes tools
-  to the Queen's context.
+  to the Major's context.
   """
 
   @callback name() :: String.t()

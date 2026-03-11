@@ -235,7 +235,7 @@ defmodule GiTF.CLI.PlanHandler do
     if answer in ["y", "yes", ""] do
       Format.info("Starting quest execution...")
 
-      case GiTF.Queen.Orchestrator.start_quest(quest.id) do
+      case GiTF.Major.Orchestrator.start_quest(quest.id) do
         {:ok, phase} ->
           Format.success("Quest #{quest.id} is now in #{phase} phase.")
           Format.info("Run `gitf server` to monitor progress.")

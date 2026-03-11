@@ -137,7 +137,7 @@ defmodule GiTF.Costs do
   @planning_phases ~w(research requirements design planning)
   @verification_phases ~w(review validation)
 
-  defp derive_category("queen"), do: "orchestration"
+  defp derive_category("major"), do: "orchestration"
 
   defp derive_category(bee_id) when is_binary(bee_id) do
     with {:ok, bee} <- GiTF.Bees.get(bee_id),

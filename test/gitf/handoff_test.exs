@@ -43,10 +43,10 @@ defmodule GiTF.HandoffTest do
 
     # Create some waggles to/from this bee
     {:ok, _sent} =
-      GiTF.Waggle.send(bee.id, "queen", "progress", "50% done with feature X")
+      GiTF.Waggle.send(bee.id, "major", "progress", "50% done with feature X")
 
     {:ok, _received} =
-      GiTF.Waggle.send("queen", bee.id, "guidance", "Focus on the API first")
+      GiTF.Waggle.send("major", bee.id, "guidance", "Focus on the API first")
 
     %{bee: bee, job: job, cell: cell, comb: comb, quest: quest}
   end

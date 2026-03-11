@@ -49,7 +49,7 @@ defmodule GiTF.Runtime.AgentLoop do
     * `:model` — model spec string (default: resolved "sonnet")
     * `:system_prompt` — system prompt text
     * `:tools` — explicit list of ReqLLM.Tool structs (overrides tool_set)
-    * `:tool_set` — `:standard`, `:readonly`, or `:queen` (default: `:standard`)
+    * `:tool_set` — `:standard`, `:readonly`, or `:major` (default: `:standard`)
     * `:max_iterations` — iteration limit (default: 50)
     * `:max_tokens` — max tokens per response (default: 16384)
     * `:on_progress` — `fn(event_map) -> :ok` callback for progress updates

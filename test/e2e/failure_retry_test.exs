@@ -29,9 +29,9 @@ defmodule GiTF.E2E.FailureRetryTest do
     assert_waggle(subject: "job_failed")
   end
 
-  scenario "Queen receives failure waggle and stays alive" do
+  scenario "Major receives failure waggle and stays alive" do
     {:ok, env, comb} = Harness.add_comb(env)
-    env = Harness.start_queen(env)
+    env = Harness.start_major(env)
 
     {:ok, _quest, [job1]} =
       Harness.create_quest(env,
@@ -52,21 +52,21 @@ defmodule GiTF.E2E.FailureRetryTest do
     await({:bee_stopped, bee1.id}, timeout: 15_000)
 
     # job_failed waggle should exist — the Worker sends it on failure
-    # Note: we await the waggle rather than job status because Queen's
+    # Note: we await the waggle rather than job status because Major's
     # retry logic may reset the job back to "pending" before we check
     assert_waggle(subject: "job_failed")
 
-    # Give Queen time to process waggle and attempt retry
+    # Give Major time to process waggle and attempt retry
     Process.sleep(1_000)
 
-    # Queen should still be alive after processing retry logic
-    # (retry spawn may fail without real Claude, but Queen shouldn't crash)
-    assert Process.alive?(env.queen_pid)
+    # Major should still be alive after processing retry logic
+    # (retry spawn may fail without real Claude, but Major shouldn't crash)
+    assert Process.alive?(env.major_pid)
   end
 
-  scenario "Queen marks quest failed after retry exhaustion" do
+  scenario "Major marks quest failed after retry exhaustion" do
     {:ok, env, comb} = Harness.add_comb(env)
-    env = Harness.start_queen(env)
+    env = Harness.start_major(env)
 
     {:ok, quest, [job1]} =
       Harness.create_quest(env,
@@ -87,17 +87,17 @@ defmodule GiTF.E2E.FailureRetryTest do
     job_record = GiTF.Store.get(:jobs, job1.id)
     GiTF.Store.put(:jobs, Map.put(job_record, :retry_count, 3))
 
-    # Send failure waggle directly to Queen
+    # Send failure waggle directly to Major
     waggle = %{
       id: "wag-exhaust-#{:erlang.unique_integer([:positive])}",
       from: bee.id,
-      to: "queen",
+      to: "major",
       subject: "job_failed",
       body: "Job failed after max retries",
       read: false
     }
 
-    Harness.send_waggle_to_queen(waggle)
+    Harness.send_waggle_to_major(waggle)
 
     # Quest should be marked as failed after exhaustion
     await({:quest_failed, quest.id}, timeout: 5_000)

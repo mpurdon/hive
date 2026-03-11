@@ -3,7 +3,7 @@ defmodule GiTF.Init do
   Initializes a new GiTF workspace at a given path.
 
   The initialization pipeline creates the directory structure, writes the
-  default configuration, seeds the Queen's instructions, and bootstraps the
+  default configuration, seeds the Major's instructions, and bootstraps the
   ETF file store.
 
   ## Directory structure
@@ -19,9 +19,9 @@ defmodule GiTF.Init do
   alias GiTF.Config
 
   @queen_instructions """
-  # Queen Instructions
+  # Major Instructions
 
-  You are the Queen of this GiTF. Your role is COORDINATION, not coding.
+  You are the Major of this GiTF. Your role is COORDINATION, not coding.
 
   ## You MUST NOT
   - Write or modify any code files
@@ -85,7 +85,7 @@ defmodule GiTF.Init do
 
   ## Workflow
 
-  The Queen follows a 6-phase workflow for every quest. Each planning phase produces
+  The Major follows a 6-phase workflow for every quest. Each planning phase produces
   a persistent markdown spec file and requires user approval before proceeding.
 
   ### Phase 1: Understand
@@ -205,7 +205,7 @@ defmodule GiTF.Init do
   """
 
   @doc """
-  Returns the Queen's instruction text.
+  Returns the Major's instruction text.
 
   Used by `GiTF.Doctor` to regenerate `QUEEN.md` when it is missing.
   """
@@ -216,7 +216,7 @@ defmodule GiTF.Init do
   Initializes a GiTF workspace at `path`.
 
   Creates the `.gitf/` directory structure, writes the default config,
-  seeds the Queen's instruction file, and starts the ETF file store.
+  seeds the Major's instruction file, and starts the ETF file store.
 
   ## Options
 
@@ -235,7 +235,7 @@ defmodule GiTF.Init do
     with :ok <- validate_path(gitf_dir, force?),
          :ok <- create_directories(gitf_dir),
          :ok <- write_config(gitf_dir),
-         :ok <- write_queen_instructions(gitf_dir),
+         :ok <- write_major_instructions(gitf_dir),
          :ok <- init_store(gitf_dir) do
       {:ok, expanded}
     end
@@ -256,7 +256,7 @@ defmodule GiTF.Init do
   defp validate_path(_gitf_dir, true), do: :ok
 
   defp create_directories(gitf_dir) do
-    queen_dir = Path.join(gitf_dir, "queen")
+    queen_dir = Path.join(gitf_dir, "major")
     quests_dir = Path.join(gitf_dir, "quests")
 
     with :ok <- File.mkdir_p(queen_dir),
@@ -270,8 +270,8 @@ defmodule GiTF.Init do
     Config.write_config(config_path)
   end
 
-  defp write_queen_instructions(gitf_dir) do
-    queen_path = Path.join([gitf_dir, "queen", "QUEEN.md"])
+  defp write_major_instructions(gitf_dir) do
+    queen_path = Path.join([gitf_dir, "major", "QUEEN.md"])
     File.write(queen_path, @queen_instructions)
   end
 

@@ -208,13 +208,13 @@ defmodule GiTF.CostsTest do
 
   describe "category derivation" do
     test "queen bee_id maps to orchestration" do
-      {:ok, cost} = Costs.record("queen", %{input_tokens: 100, output_tokens: 50})
+      {:ok, cost} = Costs.record("major", %{input_tokens: 100, output_tokens: 50})
       assert cost.category == "orchestration"
     end
 
     test "explicit category overrides auto-derivation" do
       {:ok, cost} =
-        Costs.record("queen", %{input_tokens: 100, output_tokens: 50, category: "planning"})
+        Costs.record("major", %{input_tokens: 100, output_tokens: 50, category: "planning"})
 
       assert cost.category == "planning"
     end
@@ -309,7 +309,7 @@ defmodule GiTF.CostsTest do
 
     test "summary includes by_category grouping" do
       {:ok, _} =
-        Costs.record("queen", %{input_tokens: 500, output_tokens: 250})
+        Costs.record("major", %{input_tokens: 500, output_tokens: 250})
 
       summary = Costs.summary()
       assert Map.has_key?(summary.by_category, "orchestration")

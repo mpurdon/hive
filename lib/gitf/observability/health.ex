@@ -16,7 +16,7 @@ defmodule GiTF.Observability.Health do
       {:quests, check_quests()},
       {:model_api, check_model_api()},
       {:git, check_git()},
-      {:queen, check_queen()},
+      {:major, check_major()},
       {:merge_queue, check_merge_queue()}
     ]
 
@@ -37,7 +37,7 @@ defmodule GiTF.Observability.Health do
   @doc "Get liveness status — detects zombie state (alive but unproductive)"
   def alive? do
     # Check critical processes exist
-    queen_alive = Process.whereis(GiTF.Queen) != nil
+    queen_alive = Process.whereis(GiTF.Major) != nil
     store_ok = check_store() == :ok
 
     if not queen_alive or not store_ok do
@@ -153,8 +153,8 @@ defmodule GiTF.Observability.Health do
     end
   end
 
-  defp check_queen do
-    case Process.whereis(GiTF.Queen) do
+  defp check_major do
+    case Process.whereis(GiTF.Major) do
       nil -> :warning
       pid ->
         if Process.alive?(pid) do

@@ -1,11 +1,11 @@
-defmodule GiTF.QueenVerificationTest do
+defmodule GiTF.MajorVerificationTest do
   use ExUnit.Case, async: false
   
-  # We can't easily test the Queen GenServer async verification flow without
+  # We can't easily test the Major GenServer async verification flow without
   # mocking GiTF.Verification or starting the full app.
   # But we can verify that the code compiles.
   
   test "compiles" do
-    assert Code.ensure_loaded?(GiTF.Queen)
+    assert Code.ensure_loaded?(GiTF.Major)
   end
 end

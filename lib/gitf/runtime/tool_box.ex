@@ -10,7 +10,7 @@ defmodule GiTF.Runtime.ToolBox do
 
   - `:standard` — Full read/write tools for implementation bees
   - `:readonly` — Read-only tools for phase/validation bees
-  - `:queen` — Standard tools + orchestration tools
+  - `:major` — Standard tools + orchestration tools
   """
 
   require Logger
@@ -25,7 +25,7 @@ defmodule GiTF.Runtime.ToolBox do
   ## Options
 
     * `:working_dir` — required, the directory to scope operations to
-    * `:tool_set` — `:standard` (default), `:readonly`, or `:queen`
+    * `:tool_set` — `:standard` (default), `:readonly`, or `:major`
   """
   @spec tools(keyword()) :: [ReqLLM.Tool.t()]
   def tools(opts \\ []) do
@@ -36,7 +36,7 @@ defmodule GiTF.Runtime.ToolBox do
     static =
       case tool_set do
         :readonly -> readonly_tools(working_dir)
-        :queen -> standard_tools(working_dir) ++ queen_tools()
+        :major -> standard_tools(working_dir) ++ queen_tools()
         _ -> standard_tools(working_dir)
       end
 
@@ -97,7 +97,7 @@ defmodule GiTF.Runtime.ToolBox do
     ]
   end
 
-  # -- Queen Tools -------------------------------------------------------------
+  # -- Major Tools -------------------------------------------------------------
 
   defp queen_tools do
     [
@@ -250,7 +250,7 @@ defmodule GiTF.Runtime.ToolBox do
     e -> {:ok, "git commit error: #{Exception.message(e)}"}
   end
 
-  # -- Queen tool implementations -----------------------------------------------
+  # -- Major tool implementations -----------------------------------------------
 
   defp list_quests do
     quests = GiTF.Store.all(:quests)

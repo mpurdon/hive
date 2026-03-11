@@ -3,7 +3,7 @@ defmodule GiTF.Drone do
   GenServer that periodically runs health checks (patrols) on the section.
 
   The Drone is a background watchdog that polls `GiTF.Doctor.run_all/1`
-  on a fixed interval and notifies the Queen when issues are found.
+  on a fixed interval and notifies the Major when issues are found.
   It follows the same polling pattern as `GiTF.TranscriptWatcher`.
 
   ## State
@@ -16,7 +16,7 @@ defmodule GiTF.Drone do
 
   ## Lifecycle
 
-  Started on-demand via `gitf tachikoma` or auto-started by the Queen.
+  Started on-demand via `gitf tachikoma` or auto-started by the Major.
   Registered in `GiTF.Registry` so there is at most one Drone process.
   """
 
@@ -165,12 +165,12 @@ defmodule GiTF.Drone do
     check_stuck_jobs()
     check_deadlocks()
 
-    queen_results = check_queen_heartbeat()
+    queen_results = check_major_heartbeat()
     all_results = results ++ budget_results ++ conflict_results ++ verification_results ++ queen_results
     issues = Enum.filter(all_results, &(&1.status in [:warn, :error]))
 
     if issues != [] do
-      notify_queen(issues)
+      notify_major(issues)
     end
 
     all_results
@@ -289,24 +289,24 @@ defmodule GiTF.Drone do
     _ -> []
   end
 
-  defp check_queen_heartbeat do
-    # Only check if there are active quests that need the Queen
+  defp check_major_heartbeat do
+    # Only check if there are active quests that need the Major
     active_quests = GiTF.Quests.list() |> Enum.filter(&(&1.status == "active"))
 
     if active_quests != [] do
-      case GenServer.whereis(GiTF.Queen) do
+      case GenServer.whereis(GiTF.Major) do
         nil ->
           [
             %{
               name: "queen_heartbeat",
               status: :error,
-              message: "Queen is not running but #{length(active_quests)} quest(s) are active"
+              message: "Major is not running but #{length(active_quests)} quest(s) are active"
             }
           ]
 
         pid when is_pid(pid) ->
           try do
-            GiTF.Queen.status()
+            GiTF.Major.status()
             []
           catch
             :exit, {:timeout, _} ->
@@ -314,7 +314,7 @@ defmodule GiTF.Drone do
                 %{
                   name: "queen_heartbeat",
                   status: :warn,
-                  message: "Queen is unresponsive (timeout)"
+                  message: "Major is unresponsive (timeout)"
                 }
               ]
 
@@ -323,7 +323,7 @@ defmodule GiTF.Drone do
                 %{
                   name: "queen_heartbeat",
                   status: :error,
-                  message: "Queen process is dead"
+                  message: "Major process is dead"
                 }
               ]
           end
@@ -527,13 +527,13 @@ defmodule GiTF.Drone do
     _ -> :ok
   end
 
-  defp notify_queen(issues) do
+  defp notify_major(issues) do
     summary =
       issues
       |> Enum.map(fn i -> "#{i.name}: #{i.message}" end)
       |> Enum.join("; ")
 
-    GiTF.Waggle.send("drone", "queen", "health_alert", summary)
+    GiTF.Waggle.send("drone", "major", "health_alert", summary)
   rescue
     _ -> :ok
   end
@@ -733,12 +733,12 @@ defmodule GiTF.Drone do
           case GiTF.Jobs.create_retry(job_id, feedback: feedback) do
             {:ok, retry_job} ->
               Logger.info("Drone: created retry job #{retry_job.id} for #{job_id} (attempt #{retry_count + 1})")
-              GiTF.Waggle.send("drone", "queen", "job_retry_created",
+              GiTF.Waggle.send("drone", "major", "job_retry_created",
                 "Retry #{retry_job.id} for failed job #{job_id} (attempt #{retry_count + 1})")
 
             {:error, :max_retries_exceeded} ->
               Logger.warning("Drone: job #{job_id} exhausted retries")
-              GiTF.Waggle.send("drone", "queen", "job_exhausted_retries",
+              GiTF.Waggle.send("drone", "major", "job_exhausted_retries",
                 "Job #{job_id} exhausted all retries")
 
             {:error, reason} ->
@@ -746,7 +746,7 @@ defmodule GiTF.Drone do
           end
         else
           Logger.warning("Drone: job #{job_id} already at #{retry_count} retries, no more attempts")
-          GiTF.Waggle.send("drone", "queen", "job_exhausted_retries",
+          GiTF.Waggle.send("drone", "major", "job_exhausted_retries",
             "Job #{job_id} exhausted #{retry_count} retries")
         end
 

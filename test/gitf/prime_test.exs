@@ -18,22 +18,22 @@ defmodule GiTF.PrimeTest do
   defp create_gitf_workspace do
     name = "gitf_prime_test_#{:erlang.unique_integer([:positive])}"
     gitf_root = Path.join(@tmp_dir, name)
-    queen_dir = Path.join([gitf_root, ".gitf", "queen"])
+    queen_dir = Path.join([gitf_root, ".gitf", "major"])
     File.mkdir_p!(queen_dir)
 
     queen_md = Path.join(queen_dir, "QUEEN.md")
-    File.write!(queen_md, "# Queen Instructions\n\nYou are the Queen.\n")
+    File.write!(queen_md, "# Major Instructions\n\nYou are the Major.\n")
 
     on_exit(fn -> File.rm_rf!(gitf_root) end)
     gitf_root
   end
 
-  describe "prime(:queen, gitf_root)" do
+  describe "prime(:major, gitf_root)" do
     test "returns QUEEN.md content plus section state summary" do
       gitf_root = create_gitf_workspace()
 
-      assert {:ok, markdown} = Prime.prime(:queen, gitf_root)
-      assert markdown =~ "Queen Instructions"
+      assert {:ok, markdown} = Prime.prime(:major, gitf_root)
+      assert markdown =~ "Major Instructions"
       assert markdown =~ "Current GiTF State"
       assert markdown =~ "Active Bees"
       assert markdown =~ "Pending Jobs"
@@ -44,7 +44,7 @@ defmodule GiTF.PrimeTest do
       File.mkdir_p!(Path.join(tmp, ".gitf"))
       on_exit(fn -> File.rm_rf!(tmp) end)
 
-      assert {:error, :enoent} = Prime.prime(:queen, tmp)
+      assert {:error, :enoent} = Prime.prime(:major, tmp)
     end
 
     test "includes active bee information in state summary" do
@@ -53,7 +53,7 @@ defmodule GiTF.PrimeTest do
       # Create a working bee
       {:ok, _bee} = Store.insert(:bees, %{name: "busy-bee", status: "working"})
 
-      {:ok, markdown} = Prime.prime(:queen, gitf_root)
+      {:ok, markdown} = Prime.prime(:major, gitf_root)
       assert markdown =~ "busy-bee"
     end
 
@@ -63,7 +63,7 @@ defmodule GiTF.PrimeTest do
       {:ok, quest} =
         Store.insert(:quests, %{name: "plan-quest", goal: "Plan something", status: "planning"})
 
-      {:ok, markdown} = Prime.prime(:queen, gitf_root)
+      {:ok, markdown} = Prime.prime(:major, gitf_root)
       assert markdown =~ "plan-quest"
       assert markdown =~ quest.id
     end
@@ -80,7 +80,7 @@ defmodule GiTF.PrimeTest do
 
       GiTF.Specs.write(quest.id, "requirements", "# Requirements\n\n- FR-1: Do the thing")
 
-      {:ok, markdown} = Prime.prime(:queen, gitf_root)
+      {:ok, markdown} = Prime.prime(:major, gitf_root)
       assert markdown =~ "Planning Specs: spec-quest"
       assert markdown =~ "Requirements"
       assert markdown =~ "FR-1: Do the thing"
@@ -98,7 +98,7 @@ defmodule GiTF.PrimeTest do
       long_content = Enum.map(1..150, fn i -> "Line #{i}" end) |> Enum.join("\n")
       GiTF.Specs.write(quest.id, "requirements", long_content)
 
-      {:ok, markdown} = Prime.prime(:queen, gitf_root)
+      {:ok, markdown} = Prime.prime(:major, gitf_root)
       assert markdown =~ "(truncated"
       assert markdown =~ "Line 1"
       # Line 150 should be truncated away

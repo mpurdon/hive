@@ -37,9 +37,9 @@ defmodule GiTF.TestDriver.Harness do
     mock_dir = Path.join(@tmp_dir, "gitf_e2e_mocks_#{suffix}")
 
     File.mkdir_p!(store_dir)
-    File.mkdir_p!(Path.join([gitf_root, ".gitf", "queen"]))
+    File.mkdir_p!(Path.join([gitf_root, ".gitf", "major"]))
     File.write!(Path.join([gitf_root, ".gitf", "config.toml"]), "")
-    File.write!(Path.join([gitf_root, ".gitf", "queen", "QUEEN.md"]), "# Queen\n")
+    File.write!(Path.join([gitf_root, ".gitf", "major", "QUEEN.md"]), "# Major\n")
     File.mkdir_p!(mock_dir)
 
     # Restart Store with isolated directory
@@ -55,8 +55,8 @@ defmodule GiTF.TestDriver.Harness do
       queen_pid: nil
     }
 
-    if Keyword.get(opts, :queen, false) do
-      start_queen(env)
+    if Keyword.get(opts, :major, false) do
+      start_major(env)
     else
       env
     end
@@ -67,8 +67,8 @@ defmodule GiTF.TestDriver.Harness do
   """
   @spec teardown(env()) :: :ok
   def teardown(env) do
-    if env.queen_pid && Process.alive?(env.queen_pid) do
-      GenServer.stop(env.queen_pid, :normal)
+    if env.major_pid && Process.alive?(env.major_pid) do
+      GenServer.stop(env.major_pid, :normal)
     end
   catch
     :exit, _ -> :ok
@@ -177,33 +177,33 @@ defmodule GiTF.TestDriver.Harness do
   end
 
   @doc """
-  Starts the Queen GenServer pointing at the test workspace.
+  Starts the Major GenServer pointing at the test workspace.
 
   Returns the updated env with the queen_pid.
   """
-  @spec start_queen(env()) :: env()
-  def start_queen(env) do
-    # Terminate Queen from supervisor to prevent auto-restart conflicts
+  @spec start_major(env()) :: env()
+  def start_major(env) do
+    # Terminate Major from supervisor to prevent auto-restart conflicts
     try do
-      Supervisor.terminate_child(GiTF.Supervisor, GiTF.Queen)
-      Supervisor.delete_child(GiTF.Supervisor, GiTF.Queen)
+      Supervisor.terminate_child(GiTF.Supervisor, GiTF.Major)
+      Supervisor.delete_child(GiTF.Supervisor, GiTF.Major)
     catch
       :exit, _ -> :ok
     end
-    safe_stop(Process.whereis(GiTF.Queen))
+    safe_stop(Process.whereis(GiTF.Major))
     Process.sleep(10)
 
-    {:ok, pid} = GiTF.Queen.start_link(gitf_root: env.gitf_root)
-    GiTF.Queen.start_session()
+    {:ok, pid} = GiTF.Major.start_link(gitf_root: env.gitf_root)
+    GiTF.Major.start_session()
     %{env | queen_pid: pid}
   end
 
   @doc """
-  Sends a waggle message directly to the Queen process.
+  Sends a waggle message directly to the Major process.
   """
-  @spec send_waggle_to_queen(map()) :: :ok
-  def send_waggle_to_queen(waggle) do
-    case Process.whereis(GiTF.Queen) do
+  @spec send_waggle_to_major(map()) :: :ok
+  def send_waggle_to_major(waggle) do
+    case Process.whereis(GiTF.Major) do
       nil -> :ok
       pid -> send(pid, {:waggle_received, waggle})
     end

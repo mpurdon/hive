@@ -1,6 +1,6 @@
-defmodule GiTF.Queen.Research do
+defmodule GiTF.Major.Research do
   @moduledoc """
-  Queen's codebase research capabilities.
+  Major's codebase research capabilities.
   
   Analyzes comb structure, patterns, and architecture to inform planning.
   Uses caching to avoid redundant analysis of unchanged codebases.

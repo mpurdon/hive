@@ -1,4 +1,4 @@
-defmodule GiTF.Queen.FastPath do
+defmodule GiTF.Major.FastPath do
   @moduledoc """
   Fast path for simple quests that don't need the full 7-phase pipeline.
 

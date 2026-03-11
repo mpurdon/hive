@@ -50,9 +50,9 @@ defmodule GiTF.Runtime.Models do
     {:ok, plugin} = resolve_plugin(opts)
 
     if api_mode?(plugin) do
-      prompt = Keyword.get(opts, :prompt, "You are the Queen orchestrator. Manage the section.")
+      prompt = Keyword.get(opts, :prompt, "You are the Major orchestrator. Manage the section.")
       run_agent(prompt, cwd,
-        Keyword.merge(opts, tool_set: :queen, max_iterations: 200))
+        Keyword.merge(opts, tool_set: :major, max_iterations: 200))
     else
       service_key = plugin_service_key(plugin)
 
@@ -237,11 +237,11 @@ defmodule GiTF.Runtime.Models do
   doesn't provide workspace configuration.
   """
   @spec workspace_setup(String.t(), String.t(), keyword()) :: map() | nil
-  def workspace_setup(bee_or_queen, gitf_root, opts \\ []) do
+  def workspace_setup(bee_or_major, gitf_root, opts \\ []) do
     {:ok, plugin} = resolve_plugin(opts)
 
     if function_exported?(plugin, :workspace_setup, 2) do
-      plugin.workspace_setup(bee_or_queen, gitf_root)
+      plugin.workspace_setup(bee_or_major, gitf_root)
     else
       nil
     end

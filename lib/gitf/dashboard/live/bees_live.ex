@@ -14,7 +14,7 @@ defmodule GiTF.Dashboard.BeesLive do
   @impl true
   def mount(_params, _session, socket) do
     if connected?(socket) do
-      Phoenix.PubSub.subscribe(GiTF.PubSub, "waggle:queen")
+      Phoenix.PubSub.subscribe(GiTF.PubSub, "link:major")
       Process.send_after(self(), :refresh, @refresh_interval)
     end
 
@@ -48,7 +48,7 @@ defmodule GiTF.Dashboard.BeesLive do
 
       <div class="panel">
         <%= if @bees == [] do %>
-          <div class="empty">No bees spawned yet. Bees are created when the Queen assigns jobs.</div>
+          <div class="empty">No bees spawned yet. Bees are created when the Major assigns jobs.</div>
         <% else %>
           <table>
             <thead>

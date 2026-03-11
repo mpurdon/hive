@@ -152,12 +152,12 @@ defmodule GiTF.DoctorTest do
     test "regenerates QUEEN.md when in a gitf workspace" do
       case GiTF.gitf_dir() do
         {:ok, path} ->
-          queen_md = Path.join([path, ".gitf", "queen", "QUEEN.md"])
+          queen_md = Path.join([path, ".gitf", "major", "QUEEN.md"])
           # Remove it so fix can regenerate
           File.rm(queen_md)
 
-          result = Doctor.fix(:queen_workspace)
-          assert result.name == :queen_workspace
+          result = Doctor.fix(:major_workspace)
+          assert result.name == :major_workspace
           assert result.status == :ok
           assert result.message =~ "Regenerated"
           assert File.exists?(queen_md)
@@ -203,7 +203,7 @@ defmodule GiTF.DoctorTest do
     test "reports warn when a settings file has old-format hooks" do
       case GiTF.gitf_dir() do
         {:ok, path} ->
-          queen_claude_dir = Path.join([path, ".gitf", "queen", ".claude"])
+          queen_claude_dir = Path.join([path, ".gitf", "major", ".claude"])
           settings_path = Path.join(queen_claude_dir, "settings.json")
           File.mkdir_p!(queen_claude_dir)
 

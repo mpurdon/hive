@@ -1,7 +1,7 @@
-defmodule GiTF.Queen.PhasePromptsTest do
+defmodule GiTF.Major.PhasePromptsTest do
   use ExUnit.Case, async: true
 
-  alias GiTF.Queen.PhasePrompts
+  alias GiTF.Major.PhasePrompts
 
   @quest %{id: "q-1", goal: "Add user authentication", comb_id: "cmb-1"}
 

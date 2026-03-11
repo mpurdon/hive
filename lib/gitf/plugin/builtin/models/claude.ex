@@ -33,9 +33,9 @@ defmodule GiTF.Plugin.Builtin.Models.Claude do
   end
 
   @impl true
-  def workspace_setup(bee_or_queen, gitf_root) do
-    case bee_or_queen do
-      "queen" -> GiTF.Runtime.Settings.build_queen_settings(gitf_root)
+  def workspace_setup(bee_or_major, gitf_root) do
+    case bee_or_major do
+      "major" -> GiTF.Runtime.Settings.build_major_settings(gitf_root)
       bee_id -> GiTF.Runtime.Settings.build_settings(bee_id, gitf_root)
     end
   end

@@ -76,13 +76,13 @@ defmodule GiTF.Runtime.Settings do
   end
 
   @doc """
-  Builds settings for the Queen's interactive Claude session.
+  Builds settings for the Major's interactive Claude session.
 
   Includes the same tool permissions as bee settings, plus hooks for
   queen-specific priming and cost recording.
   """
-  @spec build_queen_settings(String.t()) :: map()
-  def build_queen_settings(gitf_root) do
+  @spec build_major_settings(String.t()) :: map()
+  def build_major_settings(gitf_root) do
     gitf_bin = gitf_binary_path(gitf_root)
 
     %{
@@ -115,13 +115,13 @@ defmodule GiTF.Runtime.Settings do
 
   Returns `:ok` on success or `{:error, reason}` on failure.
   """
-  @spec generate_queen(String.t(), String.t()) :: :ok | {:error, term()}
-  def generate_queen(gitf_root, queen_workspace) do
+  @spec generate_major(String.t(), String.t()) :: :ok | {:error, term()}
+  def generate_major(gitf_root, queen_workspace) do
     if GiTF.Runtime.ModelResolver.api_mode?() do
       # API mode: no CLI process, no settings file needed
       :ok
     else
-      case GiTF.Runtime.Models.workspace_setup("queen", gitf_root) do
+      case GiTF.Runtime.Models.workspace_setup("major", gitf_root) do
         nil ->
           :ok
 

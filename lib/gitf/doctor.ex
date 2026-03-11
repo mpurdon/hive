@@ -33,7 +33,7 @@ defmodule GiTF.Doctor do
     :settings_valid,
     :orphan_cells,
     :stale_bees,
-    :queen_workspace,
+    :major_workspace,
     :disk_space
   ]
 
@@ -74,7 +74,7 @@ defmodule GiTF.Doctor do
   def check(:settings_valid), do: check_settings_valid()
   def check(:orphan_cells), do: check_orphan_cells()
   def check(:stale_bees), do: check_stale_bees()
-  def check(:queen_workspace), do: check_queen_workspace()
+  def check(:major_workspace), do: check_major_workspace()
   def check(:disk_space), do: check_disk_space()
 
   @doc """
@@ -86,7 +86,7 @@ defmodule GiTF.Doctor do
   @spec fix(atom()) :: check_result()
   def fix(:orphan_cells), do: fix_orphan_cells()
   def fix(:stale_bees), do: fix_stale_bees()
-  def fix(:queen_workspace), do: fix_queen_workspace()
+  def fix(:major_workspace), do: fix_major_workspace()
   def fix(:config_valid), do: fix_config_valid()
   def fix(:settings_valid), do: fix_settings_valid()
   def fix(name), do: %{name: name, status: :error, message: "Not fixable", fixable: false}
@@ -271,19 +271,19 @@ defmodule GiTF.Doctor do
     end
   end
 
-  defp check_queen_workspace do
+  defp check_major_workspace do
     case GiTF.gitf_dir() do
       {:ok, path} ->
-        queen_md = Path.join([path, ".gitf", "queen", "QUEEN.md"])
+        queen_md = Path.join([path, ".gitf", "major", "QUEEN.md"])
 
         if File.exists?(queen_md) do
-          result(:queen_workspace, :ok, "QUEEN.md exists")
+          result(:major_workspace, :ok, "QUEEN.md exists")
         else
-          result(:queen_workspace, :error, "QUEEN.md is missing from .gitf/queen/", true)
+          result(:major_workspace, :error, "QUEEN.md is missing from .gitf/queen/", true)
         end
 
       {:error, _} ->
-        result(:queen_workspace, :warn, "Cannot check: not in a gitf workspace")
+        result(:major_workspace, :warn, "Cannot check: not in a gitf workspace")
     end
   end
 
@@ -342,22 +342,22 @@ defmodule GiTF.Doctor do
     end
   end
 
-  defp fix_queen_workspace do
+  defp fix_major_workspace do
     case GiTF.gitf_dir() do
       {:ok, path} ->
-        queen_dir = Path.join([path, ".gitf", "queen"])
+        queen_dir = Path.join([path, ".gitf", "major"])
         queen_md = Path.join(queen_dir, "QUEEN.md")
 
         with :ok <- File.mkdir_p(queen_dir),
-             :ok <- File.write(queen_md, GiTF.Init.queen_instructions()) do
-          result(:queen_workspace, :ok, "Regenerated QUEEN.md")
+             :ok <- File.write(queen_md, GiTF.Init.major_instructions()) do
+          result(:major_workspace, :ok, "Regenerated QUEEN.md")
         else
           {:error, reason} ->
-            result(:queen_workspace, :error, "Failed to regenerate QUEEN.md: #{inspect(reason)}")
+            result(:major_workspace, :error, "Failed to regenerate QUEEN.md: #{inspect(reason)}")
         end
 
       {:error, _} ->
-        result(:queen_workspace, :error, "Cannot fix: not in a gitf workspace")
+        result(:major_workspace, :error, "Cannot fix: not in a gitf workspace")
     end
   end
 
@@ -385,11 +385,11 @@ defmodule GiTF.Doctor do
         regenerated = 0
 
         # Regenerate queen settings
-        queen_workspace = Path.join([path, ".gitf", "queen"])
+        queen_workspace = Path.join([path, ".gitf", "major"])
 
         regenerated =
           if File.dir?(queen_workspace) do
-            case GiTF.Runtime.Settings.generate_queen(path, queen_workspace) do
+            case GiTF.Runtime.Settings.generate_major(path, queen_workspace) do
               :ok -> regenerated + 1
               _ -> regenerated
             end
@@ -490,7 +490,7 @@ defmodule GiTF.Doctor do
   defp format_size(bytes), do: "#{Float.round(bytes / (1024 * 1024), 1)} MB"
 
   defp collect_settings_files(gitf_root) do
-    queen_settings = Path.join([gitf_root, ".gitf", "queen", ".claude", "settings.json"])
+    queen_settings = Path.join([gitf_root, ".gitf", "major", ".claude", "settings.json"])
 
     cell_settings =
       try do

@@ -17,10 +17,10 @@ defmodule GiTF.Logger do
     :ok
   end
 
-  @doc "Sets process metadata for the Queen."
-  @spec set_queen_context() :: :ok
-  def set_queen_context do
-    Logger.metadata(role: :queen)
+  @doc "Sets process metadata for the Major."
+  @spec set_major_context() :: :ok
+  def set_major_context do
+    Logger.metadata(role: :major)
     :ok
   end
 

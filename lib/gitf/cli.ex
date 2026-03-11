@@ -47,9 +47,9 @@ defmodule GiTF.CLI do
         {:ok, _} = Application.ensure_all_started(:gitf)
 
         File.write("/tmp/gitf_tui_debug.log",
-          "[#{DateTime.utc_now()}] app started, calling start_queen\n", [:append])
+          "[#{DateTime.utc_now()}] app started, calling start_major\n", [:append])
 
-        start_queen()
+        start_major()
 
         Process.flag(:trap_exit, true)
         result = Ratatouille.run(GiTF.TUI.App,
@@ -189,20 +189,20 @@ defmodule GiTF.CLI do
     _ -> :ok
   end
 
-  defp start_queen do
+  defp start_major do
     File.write("/tmp/gitf_tui_debug.log",
-      "[#{DateTime.utc_now()}] start_queen called, gitf_dir=#{inspect(GiTF.gitf_dir())}\n", [:append])
+      "[#{DateTime.utc_now()}] start_major called, gitf_dir=#{inspect(GiTF.gitf_dir())}\n", [:append])
 
     case GiTF.gitf_dir() do
       {:ok, root} ->
-        # Use GenServer.start (not start_link) so a Queen crash doesn't kill the TUI.
-        result = GenServer.start(GiTF.Queen, %{gitf_root: root}, name: GiTF.Queen)
+        # Use GenServer.start (not start_link) so a Major crash doesn't kill the TUI.
+        result = GenServer.start(GiTF.Major, %{gitf_root: root}, name: GiTF.Major)
         File.write("/tmp/gitf_tui_debug.log",
-          "[#{DateTime.utc_now()}] Queen start: #{inspect(result)}\n", [:append])
+          "[#{DateTime.utc_now()}] Major start: #{inspect(result)}\n", [:append])
 
         case result do
           {:ok, _pid} ->
-            GiTF.Queen.start_session()
+            GiTF.Major.start_session()
 
           {:error, {:already_started, _pid}} ->
             :ok
@@ -1286,7 +1286,7 @@ defmodule GiTF.CLI do
 
   defp dispatch([:prime], result) do
     bee_id = result_get(result, :options, :bee)
-    queen? = result_get(result, :flags, :queen) || false
+    queen? = result_get(result, :flags, :major) || false
 
     if GiTF.Client.remote?() do
       # In remote mode, prime is a no-op — the bee works without local context injection
@@ -1294,7 +1294,7 @@ defmodule GiTF.CLI do
     else
       cond do
         queen? ->
-          do_prime_queen()
+          do_prime_major()
 
         is_binary(bee_id) ->
           do_prime_bee(bee_id)
@@ -1305,34 +1305,34 @@ defmodule GiTF.CLI do
     end
   end
 
-  defp dispatch([:queen], _result) do
+  defp dispatch([:major], _result) do
     case GiTF.gitf_dir() do
       {:ok, gitf_root} ->
-        case GiTF.Queen.start_link(gitf_root: gitf_root) do
+        case GiTF.Major.start_link(gitf_root: gitf_root) do
           {:ok, _pid} ->
-            GiTF.Queen.start_session()
+            GiTF.Major.start_session()
 
             # Print messages BEFORE launching Claude, not after.
             # Once Claude starts, it takes full control of the terminal --
             # any BEAM writes to stdout would corrupt Claude's TUI rendering.
-            Format.success("Queen is active at #{gitf_root}")
+            Format.success("Major is active at #{gitf_root}")
 
-            case GiTF.Queen.launch() do
+            case GiTF.Major.launch() do
               :ok ->
                 :ok
 
               {:error, reason} ->
                 Format.warn("Could not launch Claude: #{inspect(reason)}")
-                Format.info("Queen running without Claude. Listening for waggles.")
+                Format.info("Major running without Claude. Listening for waggles.")
             end
 
-            GiTF.Queen.await_session_end()
+            GiTF.Major.await_session_end()
 
           {:error, {:already_started, _pid}} ->
-            Format.warn("Queen is already running.")
+            Format.warn("Major is already running.")
 
           {:error, reason} ->
-            Format.error("Failed to start Queen: #{inspect(reason)}")
+            Format.error("Failed to start Major: #{inspect(reason)}")
         end
 
       {:error, :not_in_gitf} ->
@@ -1354,7 +1354,7 @@ defmodule GiTF.CLI do
 
     case bees do
       [] ->
-        Format.info("No bees. Bees are spawned when the Queen assigns jobs.")
+        Format.info("No bees. Bees are spawned when the Major assigns jobs.")
 
       bees ->
         headers = ["ID", "Name", "Status", "Job ID", "Context %"]
@@ -1444,7 +1444,7 @@ defmodule GiTF.CLI do
 
             GiTF.Waggle.send(
               bee_id,
-              "queen",
+              "major",
               "job_complete",
               "Job #{bee.job_id} completed successfully"
             )
@@ -1474,7 +1474,7 @@ defmodule GiTF.CLI do
 
           if bee.job_id do
             GiTF.Jobs.fail(bee.job_id)
-            GiTF.Waggle.send(bee_id, "queen", "job_failed", "Job #{bee.job_id} failed: #{reason}")
+            GiTF.Waggle.send(bee_id, "major", "job_failed", "Job #{bee.job_id} failed: #{reason}")
           end
 
           Format.success("Bee #{bee_id} marked as failed: #{reason}")
@@ -1964,10 +1964,10 @@ defmodule GiTF.CLI do
         end
       end
     else
-      queen? = result_get(result, :flags, :queen) || false
+      queen? = result_get(result, :flags, :major) || false
 
       if queen? do
-        record_queen_costs()
+        record_major_costs()
       else
         bee_id = result_get(result, :options, :bee)
         input = result_get(result, :options, :input)
@@ -2436,7 +2436,7 @@ defmodule GiTF.CLI do
     status_result =
       if GiTF.Client.remote?(),
         do: GiTF.Client.quest_status(quest_id),
-        else: GiTF.Queen.Orchestrator.get_quest_status(quest_id)
+        else: GiTF.Major.Orchestrator.get_quest_status(quest_id)
 
     case status_result do
       {:ok, status} ->
@@ -2490,11 +2490,11 @@ defmodule GiTF.CLI do
 
   @empty_costs %{input_tokens: 0, output_tokens: 0, cache_read_tokens: 0, cache_write_tokens: 0, model: nil}
 
-  defp record_queen_costs do
-    # Read costs from the latest Queen transcript if available
+  defp record_major_costs do
+    # Read costs from the latest Major transcript if available
     case GiTF.gitf_dir() do
       {:ok, root} ->
-        transcript_dir = Path.join([root, ".gitf", "queen", ".claude", "projects"])
+        transcript_dir = Path.join([root, ".gitf", "major", ".claude", "projects"])
 
         costs = extract_costs_from_transcripts(transcript_dir)
 
@@ -2507,9 +2507,9 @@ defmodule GiTF.CLI do
             model: costs.model
           }
 
-          {:ok, cost} = GiTF.Costs.record("queen", attrs)
+          {:ok, cost} = GiTF.Costs.record("major", attrs)
           Format.success(
-            "Queen cost recorded: $#{:erlang.float_to_binary(cost.cost_usd, decimals: 6)} (#{cost.id})"
+            "Major cost recorded: $#{:erlang.float_to_binary(cost.cost_usd, decimals: 6)} (#{cost.id})"
           )
         else
           Format.info("No new queen costs to record.")
@@ -2593,10 +2593,10 @@ defmodule GiTF.CLI do
     end
   end
 
-  defp do_prime_queen do
+  defp do_prime_major do
     case GiTF.gitf_dir() do
       {:ok, gitf_root} ->
-        case GiTF.Prime.prime(:queen, gitf_root) do
+        case GiTF.Prime.prime(:major, gitf_root) do
           {:ok, markdown} -> IO.puts(markdown)
           {:error, reason} -> Format.error("Prime failed: #{inspect(reason)}")
         end
@@ -2805,7 +2805,7 @@ defmodule GiTF.CLI do
           ]
         ],
         queen: [
-          name: "queen",
+          name: "major",
           about: "Start the queen orchestrator for a quest"
         ],
         bee: [
@@ -3611,11 +3611,11 @@ defmodule GiTF.CLI do
         ],
         prime: [
           name: "prime",
-          about: "Output context prompt for a Queen or Bee session",
+          about: "Output context prompt for a Major or Bee session",
           flags: [
             queen: [
               long: "--queen",
-              help: "Prime the Queen with instructions and section state"
+              help: "Prime the Major with instructions and section state"
             ]
           ],
           options: [

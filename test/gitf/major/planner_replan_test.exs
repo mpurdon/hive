@@ -1,7 +1,7 @@
-defmodule GiTF.Queen.PlannerReplanTest do
+defmodule GiTF.Major.PlannerReplanTest do
   use ExUnit.Case, async: false
 
-  alias GiTF.Queen.Planner
+  alias GiTF.Major.Planner
   alias GiTF.Store
 
   setup do

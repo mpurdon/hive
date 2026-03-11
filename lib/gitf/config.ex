@@ -8,7 +8,7 @@ defmodule GiTF.Config do
 
   @default_config %{
     "gitf" => %{"version" => GiTF.version()},
-    "queen" => %{"max_bees" => 5},
+    "major" => %{"max_bees" => 5},
     "costs" => %{"warn_threshold_usd" => 5.0, "budget_usd" => 10.0},
     "llm" => %{"keys" => %{"google" => "", "anthropic" => ""}},
     "github" => %{"token" => ""},
@@ -22,7 +22,7 @@ defmodule GiTF.Config do
   ## Examples
 
       iex> config = GiTF.Config.default_config()
-      iex> config["queen"]["max_bees"]
+      iex> config["major"]["max_bees"]
       5
   """
   @spec default_config() :: map()
@@ -83,7 +83,7 @@ defmodule GiTF.Config do
   end
 
   defp config_lookup(config, :api_key), do: get_in(config, ["server", "api_key"])
-  defp config_lookup(config, :max_bees), do: get_in(config, ["queen", "max_bees"])
+  defp config_lookup(config, :max_bees), do: get_in(config, ["major", "max_bees"])
   defp config_lookup(config, :budget_usd), do: get_in(config, ["costs", "budget_usd"])
   defp config_lookup(_config, _key), do: nil
 

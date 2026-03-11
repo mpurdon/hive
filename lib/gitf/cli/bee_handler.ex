@@ -20,7 +20,7 @@ defmodule GiTF.CLI.BeeHandler do
 
     case bees do
       [] ->
-        Format.info("No bees. Bees are spawned when the Queen assigns jobs.")
+        Format.info("No bees. Bees are spawned when the Major assigns jobs.")
 
       bees ->
         headers = ["ID", "Name", "Status", "Job ID", "Context %"]

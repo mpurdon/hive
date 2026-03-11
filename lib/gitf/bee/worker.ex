@@ -4,7 +4,7 @@ defmodule GiTF.Bee.Worker do
 
   Each bee is a Claude Code agent working on one job within a comb.
   The Worker provisions an isolated worktree (cell), spawns Claude
-  headless with the job prompt, and reports results back to the Queen
+  headless with the job prompt, and reports results back to the Major
   via waggle messages.
 
   ## Lifecycle
@@ -25,7 +25,7 @@ defmodule GiTF.Bee.Worker do
 
   ## Restart strategy
 
-  Workers use `restart: :temporary` because the Queen decides whether
+  Workers use `restart: :temporary` because the Major decides whether
   and how to retry failed bees -- not the supervisor.
   """
 
@@ -286,10 +286,10 @@ defmodule GiTF.Bee.Worker do
         :ok
     end
 
-    # Notify Queen that bee handed off — Queen's job spawner will pick it up
+    # Notify Major that bee handed off — Major's job spawner will pick it up
     GiTF.Waggle.send(
       state.bee_id,
-      "queen",
+      "major",
       "context_handoff",
       "Bee #{state.bee_id} handed off job #{state.job_id} due to context exhaustion"
     )
@@ -773,7 +773,7 @@ defmodule GiTF.Bee.Worker do
 
     cond do
       is_scout ->
-        # Scout jobs: waggle Queen with scout_complete and the raw output
+        # Scout jobs: waggle Major with scout_complete and the raw output
         output = IO.iodata_to_binary(state.output)
         parent_job_id = Map.get(job, :scout_for)
 
@@ -783,24 +783,24 @@ defmodule GiTF.Bee.Worker do
           output: output
         })
 
-        GiTF.Waggle.send(state.bee_id, "queen", "scout_complete", body)
+        GiTF.Waggle.send(state.bee_id, "major", "scout_complete", body)
 
       is_phase_job ->
-        # Phase jobs waggle Queen directly — no verification/merge needed
+        # Phase jobs waggle Major directly — no verification/merge needed
         session_id = GiTF.Runtime.Models.extract_session_id(Enum.reverse(state.parsed_events))
         body = "Job #{state.job_id} completed successfully (phase: #{job.phase})"
         body = if session_id, do: body <> "\nSession ID: #{session_id}", else: body
-        GiTF.Waggle.send(state.bee_id, "queen", "job_complete", body)
+        GiTF.Waggle.send(state.bee_id, "major", "job_complete", body)
 
       skip_verification ->
-        # Simple jobs skip drone verification, go straight to Queen
-        GiTF.Waggle.send(state.bee_id, "queen", "job_complete",
+        # Simple jobs skip drone verification, go straight to Major
+        GiTF.Waggle.send(state.bee_id, "major", "job_complete",
           "Job #{state.job_id} completed (skip_verification)")
 
       true ->
         # Standard jobs: broadcast to Drone for independent verification.
         # The Drone verifies, then forwards to MergeQueue on pass.
-        # Do NOT waggle Queen here — the MergeQueue will waggle "job_merged" after merge.
+        # Do NOT waggle Major here — the MergeQueue will waggle "job_merged" after merge.
         Phoenix.PubSub.broadcast(
           GiTF.PubSub,
           "drone:review",
@@ -815,7 +815,7 @@ defmodule GiTF.Bee.Worker do
     raw_output = IO.iodata_to_binary(state.output)
     events = Enum.reverse(state.parsed_events)
 
-    case GiTF.Queen.PhaseCollector.collect(job.phase, raw_output, events) do
+    case GiTF.Major.PhaseCollector.collect(job.phase, raw_output, events) do
       {:ok, artifact} ->
         GiTF.Quests.store_artifact(job.quest_id, job.phase, artifact)
 
@@ -886,7 +886,7 @@ defmodule GiTF.Bee.Worker do
 
     GiTF.Waggle.send(
       state.bee_id,
-      "queen",
+      "major",
       "job_failed",
       "Job #{state.job_id} failed: #{reason}"
     )

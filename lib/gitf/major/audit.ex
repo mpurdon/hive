@@ -1,8 +1,8 @@
-defmodule GiTF.Queen.Audit do
+defmodule GiTF.Major.Audit do
   @moduledoc """
-  File access auditing for the Queen process.
+  File access auditing for the Major process.
 
-  The Queen should only coordinate -- she must not write code or modify
+  The Major should only coordinate -- she must not write code or modify
   files outside her workspace. This module provides path-checking utilities
   that enforce those boundaries.
 
@@ -21,10 +21,10 @@ defmodule GiTF.Queen.Audit do
 
   ## Examples
 
-      iex> GiTF.Queen.Audit.check_file_access("/project/.gitf/queen/notes.md", "/project")
+      iex> GiTF.Major.Audit.check_file_access("/project/.gitf/queen/notes.md", "/project")
       :ok
 
-      iex> GiTF.Queen.Audit.check_file_access("/project/src/app.ex", "/project")
+      iex> GiTF.Major.Audit.check_file_access("/project/src/app.ex", "/project")
       {:error, :delegation_required}
   """
   @spec check_file_access(String.t(), String.t()) :: :ok | {:error, :delegation_required}
@@ -35,7 +35,7 @@ defmodule GiTF.Queen.Audit do
     if inside_gitf_dir?(expanded, gitf_dir) do
       :ok
     else
-      Logger.warning("Queen file access outside .gitf/: #{expanded}")
+      Logger.warning("Major file access outside .gitf/: #{expanded}")
       {:error, :delegation_required}
     end
   end
@@ -48,10 +48,10 @@ defmodule GiTF.Queen.Audit do
 
   ## Examples
 
-      iex> GiTF.Queen.Audit.inside_gitf_dir?("/project/.gitf/queen/QUEEN.md", "/project/.gitf")
+      iex> GiTF.Major.Audit.inside_gitf_dir?("/project/.gitf/queen/QUEEN.md", "/project/.gitf")
       true
 
-      iex> GiTF.Queen.Audit.inside_gitf_dir?("/project/src/app.ex", "/project/.gitf")
+      iex> GiTF.Major.Audit.inside_gitf_dir?("/project/src/app.ex", "/project/.gitf")
       false
   """
   @spec inside_gitf_dir?(String.t(), String.t()) :: boolean()

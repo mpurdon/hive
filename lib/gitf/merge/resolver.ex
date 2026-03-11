@@ -272,7 +272,7 @@ defmodule GiTF.Merge.Resolver do
         {:ok, reimagine_job} ->
           Logger.info("Created re-imagine job #{reimagine_job.id} for #{job_id}")
 
-          GiTF.Waggle.send("merge_resolver", "queen", "reimagine_job_created",
+          GiTF.Waggle.send("merge_resolver", "major", "reimagine_job_created",
             "Created conflict resolution job #{reimagine_job.id} for #{job_id}")
 
           # The re-imagine job will go through the full bee → drone → merge pipeline

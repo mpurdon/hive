@@ -1,7 +1,7 @@
-defmodule GiTF.Queen.AuditTest do
+defmodule GiTF.Major.AuditTest do
   use ExUnit.Case, async: true
 
-  alias GiTF.Queen.Audit
+  alias GiTF.Major.Audit
 
   describe "inside_gitf_dir?/2" do
     test "returns true for path inside .gitf" do
@@ -33,7 +33,7 @@ defmodule GiTF.Queen.AuditTest do
       # Use a real-ish path structure
       gitf_root = System.tmp_dir!()
       gitf_dir = Path.join(gitf_root, ".gitf")
-      path = Path.join([gitf_dir, "queen", "QUEEN.md"])
+      path = Path.join([gitf_dir, "major", "QUEEN.md"])
 
       assert :ok = Audit.check_file_access(path, gitf_root)
     end

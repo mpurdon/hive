@@ -81,7 +81,7 @@ defmodule GiTF.HumanGate do
       try do
         GiTF.Waggle.send(
           "system",
-          "queen",
+          "major",
           "human_approval_needed",
           Jason.encode!(%{quest_id: quest_id, quest_name: quest.name})
         )

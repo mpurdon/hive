@@ -48,7 +48,7 @@ defmodule GiTF.Conflict do
 
   Strategies:
     * `:rebase` — Fetches latest main and rebases the cell's branch onto it.
-    * `:defer` — Marks the cell as needing manual merge and notifies the Queen.
+    * `:defer` — Marks the cell as needing manual merge and notifies the Major.
 
   Returns `{:ok, :resolved}` or `{:error, reason}`.
   """
@@ -100,7 +100,7 @@ defmodule GiTF.Conflict do
 
         GiTF.Waggle.send(
           "system",
-          "queen",
+          "major",
           "manual_merge_needed",
           "Cell #{cell_id} deferred for manual merge"
         )

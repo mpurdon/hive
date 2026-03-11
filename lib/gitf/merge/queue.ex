@@ -5,7 +5,7 @@ defmodule GiTF.Merge.Queue do
   Subscribes to the `"merge:queue"` PubSub topic. When a job passes
   verification, it is added to a pending list. Jobs are dequeued one at
   a time, merged in optimal order (via `GiTF.Merge.Strategy`), and the
-  result is reported back to the Queen via waggle.
+  result is reported back to the Major via waggle.
 
   ## State
 
@@ -157,7 +157,7 @@ defmodule GiTF.Merge.Queue do
     Logger.error("Merge task crashed for job #{job_id}: #{inspect(reason)}")
     if state.merge_timer, do: Process.cancel_timer(state.merge_timer)
 
-    GiTF.Waggle.send("merge_queue", "queen", "merge_failed",
+    GiTF.Waggle.send("merge_queue", "major", "merge_failed",
       "Merge task crashed for job #{job_id}: #{inspect(reason)}")
 
     GiTF.Telemetry.emit([:gitf, :merge, :crashed], %{}, %{
@@ -177,7 +177,7 @@ defmodule GiTF.Merge.Queue do
     Process.demonitor(ref, [:flush])
     Process.exit(task_pid, :kill)
 
-    GiTF.Waggle.send("merge_queue", "queen", "merge_failed",
+    GiTF.Waggle.send("merge_queue", "major", "merge_failed",
       "Merge task timed out for job #{job_id}")
 
     GiTF.Telemetry.emit([:gitf, :merge, :timeout], %{}, %{
@@ -280,8 +280,8 @@ defmodule GiTF.Merge.Queue do
       job -> GiTF.Store.put(:jobs, Map.put(job, :merged_at, DateTime.utc_now()))
     end
 
-    # Waggle Queen
-    GiTF.Waggle.send("merge_queue", "queen", "job_merged",
+    # Waggle Major
+    GiTF.Waggle.send("merge_queue", "major", "job_merged",
       "Job #{job_id} merged successfully (tier #{tier})")
 
     entry = {job_id, :success, DateTime.utc_now()}
@@ -298,7 +298,7 @@ defmodule GiTF.Merge.Queue do
   defp handle_merge_result(job_id, {:error, reason, tier}, state) do
     Logger.warning("Job #{job_id} merge failed at tier #{tier}: #{inspect(reason)}")
 
-    GiTF.Waggle.send("merge_queue", "queen", "merge_failed",
+    GiTF.Waggle.send("merge_queue", "major", "merge_failed",
       "Job #{job_id} merge failed at tier #{tier}: #{inspect(reason)}")
 
     entry = {job_id, {:failure, reason}, DateTime.utc_now()}

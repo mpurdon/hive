@@ -7,7 +7,7 @@ defmodule GiTF.Shutdown do
   2. Drain in-flight waggles
   3. Save Store state
   4. Stop bees gracefully (SIGTERM to Claude ports, wait timeout)
-  5. Stop Queen
+  5. Stop Major
   6. Close TUI
   7. Exit
   """
@@ -83,8 +83,8 @@ defmodule GiTF.Shutdown do
     # 6. Stop bees (parallel with per-bee timeout)
     stop_bees(drain_timeout)
 
-    # 7. Stop Queen
-    stop_queen()
+    # 7. Stop Major
+    stop_major()
   end
 
   defp notify_channels do
@@ -161,8 +161,8 @@ defmodule GiTF.Shutdown do
     _ -> :ok
   end
 
-  defp stop_queen do
-    case Process.whereis(GiTF.Queen) do
+  defp stop_major do
+    case Process.whereis(GiTF.Major) do
       nil -> :ok
       pid -> GenServer.stop(pid, :shutdown, 5_000)
     end

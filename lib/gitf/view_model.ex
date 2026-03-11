@@ -11,7 +11,7 @@ defmodule GiTF.ViewModel do
 
   ## Topics consumed
 
-      "waggle:queen"    — waggle events
+      "link:major"    — waggle events
       "section:progress"   — bee progress updates
       "section:system"     — system events
       "section:intent"     — intent events (for tracking)
@@ -30,7 +30,7 @@ defmodule GiTF.ViewModel do
   @persistent_key {__MODULE__, :latest}
 
   @subscribe_topics [
-    "waggle:queen",
+    "link:major",
     "section:progress",
     "section:system",
     "section:intent"

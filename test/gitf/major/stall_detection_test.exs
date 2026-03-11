@@ -1,4 +1,4 @@
-defmodule GiTF.Queen.StallDetectionTest do
+defmodule GiTF.Major.StallDetectionTest do
   use ExUnit.Case, async: false
 
   alias GiTF.Store
@@ -25,7 +25,7 @@ defmodule GiTF.Queen.StallDetectionTest do
         })
 
       assert waggle.from == "bee-abc123"
-      assert waggle.to == "queen"
+      assert waggle.to == "major"
       assert waggle.subject == "checkpoint"
 
       body = Jason.decode!(waggle.body)
@@ -44,7 +44,7 @@ defmodule GiTF.Queen.StallDetectionTest do
         })
 
       assert waggle.from == "bee-def456"
-      assert waggle.to == "queen"
+      assert waggle.to == "major"
       assert waggle.subject == "resource_warning"
 
       body = Jason.decode!(waggle.body)
@@ -78,7 +78,7 @@ defmodule GiTF.Queen.StallDetectionTest do
       }
 
       # Should not raise, just logs warnings
-      assert :ok == GiTF.Queen.detect_stalled_bees(state)
+      assert :ok == GiTF.Major.detect_stalled_bees(state)
     end
 
     test "does not flag bees with recent checkpoints" do
@@ -102,7 +102,7 @@ defmodule GiTF.Queen.StallDetectionTest do
         stall_timeout: :timer.minutes(10)
       }
 
-      assert :ok == GiTF.Queen.detect_stalled_bees(state)
+      assert :ok == GiTF.Major.detect_stalled_bees(state)
     end
   end
 

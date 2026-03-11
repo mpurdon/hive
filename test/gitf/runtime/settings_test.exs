@@ -60,22 +60,22 @@ defmodule GiTF.Runtime.SettingsTest do
     end
   end
 
-  describe "build_queen_settings/1" do
+  describe "build_major_settings/1" do
     test "includes permissions with allowed tools" do
-      settings = Settings.build_queen_settings("/tmp/test-gitf")
+      settings = Settings.build_major_settings("/tmp/test-gitf")
 
       assert %{"permissions" => %{"allow" => tools}} = settings
       assert is_list(tools)
       assert "Read" in tools
       assert "Glob" in tools
       assert "Grep" in tools
-      # Queen must NOT have write/edit/destructive tools
+      # Major must NOT have write/edit/destructive tools
       refute "Write" in tools
       refute "Edit" in tools
     end
 
     test "SessionStart hook runs section prime --queen" do
-      settings = Settings.build_queen_settings("/tmp/test-gitf")
+      settings = Settings.build_major_settings("/tmp/test-gitf")
 
       [%{"matcher" => "", "hooks" => [hook]}] = settings["hooks"]["SessionStart"]
       assert hook["type"] == "command"
@@ -83,7 +83,7 @@ defmodule GiTF.Runtime.SettingsTest do
     end
 
     test "Stop hook runs section costs record --queen" do
-      settings = Settings.build_queen_settings("/tmp/test-gitf")
+      settings = Settings.build_major_settings("/tmp/test-gitf")
 
       [%{"matcher" => "", "hooks" => [hook]}] = settings["hooks"]["Stop"]
       assert hook["type"] == "command"
@@ -91,12 +91,12 @@ defmodule GiTF.Runtime.SettingsTest do
     end
   end
 
-  describe "generate_queen/2" do
+  describe "generate_major/2" do
     test "skips writing settings in API mode" do
       workspace = tmp_workspace()
 
       # In API mode, no CLI settings file is needed
-      assert :ok = Settings.generate_queen("/tmp/hive-root", workspace)
+      assert :ok = Settings.generate_major("/tmp/hive-root", workspace)
 
       settings_path = Path.join([workspace, ".claude", "settings.json"])
       refute File.exists?(settings_path)

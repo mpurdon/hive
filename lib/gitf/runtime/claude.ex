@@ -5,7 +5,7 @@ defmodule GiTF.Runtime.Claude do
   This module wraps Erlang ports to launch `claude` as a subprocess. It
   provides two modes of operation:
 
-  - **Interactive** (`spawn_interactive/2`): for the Queen, which runs
+  - **Interactive** (`spawn_interactive/2`): for the Major, which runs
     Claude in an interactive terminal session.
   - **Headless** (`spawn_headless/3`): for Bees, which pipe a prompt to
     Claude and collect the output when it finishes.
@@ -39,7 +39,7 @@ defmodule GiTF.Runtime.Claude do
   end
 
   @doc """
-  Spawns Claude in interactive mode for the Queen.
+  Spawns Claude in interactive mode for the Major.
 
   Opens a port with a pseudo-terminal allocation, suitable for an
   interactive session. The calling process receives port messages.

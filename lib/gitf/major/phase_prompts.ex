@@ -1,4 +1,4 @@
-defmodule GiTF.Queen.PhasePrompts do
+defmodule GiTF.Major.PhasePrompts do
   @moduledoc """
   Pure functions that build prompts for each orchestration phase.
 

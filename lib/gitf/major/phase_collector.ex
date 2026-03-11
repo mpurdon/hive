@@ -1,4 +1,4 @@
-defmodule GiTF.Queen.PhaseCollector do
+defmodule GiTF.Major.PhaseCollector do
   @moduledoc """
   Parses raw bee output into structured phase artifacts.
 

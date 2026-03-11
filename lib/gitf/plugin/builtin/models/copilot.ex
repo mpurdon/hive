@@ -38,7 +38,7 @@ defmodule GiTF.Plugin.Builtin.Models.Copilot do
   end
 
   @impl true
-  def workspace_setup(_bee_or_queen, _gitf_root), do: nil
+  def workspace_setup(_bee_or_major, _gitf_root), do: nil
 
   @impl true
   def pricing, do: %{}

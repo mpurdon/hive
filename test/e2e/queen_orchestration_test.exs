@@ -1,14 +1,14 @@
-defmodule GiTF.E2E.QueenOrchestrationTest do
+defmodule GiTF.E2E.MajorOrchestrationTest do
   use GiTF.TestDriver.Scenario
 
-  scenario "Queen advances quest and spawns next job after completion" do
+  scenario "Major advances quest and spawns next job after completion" do
     {:ok, env, comb} = Harness.add_comb(env)
-    env = Harness.start_queen(env)
+    env = Harness.start_major(env)
 
     {:ok, quest, [job1, _job2]} =
       Harness.create_quest(env,
         comb_id: comb.id,
-        goal: "Queen orchestration test",
+        goal: "Major orchestration test",
         jobs: [
           %{title: "First sequential task"},
           %{title: "Second sequential task"}
@@ -16,7 +16,7 @@ defmodule GiTF.E2E.QueenOrchestrationTest do
         dependencies: [{1, 0}]
       )
 
-    # Spawn a mock bee for job1 only — Queen should auto-spawn for job2
+    # Spawn a mock bee for job1 only — Major should auto-spawn for job2
     {:ok, bee1} = Harness.spawn_mock_bee(env, job1.id, comb.id, delay_ms: 200)
 
     # Wait for job1 to complete
@@ -33,22 +33,22 @@ defmodule GiTF.E2E.QueenOrchestrationTest do
       timeout: 15_000
     )
 
-    # Give Queen time to process waggle and attempt spawn
+    # Give Major time to process waggle and attempt spawn
     Process.sleep(500)
 
-    # Verify Queen is still alive after processing
-    assert Process.alive?(env.queen_pid)
+    # Verify Major is still alive after processing
+    assert Process.alive?(env.major_pid)
 
     # Quest status should reflect the state of jobs.
-    # Queen attempts to spawn for job2 but without claude_executable,
+    # Major attempts to spawn for job2 but without claude_executable,
     # the bee can't find Claude and fails. After retries, quest may be "failed".
     {:ok, updated_quest} = GiTF.Quests.get(quest.id)
     assert updated_quest.status in ["pending", "active", "completed", "failed"]
   end
 
-  scenario "Queen marks quest completed when all jobs done" do
+  scenario "Major marks quest completed when all jobs done" do
     {:ok, env, comb} = Harness.add_comb(env)
-    env = Harness.start_queen(env)
+    env = Harness.start_major(env)
 
     {:ok, quest, [job1]} =
       Harness.create_quest(env,
@@ -73,26 +73,26 @@ defmodule GiTF.E2E.QueenOrchestrationTest do
       timeout: 15_000
     )
 
-    # If job_complete waggle was sent, Queen auto-advances the quest.
-    # If validation_failed waggle was sent, Queen treats it as failure.
+    # If job_complete waggle was sent, Major auto-advances the quest.
+    # If validation_failed waggle was sent, Major treats it as failure.
     # Check which waggle was sent and verify accordingly.
     waggles = GiTF.Store.filter(:waggles, fn w -> w.from == bee1.id end)
     waggle = hd(waggles)
 
     case waggle.subject do
       "job_complete" ->
-        # Queen should have advanced the quest
+        # Major should have advanced the quest
         await({:quest_completed, quest.id}, timeout: 10_000)
         assert_waggle(subject: "quest_completed")
 
       "validation_failed" ->
         # Validation spawned Claude and it either failed or the diff was assessed as failing.
         # This is valid behavior — the quest won't be completed.
-        assert Process.alive?(env.queen_pid)
+        assert Process.alive?(env.major_pid)
 
       _ ->
-        # Any other waggle — just verify Queen survived
-        assert Process.alive?(env.queen_pid)
+        # Any other waggle — just verify Major survived
+        assert Process.alive?(env.major_pid)
     end
   end
 end

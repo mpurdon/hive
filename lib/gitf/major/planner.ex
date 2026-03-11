@@ -1,6 +1,6 @@
-defmodule GiTF.Queen.Planner do
+defmodule GiTF.Major.Planner do
   @moduledoc """
-  Queen's planning capabilities for Phase 2.3.
+  Major's planning capabilities for Phase 2.3.
   
   Takes research summary and generates structured implementation plans
   with jobs, verification criteria, and context estimates.
@@ -254,7 +254,7 @@ defmodule GiTF.Queen.Planner do
     cond do
       # Full artifacts available — use the detailed planning prompt
       design && requirements && review ->
-        base = GiTF.Queen.PhasePrompts.planning_prompt(quest, design, requirements, review)
+        base = GiTF.Major.PhasePrompts.planning_prompt(quest, design, requirements, review)
         if strategy_section == "", do: base, else: base <> "\n" <> strategy_section <> "\n"
 
       # Some artifacts — build a simpler prompt with what we have

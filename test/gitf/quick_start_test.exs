@@ -116,7 +116,7 @@ defmodule GiTF.QuickStartTest do
 
       assert md =~ "my-project"
       assert md =~ "waggle"
-      assert md =~ "queen"
+      assert md =~ "major"
       assert md =~ "/path/to/my-project"
       assert md =~ "job_complete"
       assert md =~ "job_blocked"

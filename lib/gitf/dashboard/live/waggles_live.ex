@@ -12,7 +12,7 @@ defmodule GiTF.Dashboard.WagglesLive do
   @impl true
   def mount(_params, _session, socket) do
     if connected?(socket) do
-      Phoenix.PubSub.subscribe(GiTF.PubSub, "waggle:queen")
+      Phoenix.PubSub.subscribe(GiTF.PubSub, "link:major")
     end
 
     waggles = GiTF.Waggle.list(limit: 50)
@@ -49,7 +49,7 @@ defmodule GiTF.Dashboard.WagglesLive do
 
       <div class="panel">
         <%= if @waggles == [] do %>
-          <div class="empty">No waggle messages found. Messages appear here as bees and the Queen communicate.</div>
+          <div class="empty">No waggle messages found. Messages appear here as bees and the Major communicate.</div>
         <% else %>
           <table>
             <thead>

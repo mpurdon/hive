@@ -1,8 +1,8 @@
-defmodule GiTF.Queen.OrchestratorTest do
+defmodule GiTF.Major.OrchestratorTest do
   use ExUnit.Case, async: false
   import Mox
 
-  alias GiTF.Queen.Orchestrator
+  alias GiTF.Major.Orchestrator
   alias GiTF.Store
 
   setup :set_mox_from_context

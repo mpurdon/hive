@@ -186,7 +186,7 @@ defmodule GiTF.Merge do
           case GiTF.GitHub.create_pr(comb, cell, job) do
             {:ok, url} ->
               Logger.info("GitHub PR created: #{url}")
-              GiTF.Waggle.send("system", "queen", "pr_created", "PR: #{url}")
+              GiTF.Waggle.send("system", "major", "pr_created", "PR: #{url}")
 
             {:error, reason} ->
               Logger.warning("GitHub PR creation failed: #{inspect(reason)}")

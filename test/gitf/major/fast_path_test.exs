@@ -1,7 +1,7 @@
-defmodule GiTF.Queen.FastPathTest do
+defmodule GiTF.Major.FastPathTest do
   use ExUnit.Case, async: false
 
-  alias GiTF.Queen.FastPath
+  alias GiTF.Major.FastPath
   alias GiTF.Store
 
   setup do

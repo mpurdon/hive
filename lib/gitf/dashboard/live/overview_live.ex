@@ -15,7 +15,7 @@ defmodule GiTF.Dashboard.OverviewLive do
   def mount(_params, _session, socket) do
     if connected?(socket) do
       # Subscribe to all waggle traffic for live updates
-      Phoenix.PubSub.subscribe(GiTF.PubSub, "waggle:queen")
+      Phoenix.PubSub.subscribe(GiTF.PubSub, "link:major")
       Process.send_after(self(), :refresh, @refresh_interval)
     end
 

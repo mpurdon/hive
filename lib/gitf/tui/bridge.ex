@@ -18,7 +18,7 @@ defmodule GiTF.TUI.Bridge do
   """
 
   @topics [
-    "waggle:queen",
+    "link:major",
     "section:progress",
     "section:system",
     "section:view_model",
@@ -53,12 +53,12 @@ defmodule GiTF.TUI.Bridge do
   end
 
   @doc """
-  Send user input text to the Queen via the intent event bus.
+  Send user input text to the Major via the intent event bus.
 
   Also broadcasts on `"queen:input"` for backwards compatibility.
   """
-  @spec send_to_queen(String.t()) :: :ok
-  def send_to_queen(text) do
+  @spec send_to_major(String.t()) :: :ok
+  def send_to_major(text) do
     # New: structured intent event
     publish_intent(:user_input, %{text: text})
     # Backwards-compatible: raw broadcast
@@ -70,7 +70,7 @@ defmodule GiTF.TUI.Bridge do
   Publish a structured intent event.
 
   Both TUI and Raylib clients can call this to send intents
-  to the Queen/simulation GenServer.
+  to the Major/simulation GenServer.
   """
   @spec publish_intent(atom(), map()) :: :ok
   def publish_intent(action, payload \\ %{}) when is_atom(action) do

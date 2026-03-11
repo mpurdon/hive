@@ -48,8 +48,8 @@ defmodule GiTF.Application do
       {GiTF.Store, data_dir: Application.get_env(:gitf, :store_dir, Path.join(File.cwd!, ".gitf/store"))},
       {Registry, keys: :unique, name: GiTF.Registry},
       {GiTF.RateLimiter, name: GiTF.RateLimiter, max_tokens: 30, refill_rate: 30, refill_interval: 1_000},
-      # The Queen is the brain of the factory - starts automatically now
-      {GiTF.Queen, gitf_root: Application.get_env(:gitf, :store_dir, File.cwd!)},
+      # The Major is the brain of the factory - starts automatically now
+      {GiTF.Major, gitf_root: Application.get_env(:gitf, :store_dir, File.cwd!)},
       {GiTF.Ingestion.Watchdog, gitf_root: File.cwd!()},
       {GiTF.PubSubBridge, []}
     ] ++ endpoint_child() ++ [
@@ -126,7 +126,7 @@ defmodule GiTF.Application do
           end
 
         warnings =
-          if get_in(config, ["queen", "max_bees"]) == nil do
+          if get_in(config, ["major", "max_bees"]) == nil do
             ["queen.max_bees not set (defaulting to 5)" | warnings]
           else
             warnings

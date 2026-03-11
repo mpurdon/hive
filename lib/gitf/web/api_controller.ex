@@ -88,14 +88,14 @@ defmodule GiTF.Web.ApiController do
   end
 
   def start_quest(conn, %{"id" => id}) do
-    case GiTF.Queen.Orchestrator.start_quest(id) do
+    case GiTF.Major.Orchestrator.start_quest(id) do
       {:ok, phase} -> json(conn, %{data: %{quest_id: id, phase: phase}})
       {:error, reason} -> error(conn, 422, reason)
     end
   end
 
   def plan_quest(conn, %{"id" => id}) do
-    case GiTF.Queen.Planner.generate_candidate_plans(id) do
+    case GiTF.Major.Planner.generate_candidate_plans(id) do
       {:ok, plan} ->
         tasks = plan[:tasks] || plan.tasks || []
 
@@ -199,7 +199,7 @@ defmodule GiTF.Web.ApiController do
   end
 
   def quest_status(conn, %{"id" => id}) do
-    case GiTF.Queen.Orchestrator.get_quest_status(id) do
+    case GiTF.Major.Orchestrator.get_quest_status(id) do
       {:ok, status} ->
         json(conn, %{
           data: %{
@@ -274,7 +274,7 @@ defmodule GiTF.Web.ApiController do
   def confirm_plan(conn, %{"id" => quest_id} = params) do
     specs = params["specs"] || []
 
-    {:ok, jobs} = GiTF.Queen.Planner.create_jobs_from_specs(quest_id, specs)
+    {:ok, jobs} = GiTF.Major.Planner.create_jobs_from_specs(quest_id, specs)
     GiTF.Quests.store_artifact(quest_id, "planning", specs)
     json(conn, %{data: %{quest_id: quest_id, jobs_created: length(jobs)}})
   end
@@ -305,7 +305,7 @@ defmodule GiTF.Web.ApiController do
   def revise_plan(conn, %{"id" => quest_id} = params) do
     feedback = params["feedback"] || ""
 
-    case GiTF.Queen.Planner.generate_llm_plan(quest_id, %{feedback: feedback}) do
+    case GiTF.Major.Planner.generate_llm_plan(quest_id, %{feedback: feedback}) do
       {:ok, plan} ->
         # Store as draft
         quest_record = GiTF.Store.get(:quests, quest_id)
@@ -410,7 +410,7 @@ defmodule GiTF.Web.ApiController do
 
           GiTF.Waggle.send(
             bee_id,
-            "queen",
+            "major",
             "job_complete",
             "Job #{bee[:job_id]} completed successfully"
           )
@@ -432,7 +432,7 @@ defmodule GiTF.Web.ApiController do
 
         if bee[:job_id] do
           GiTF.Jobs.fail(bee[:job_id])
-          GiTF.Waggle.send(bee_id, "queen", "job_failed", "Job #{bee[:job_id]} failed: #{reason}")
+          GiTF.Waggle.send(bee_id, "major", "job_failed", "Job #{bee[:job_id]} failed: #{reason}")
         end
 
         json(conn, %{data: %{failed: true}})
@@ -576,7 +576,7 @@ defmodule GiTF.Web.ApiController do
             end)
             |> Enum.reverse()
 
-          case GiTF.Queen.PhaseCollector.collect(phase, log_content, events) do
+          case GiTF.Major.PhaseCollector.collect(phase, log_content, events) do
             {:ok, artifact} ->
               GiTF.Quests.store_artifact(job.quest_id, phase, artifact)
 

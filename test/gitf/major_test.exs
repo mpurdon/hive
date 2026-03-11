@@ -1,7 +1,7 @@
-defmodule GiTF.QueenTest do
+defmodule GiTF.MajorTest do
   use ExUnit.Case, async: false
 
-  alias GiTF.Queen
+  alias GiTF.Major
   alias GiTF.Store
 
   @tmp_dir System.tmp_dir!()
@@ -22,28 +22,28 @@ defmodule GiTF.QueenTest do
 
     gitf_root = create_gitf_workspace()
 
-    # Start a fresh Queen for each test. Must terminate from supervisor first
+    # Start a fresh Major for each test. Must terminate from supervisor first
     # to prevent auto-restart conflicts.
     try do
-      Supervisor.terminate_child(GiTF.Supervisor, GiTF.Queen)
-      Supervisor.delete_child(GiTF.Supervisor, GiTF.Queen)
+      Supervisor.terminate_child(GiTF.Supervisor, GiTF.Major)
+      Supervisor.delete_child(GiTF.Supervisor, GiTF.Major)
     catch
       :exit, _ -> :ok
     end
-    GiTF.Test.StoreHelper.safe_stop(GiTF.Queen)
+    GiTF.Test.StoreHelper.safe_stop(GiTF.Major)
     Process.sleep(10)
-    {:ok, pid} = Queen.start_link(gitf_root: gitf_root)
+    {:ok, pid} = Major.start_link(gitf_root: gitf_root)
     on_exit(fn -> safe_stop(pid) end)
 
     %{gitf_root: gitf_root, queen_pid: pid}
   end
 
   defp create_gitf_workspace do
-    name = "gitf_queen_test_#{:erlang.unique_integer([:positive])}"
+    name = "gitf_major_test_#{:erlang.unique_integer([:positive])}"
     path = Path.join(@tmp_dir, name)
-    queen_dir = Path.join([path, ".gitf", "queen"])
+    queen_dir = Path.join([path, ".gitf", "major"])
     File.mkdir_p!(queen_dir)
-    File.write!(Path.join(queen_dir, "QUEEN.md"), "# Queen\n")
+    File.write!(Path.join(queen_dir, "QUEEN.md"), "# Major\n")
     on_exit(fn -> File.rm_rf!(path) end)
     path
   end
@@ -59,29 +59,29 @@ defmodule GiTF.QueenTest do
   end
 
   describe "start_link/1" do
-    test "starts the Queen GenServer", %{queen_pid: pid} do
+    test "starts the Major GenServer", %{queen_pid: pid} do
       assert Process.alive?(pid)
     end
 
     test "initializes with idle status" do
-      status = Queen.status()
+      status = Major.status()
       assert status.status == :idle
     end
   end
 
   describe "start_session/0 and stop_session/0" do
     test "transitions status to active then back to idle" do
-      assert :ok = Queen.start_session()
-      assert %{status: :active} = Queen.status()
+      assert :ok = Major.start_session()
+      assert %{status: :active} = Major.status()
 
-      assert :ok = Queen.stop_session()
-      assert %{status: :idle} = Queen.status()
+      assert :ok = Major.stop_session()
+      assert %{status: :idle} = Major.status()
     end
   end
 
   describe "status/0" do
     test "returns current state map", %{gitf_root: gitf_root} do
-      status = Queen.status()
+      status = Major.status()
       assert status.status == :idle
       assert status.active_bees == %{}
       assert status.gitf_root == gitf_root
@@ -95,8 +95,8 @@ defmodule GiTF.QueenTest do
       original_path = System.get_env("PATH")
       System.put_env("PATH", "/empty")
 
-      Queen.start_session()
-      result = Queen.launch()
+      Major.start_session()
+      result = Major.launch()
 
       System.put_env("PATH", original_path)
 
@@ -118,51 +118,51 @@ defmodule GiTF.QueenTest do
 
   describe "handle_info/2 waggle handling" do
     test "handles job_complete waggle by removing bee from active_bees" do
-      Queen.start_session()
+      Major.start_session()
 
       # Simulate receiving a waggle message directly (plain map now)
       waggle = %{
         id: "wag-test1",
         from: "bee-abc123",
-        to: "queen",
+        to: "major",
         subject: "job_complete",
         body: "Finished the task",
         read: false
       }
 
-      send(Process.whereis(GiTF.Queen), {:waggle_received, waggle})
+      send(Process.whereis(GiTF.Major), {:waggle_received, waggle})
 
       # Give the GenServer a moment to process
       Process.sleep(10)
 
-      status = Queen.status()
+      status = Major.status()
       refute Map.has_key?(status.active_bees, "bee-abc123")
     end
 
     test "handles job_failed waggle" do
-      Queen.start_session()
+      Major.start_session()
 
       waggle = %{
         id: "wag-test2",
         from: "bee-def456",
-        to: "queen",
+        to: "major",
         subject: "job_failed",
         body: "Could not compile",
         read: false
       }
 
-      send(Process.whereis(GiTF.Queen), {:waggle_received, waggle})
+      send(Process.whereis(GiTF.Major), {:waggle_received, waggle})
       Process.sleep(10)
 
       # Should not crash
-      assert Process.alive?(Process.whereis(GiTF.Queen))
+      assert Process.alive?(Process.whereis(GiTF.Major))
     end
 
     test "handles unexpected messages gracefully" do
-      send(Process.whereis(GiTF.Queen), :some_random_message)
+      send(Process.whereis(GiTF.Major), :some_random_message)
       Process.sleep(10)
 
-      assert Process.alive?(Process.whereis(GiTF.Queen))
+      assert Process.alive?(Process.whereis(GiTF.Major))
     end
 
     test "retry logic increments retry count for failed job" do
@@ -191,24 +191,24 @@ defmodule GiTF.QueenTest do
       {:ok, _} = GiTF.Jobs.start(job.id)
       {:ok, _} = GiTF.Jobs.fail(job.id)
 
-      Queen.start_session()
+      Major.start_session()
 
       # Simulate the failed waggle -- retry will attempt to spawn a bee
       # which may fail (no worktree), but the retry count should still be tracked
       waggle = %{
         id: "wag-retry-1",
         from: bee.id,
-        to: "queen",
+        to: "major",
         subject: "job_failed",
         body: "Job failed",
         read: false
       }
 
-      send(Process.whereis(GiTF.Queen), {:waggle_received, waggle})
+      send(Process.whereis(GiTF.Major), {:waggle_received, waggle})
       Process.sleep(50)
 
-      # Queen should still be alive after retry attempt
-      assert Process.alive?(Process.whereis(GiTF.Queen))
+      # Major should still be alive after retry attempt
+      assert Process.alive?(Process.whereis(GiTF.Major))
     end
 
     test "updates quest status to completed on job_complete" do
@@ -237,25 +237,25 @@ defmodule GiTF.QueenTest do
       {:ok, _} = GiTF.Jobs.start(job.id)
       {:ok, _} = GiTF.Jobs.complete(job.id)
 
-      Queen.start_session()
+      Major.start_session()
 
       waggle = %{
         id: "wag-adv-1",
         from: bee.id,
-        to: "queen",
+        to: "major",
         subject: "job_complete",
         body: "Done",
         read: false
       }
 
-      send(Process.whereis(GiTF.Queen), {:waggle_received, waggle})
+      send(Process.whereis(GiTF.Major), {:waggle_received, waggle})
 
-      # The Queen spawns async verification which will fail (no cell/worktree
+      # The Major spawns async verification which will fail (no cell/worktree
       # in test env), triggering retry. Wait for async tasks to settle.
       Process.sleep(500)
 
-      # Queen should survive the waggle processing
-      assert Process.alive?(Process.whereis(GiTF.Queen))
+      # Major should survive the waggle processing
+      assert Process.alive?(Process.whereis(GiTF.Major))
 
       # Quest status depends on verification outcome:
       # - "completed" if verification passed (unlikely in test - no git worktree)
@@ -266,7 +266,7 @@ defmodule GiTF.QueenTest do
 
     test "sends quest_completed waggle on completion" do
       # Subscribe to queen topic to receive the waggle
-      GiTF.Waggle.subscribe("waggle:queen")
+      GiTF.Waggle.subscribe("link:major")
 
       {:ok, comb} =
         Store.insert(:combs, %{name: "wag-comb-#{:erlang.unique_integer([:positive])}"})
@@ -291,18 +291,18 @@ defmodule GiTF.QueenTest do
       {:ok, _} = GiTF.Jobs.start(job.id)
       {:ok, _} = GiTF.Jobs.complete(job.id)
 
-      Queen.start_session()
+      Major.start_session()
 
       waggle = %{
         id: "wag-complete-1",
         from: bee.id,
-        to: "queen",
+        to: "major",
         subject: "job_complete",
         body: "Done",
         read: false
       }
 
-      send(Process.whereis(GiTF.Queen), {:waggle_received, waggle})
+      send(Process.whereis(GiTF.Major), {:waggle_received, waggle})
 
       # In test env, verification will fail (no cell/worktree), so quest_completed
       # waggle may not be sent. Accept either quest_completed or no message.
@@ -312,8 +312,8 @@ defmodule GiTF.QueenTest do
 
       after
         2_000 ->
-          # Verification failed -> retry path. Queen should still be alive.
-          assert Process.alive?(Process.whereis(GiTF.Queen))
+          # Verification failed -> retry path. Major should still be alive.
+          assert Process.alive?(Process.whereis(GiTF.Major))
       end
     end
 
@@ -352,25 +352,25 @@ defmodule GiTF.QueenTest do
       {:ok, _} = GiTF.Jobs.start(job_1.id)
       {:ok, _} = GiTF.Jobs.complete(job_1.id)
 
-      Queen.start_session()
+      Major.start_session()
 
       waggle = %{
         id: "wag-spawn-1",
         from: bee.id,
-        to: "queen",
+        to: "major",
         subject: "job_complete",
         body: "Done",
         read: false
       }
 
-      send(Process.whereis(GiTF.Queen), {:waggle_received, waggle})
+      send(Process.whereis(GiTF.Major), {:waggle_received, waggle})
       Process.sleep(100)
 
       # Quest should be updated (not completed yet since job_2 is pending)
       {:ok, updated_quest} = GiTF.Quests.get(quest.id)
       # Status should be "pending" (job_2 is pending) or "active" if spawn succeeded
-      # The spawn itself may fail (no real git worktree), but Queen should not crash
-      assert Process.alive?(Process.whereis(GiTF.Queen))
+      # The spawn itself may fail (no real git worktree), but Major should not crash
+      assert Process.alive?(Process.whereis(GiTF.Major))
       assert updated_quest.status in ["pending", "active"]
     end
 
@@ -403,7 +403,7 @@ defmodule GiTF.QueenTest do
       {:ok, _} = GiTF.Jobs.start(job.id)
       {:ok, _} = GiTF.Jobs.fail(job.id)
 
-      Queen.start_session()
+      Major.start_session()
 
       # Pre-load retry count to max so next failure triggers exhaustion
       # Retry counts are now persisted on the job record
@@ -413,13 +413,13 @@ defmodule GiTF.QueenTest do
       waggle = %{
         id: "wag-exhaust-1",
         from: bee.id,
-        to: "queen",
+        to: "major",
         subject: "validation_failed",
         body: "Failed again",
         read: false
       }
 
-      send(Process.whereis(GiTF.Queen), {:waggle_received, waggle})
+      send(Process.whereis(GiTF.Major), {:waggle_received, waggle})
       Process.sleep(100)
 
       # After exhausting retries, quest status should be updated
@@ -452,32 +452,32 @@ defmodule GiTF.QueenTest do
       {:ok, _} = GiTF.Jobs.start(job.id)
       {:ok, _} = GiTF.Jobs.fail(job.id)
 
-      Queen.start_session()
+      Major.start_session()
 
       waggle = %{
         id: "wag-val-1",
         from: bee.id,
-        to: "queen",
+        to: "major",
         subject: "validation_failed",
         body: "Tests did not pass",
         read: false
       }
 
-      send(Process.whereis(GiTF.Queen), {:waggle_received, waggle})
+      send(Process.whereis(GiTF.Major), {:waggle_received, waggle})
       Process.sleep(50)
 
       # Should not crash and should attempt retry
-      assert Process.alive?(Process.whereis(GiTF.Queen))
+      assert Process.alive?(Process.whereis(GiTF.Major))
     end
 
     test "handles port data messages without crashing" do
-      # Simulate port messages that the Queen's Claude session would produce.
+      # Simulate port messages that the Major's Claude session would produce.
       # We create a real port so the guard `when is_port(port)` passes.
       port = Port.open({:spawn, "echo hello"}, [:binary, :exit_status])
 
-      # First set the Queen's port field via internal state manipulation.
+      # First set the Major's port field via internal state manipulation.
       # We simulate receiving port data as if Claude was running.
-      queen_pid = Process.whereis(GiTF.Queen)
+      queen_pid = Process.whereis(GiTF.Major)
       send(queen_pid, {port, {:data, "some output"}})
       Process.sleep(10)
 

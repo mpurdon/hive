@@ -191,7 +191,7 @@ defmodule GiTF.CLI.QuestHandler do
   # -- Private helpers ---------------------------------------------------------
 
   defp display_phase_timeline(quest) do
-    phases = GiTF.Queen.Orchestrator.phases()
+    phases = GiTF.Major.Orchestrator.phases()
     current = Map.get(quest, :current_phase, "pending")
     artifacts = Map.get(quest, :artifacts, %{})
 

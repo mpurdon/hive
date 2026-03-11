@@ -3,7 +3,7 @@ defmodule GiTF.Prime do
   Generates context prompts for Claude Code sessions.
 
   Priming is the act of feeding Claude its initial context at session start.
-  The Queen gets the QUEEN.md instructions plus a snapshot of the current
+  The Major gets the QUEEN.md instructions plus a snapshot of the current
   section state. A Bee gets its specific job description, relevant waggles,
   and information about the comb it is working on.
 
@@ -15,21 +15,21 @@ defmodule GiTF.Prime do
   # -- Public API ------------------------------------------------------------
 
   @doc """
-  Primes a Queen or Bee with context for a Claude Code session.
+  Primes a Major or Bee with context for a Claude Code session.
 
-  - `prime(:queen, gitf_root)` reads QUEEN.md and appends current section state
+  - `prime(:major, gitf_root)` reads QUEEN.md and appends current section state
   - `prime(:bee, bee_id)` builds a briefing from the bee's job, cell, and waggles
 
   Returns `{:ok, markdown}` or `{:error, reason}`.
   """
-  @spec prime(:queen | :bee, String.t()) :: {:ok, String.t()} | {:error, term()}
+  @spec prime(:major | :bee, String.t()) :: {:ok, String.t()} | {:error, term()}
   def prime(role, identifier)
 
-  def prime(:queen, gitf_root) do
-    queen_md_path = Path.join([gitf_root, ".gitf", "queen", "QUEEN.md"])
+  def prime(:major, gitf_root) do
+    queen_md_path = Path.join([gitf_root, ".gitf", "major", "QUEEN.md"])
 
     with {:ok, instructions} <- File.read(queen_md_path) do
-      state_summary = build_queen_state_summary()
+      state_summary = build_major_state_summary()
       {:ok, instructions <> "\n\n" <> state_summary}
     end
   end
@@ -42,9 +42,9 @@ defmodule GiTF.Prime do
     end
   end
 
-  # -- Private: Queen --------------------------------------------------------
+  # -- Private: Major --------------------------------------------------------
 
-  defp build_queen_state_summary do
+  defp build_major_state_summary do
     bees = Store.all(:bees)
     active_bees = Enum.filter(bees, &(&1.status in ["working", "idle", "starting"]))
 
@@ -52,7 +52,7 @@ defmodule GiTF.Prime do
       Store.filter(:quests, fn q -> q.status in ["pending", "active", "planning"] end)
 
     pending_jobs = Store.filter(:jobs, fn j -> j.status == "pending" end)
-    recent_waggles = GiTF.Waggle.list(to: "queen", limit: 10)
+    recent_waggles = GiTF.Waggle.list(to: "major", limit: 10)
 
     planning_quests = Enum.filter(pending_quests, &(&1.status == "planning"))
     quest_specs_section = format_quest_specs(planning_quests)
@@ -71,7 +71,7 @@ defmodule GiTF.Prime do
       "### Pending Jobs (#{length(pending_jobs)})",
       format_jobs(pending_jobs),
       "",
-      "### Recent Messages to Queen (#{length(recent_waggles)})",
+      "### Recent Messages to Major (#{length(recent_waggles)})",
       format_waggles(recent_waggles)
     ]
 

@@ -1,7 +1,7 @@
-defmodule GiTF.Queen.PlannerMultiPlanTest do
+defmodule GiTF.Major.PlannerMultiPlanTest do
   use ExUnit.Case, async: false
 
-  alias GiTF.Queen.Planner
+  alias GiTF.Major.Planner
   alias GiTF.Store
 
   setup do
@@ -238,7 +238,7 @@ defmodule GiTF.Queen.PlannerMultiPlanTest do
       updated = Map.put(quest_record, :current_phase, "implementation")
       Store.put(:quests, updated)
 
-      {:ok, phase} = GiTF.Queen.Orchestrator.advance_quest(quest.id)
+      {:ok, phase} = GiTF.Major.Orchestrator.advance_quest(quest.id)
       assert phase == "implementation"
     end
   end

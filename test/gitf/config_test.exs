@@ -14,7 +14,7 @@ defmodule GiTF.ConfigTest do
       config = Config.default_config()
 
       assert config["gitf"]["version"] == GiTF.version()
-      assert config["queen"]["max_bees"] == 5
+      assert config["major"]["max_bees"] == 5
       assert config["costs"]["warn_threshold_usd"] == 5.0
     end
   end
@@ -28,7 +28,7 @@ defmodule GiTF.ConfigTest do
       assert {:ok, parsed} = Config.read_config(path)
 
       assert parsed["gitf"]["version"] == GiTF.version()
-      assert parsed["queen"]["max_bees"] == 5
+      assert parsed["major"]["max_bees"] == 5
       assert parsed["costs"]["warn_threshold_usd"] == 5.0
     end
 
@@ -38,14 +38,14 @@ defmodule GiTF.ConfigTest do
 
       custom = %{
         "gitf" => %{"version" => "99.0.0"},
-        "queen" => %{"max_bees" => 10}
+        "major" => %{"max_bees" => 10}
       }
 
       assert :ok = Config.write_config(path, custom)
       assert {:ok, parsed} = Config.read_config(path)
 
       assert parsed["gitf"]["version"] == "99.0.0"
-      assert parsed["queen"]["max_bees"] == 10
+      assert parsed["major"]["max_bees"] == 10
     end
 
     test "round-trips nested maps and lists" do
