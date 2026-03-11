@@ -25,7 +25,7 @@ defmodule GiTF.AutonomyTest do
     end
 
     test "cleans up orphaned ghosts" do
-      # Create ghost without active job
+      # Create ghost without active op
       ghost = %{
         id: "ghost-orphan",
         status: "active",
@@ -51,61 +51,61 @@ defmodule GiTF.AutonomyTest do
 
   describe "predict_issues/1" do
     test "predicts issues based on failure patterns" do
-      comb_id = "comb-predict"
+      sector_id = "sector-predict"
       
-      # Create some failed jobs
+      # Create some failed ops
       for i <- 1..3 do
-        job = %{
-          id: "job-fail-#{i}",
-          comb_id: comb_id,
+        op = %{
+          id: "op-fail-#{i}",
+          sector_id: sector_id,
           status: "failed",
           error_message: "timeout",
           created_at: DateTime.utc_now(),
           updated_at: DateTime.utc_now()
         }
-        Store.insert(:jobs, job)
+        Store.insert(:ops, op)
       end
       
-      predictions = Autonomy.predict_issues(comb_id)
+      predictions = Autonomy.predict_issues(sector_id)
       
       assert is_list(predictions)
     end
   end
 
   describe "auto_approve?/1" do
-    test "approves high-quality verified jobs" do
-      job = %{
-        id: "job-approve",
+    test "approves high-quality verified ops" do
+      op = %{
+        id: "op-approve",
         quality_score: 90,
         verification_status: "passed",
         created_at: DateTime.utc_now(),
         updated_at: DateTime.utc_now()
       }
-      Store.insert(:jobs, job)
+      Store.insert(:ops, op)
       
-      assert Autonomy.auto_approve?(job.id) == true
+      assert Autonomy.auto_approve?(op.id) == true
     end
 
-    test "rejects low-quality jobs" do
-      job = %{
-        id: "job-reject",
+    test "rejects low-quality ops" do
+      op = %{
+        id: "op-reject",
         quality_score: 60,
         verification_status: "passed",
         created_at: DateTime.utc_now(),
         updated_at: DateTime.utc_now()
       }
-      Store.insert(:jobs, job)
+      Store.insert(:ops, op)
       
-      assert Autonomy.auto_approve?(job.id) == false
+      assert Autonomy.auto_approve?(op.id) == false
     end
   end
 
   describe "audit/2" do
     test "creates audit log entry" do
-      {:ok, entry} = Autonomy.audit(:job_approved, %{job_id: "job-123"})
+      {:ok, entry} = Autonomy.audit(:job_approved, %{op_id: "op-123"})
       
       assert entry.action == :job_approved
-      assert entry.details.job_id == "job-123"
+      assert entry.details.op_id == "op-123"
     end
   end
 end

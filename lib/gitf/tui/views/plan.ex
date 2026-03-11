@@ -25,7 +25,7 @@ defmodule GiTF.TUI.Views.Plan do
   end
 
   defp plan_title(plan) do
-    base = if plan.quest_id, do: "Plan: #{String.slice(plan.quest_id, 0, 12)}", else: "Plan"
+    base = if plan.mission_id, do: "Plan: #{String.slice(plan.mission_id, 0, 12)}", else: "Plan"
 
     case Plan.current_strategy(plan) do
       {strategy, score} ->

@@ -1,36 +1,36 @@
-defmodule GiTF.CLI.QuestHandler do
+defmodule GiTF.CLI.MissionHandler do
   @moduledoc """
-  CLI handler for quest subcommands.
+  CLI handler for mission subcommands.
 
   Extracted from `GiTF.CLI` to reduce the monolithic dispatch file.
-  The main CLI module delegates quest-related dispatch calls here.
+  The main CLI module delegates mission-related dispatch calls here.
   """
 
   alias GiTF.CLI.Format
 
-  def dispatch([:quest, :new], result, helpers) do
+  def dispatch([:mission, :new], result, helpers) do
     goal = helpers.result_get.(result, :args, :goal)
 
     if GiTF.Client.remote?() do
-      comb_opt = helpers.result_get.(result, :options, :comb)
-      attrs = if comb_opt, do: %{goal: goal, comb_id: comb_opt}, else: %{goal: goal}
+      comb_opt = helpers.result_get.(result, :options, :sector)
+      attrs = if comb_opt, do: %{goal: goal, sector_id: comb_opt}, else: %{goal: goal}
 
       case GiTF.Client.create_quest(attrs) do
-        {:ok, quest} ->
-          Format.success("Quest created: #{quest.name} (#{quest.id})")
-          Format.info("Starting quest execution on remote server...")
+        {:ok, mission} ->
+          Format.success("Quest created: #{mission.name} (#{mission.id})")
+          Format.info("Starting mission execution on remote server...")
 
-          case GiTF.Client.start_quest(quest.id) do
+          case GiTF.Client.start_quest(mission.id) do
             {:ok, data} ->
               phase = if is_map(data), do: data[:phase], else: data
-              Format.success("Quest #{quest.id} is now in #{phase} phase.")
+              Format.success("Quest #{mission.id} is now in #{phase} phase.")
 
             {:error, reason} ->
               Format.warn("Could not auto-start: #{inspect(reason)}")
           end
 
         {:error, reason} ->
-          Format.error("Failed to create quest: #{inspect(reason)}")
+          Format.error("Failed to create mission: #{inspect(reason)}")
       end
     else
       goal =
@@ -42,46 +42,46 @@ defmodule GiTF.CLI.QuestHandler do
         end
 
       quest_result =
-        case helpers.resolve_comb_id.(helpers.result_get.(result, :options, :comb)) do
-          {:ok, cid} -> GiTF.Quests.create(%{goal: goal, comb_id: cid})
-          {:error, :no_comb} -> GiTF.Quests.create(%{goal: goal})
+        case helpers.resolve_comb_id.(helpers.result_get.(result, :options, :sector)) do
+          {:ok, cid} -> GiTF.Missions.create(%{goal: goal, sector_id: cid})
+          {:error, :no_comb} -> GiTF.Missions.create(%{goal: goal})
         end
 
       case quest_result do
-        {:ok, quest} ->
-          Format.success("Quest created: #{quest.name} (#{quest.id})")
-          GiTF.CLI.PlanHandler.start_interactive_planning(quest)
+        {:ok, mission} ->
+          Format.success("Quest created: #{mission.name} (#{mission.id})")
+          GiTF.CLI.PlanHandler.start_interactive_planning(mission)
 
         {:error, reason} ->
-          Format.error("Failed to create quest: #{inspect(reason)}")
+          Format.error("Failed to create mission: #{inspect(reason)}")
       end
     end
   end
 
-  def dispatch([:quest, :list], _result, _helpers) do
-    quests =
+  def dispatch([:mission, :list], _result, _helpers) do
+    missions =
       if GiTF.Client.remote?() do
         case GiTF.Client.list_quests() do
           {:ok, q} -> q
           {:error, reason} -> Format.error("Remote error: #{inspect(reason)}"); []
         end
       else
-        GiTF.Quests.list()
+        GiTF.Missions.list()
       end
 
-    case quests do
+    case missions do
       [] ->
-        Format.info("No quests yet. Create one with `gitf mission new \"<goal>\"`")
+        Format.info("No missions yet. Create one with `gitf mission new \"<goal>\"`")
 
-      quests ->
+      missions ->
         headers = ["ID", "Name", "Phase", "Status", "Jobs", "Created"]
 
         rows =
-          Enum.map(quests, fn q ->
+          Enum.map(missions, fn q ->
             job_summary =
-              case q[:jobs] do
+              case q[:ops] do
                 nil -> "-"
-                jobs -> "#{length(jobs)}"
+                ops -> "#{length(ops)}"
               end
 
             created =
@@ -99,42 +99,42 @@ defmodule GiTF.CLI.QuestHandler do
     end
   end
 
-  def dispatch([:quest, :show], result, helpers) do
+  def dispatch([:mission, :show], result, helpers) do
     id = helpers.result_get.(result, :args, :id)
 
     quest_result =
       if GiTF.Client.remote?(),
         do: GiTF.Client.get_quest(id),
-        else: GiTF.Quests.get(id)
+        else: GiTF.Missions.get(id)
 
     case quest_result do
-      {:ok, quest} ->
-        IO.puts("Quest: #{quest.name}")
-        IO.puts("ID:     #{quest.id}")
-        IO.puts("Status: #{quest.status}")
-        IO.puts("Phase:  #{quest[:current_phase] || "pending"}")
+      {:ok, mission} ->
+        IO.puts("Quest: #{mission.name}")
+        IO.puts("ID:     #{mission.id}")
+        IO.puts("Status: #{mission.status}")
+        IO.puts("Phase:  #{mission[:current_phase] || "pending"}")
         IO.puts("")
 
         unless GiTF.Client.remote?() do
           # Phase timeline
-          display_phase_timeline(quest)
+          display_phase_timeline(mission)
 
           # Artifact summaries
-          display_artifact_summaries(quest)
+          display_artifact_summaries(mission)
         end
 
         # Jobs table
-        case quest[:jobs] do
+        case mission[:ops] do
           nil ->
-            Format.info("No jobs yet.")
+            Format.info("No ops yet.")
 
           [] ->
-            Format.info("No jobs yet.")
+            Format.info("No ops yet.")
 
-          jobs ->
-            # Separate phase jobs from implementation jobs
-            phase_jobs = Enum.filter(jobs, & &1[:phase_job])
-            impl_jobs = Enum.reject(jobs, & &1[:phase_job])
+          ops ->
+            # Separate phase ops from implementation ops
+            phase_jobs = Enum.filter(ops, & &1[:phase_job])
+            impl_jobs = Enum.reject(ops, & &1[:phase_job])
 
             if impl_jobs != [] do
               IO.puts("Implementation Jobs:")
@@ -172,17 +172,17 @@ defmodule GiTF.CLI.QuestHandler do
     end
   end
 
-  def dispatch([:quest, :remove], result, helpers) do
+  def dispatch([:mission, :remove], result, helpers) do
     id = helpers.result_get.(result, :args, :id)
 
     del_result =
       if GiTF.Client.remote?(),
         do: GiTF.Client.delete_quest(id),
-        else: GiTF.Quests.delete(id)
+        else: GiTF.Missions.delete(id)
 
     case del_result do
       :ok -> Format.success("Quest #{id} removed.")
-      {:error, reason} -> Format.error("Failed to remove quest: #{inspect(reason)}")
+      {:error, reason} -> Format.error("Failed to remove mission: #{inspect(reason)}")
     end
   end
 
@@ -190,10 +190,10 @@ defmodule GiTF.CLI.QuestHandler do
 
   # -- Private helpers ---------------------------------------------------------
 
-  defp display_phase_timeline(quest) do
+  defp display_phase_timeline(mission) do
     phases = GiTF.Major.Orchestrator.phases()
-    current = Map.get(quest, :current_phase, "pending")
-    artifacts = Map.get(quest, :artifacts, %{})
+    current = Map.get(mission, :current_phase, "pending")
+    artifacts = Map.get(mission, :artifacts, %{})
 
     timeline =
       Enum.map_join(phases, " -> ", fn phase ->
@@ -208,8 +208,8 @@ defmodule GiTF.CLI.QuestHandler do
     IO.puts("")
   end
 
-  defp display_artifact_summaries(quest) do
-    artifacts = Map.get(quest, :artifacts, %{})
+  defp display_artifact_summaries(mission) do
+    artifacts = Map.get(mission, :artifacts, %{})
 
     if map_size(artifacts) > 0 do
       IO.puts("Phase Artifacts:")
@@ -233,7 +233,7 @@ defmodule GiTF.CLI.QuestHandler do
               if Map.get(artifact, "approved"), do: "Approved", else: "Rejected"
 
             "planning" when is_list(artifact) ->
-              "#{length(artifact)} jobs planned"
+              "#{length(artifact)} ops planned"
 
             "validation" ->
               "Verdict: #{Map.get(artifact, "overall_verdict", "unknown")}"

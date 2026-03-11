@@ -17,49 +17,49 @@ defmodule GiTF.Intelligence.RetryFeedbackTest do
 
   describe "feedback-enriched classification" do
     test "vague error + specific feedback yields correct type" do
-      job = insert_failed_job("job-fb-1", error_message: "something went wrong")
+      op = insert_failed_job("op-fb-1", error_message: "something went wrong")
 
       # Without feedback → :unknown
-      {:ok, analysis_no_fb} = FailureAnalysis.analyze_failure(job.id, nil)
+      {:ok, analysis_no_fb} = FailureAnalysis.analyze_failure(op.id, nil)
       assert analysis_no_fb.failure_type == :unknown
 
       # With feedback mentioning "timeout" → :timeout
-      {:ok, analysis_fb} = FailureAnalysis.analyze_failure(job.id, "the process hit a timeout")
+      {:ok, analysis_fb} = FailureAnalysis.analyze_failure(op.id, "the process hit a timeout")
       assert analysis_fb.failure_type == :timeout
       assert analysis_fb.feedback == "the process hit a timeout"
     end
 
     test "feedback mentioning test failure overrides vague error" do
-      job = insert_failed_job("job-fb-2", error_message: "exit code 1")
+      op = insert_failed_job("op-fb-2", error_message: "exit code 1")
 
-      {:ok, analysis} = FailureAnalysis.analyze_failure(job.id, "test suite failed on 3 tests")
+      {:ok, analysis} = FailureAnalysis.analyze_failure(op.id, "test suite failed on 3 tests")
       assert analysis.failure_type == :test_failure
     end
 
     test "feedback mentioning compilation error" do
-      job = insert_failed_job("job-fb-3", error_message: "unknown error")
+      op = insert_failed_job("op-fb-3", error_message: "unknown error")
 
-      {:ok, analysis} = FailureAnalysis.analyze_failure(job.id, "compilation errors in module Foo")
+      {:ok, analysis} = FailureAnalysis.analyze_failure(op.id, "compilation errors in module Foo")
       assert analysis.failure_type == :compilation_error
     end
   end
 
   describe "feedback stored in retry_metadata" do
-    test "feedback is threaded to retry job metadata" do
-      job = insert_failed_job("job-fb-4", error_message: "timeout occurred")
+    test "feedback is threaded to retry op metadata" do
+      op = insert_failed_job("op-fb-4", error_message: "timeout occurred")
 
-      {:ok, new_job} = Retry.retry_with_strategy(job.id, "ghost was stuck in a loop")
+      {:ok, new_job} = Retry.retry_with_strategy(op.id, "ghost was stuck in a loop")
 
-      assert new_job.retry_of == job.id
+      assert new_job.retry_of == op.id
       assert new_job.retry_metadata[:feedback] == "ghost was stuck in a loop"
     end
 
     test "nil feedback is stored as nil in metadata" do
-      job = insert_failed_job("job-fb-5", error_message: "timeout occurred")
+      op = insert_failed_job("op-fb-5", error_message: "timeout occurred")
 
-      {:ok, new_job} = Retry.retry_with_strategy(job.id, nil)
+      {:ok, new_job} = Retry.retry_with_strategy(op.id, nil)
 
-      assert new_job.retry_of == job.id
+      assert new_job.retry_of == op.id
       assert new_job.retry_metadata[:feedback] == nil
     end
   end
@@ -67,11 +67,11 @@ defmodule GiTF.Intelligence.RetryFeedbackTest do
   # -- Helpers -----------------------------------------------------------------
 
   defp insert_failed_job(id, opts) do
-    job = %{
+    op = %{
       id: id,
-      quest_id: "qst-fb",
-      comb_id: "comb-fb",
-      title: "Feedback test job",
+      mission_id: "qst-fb",
+      sector_id: "sector-fb",
+      title: "Feedback test op",
       description: "Test",
       status: "failed",
       error_message: opts[:error_message] || "",
@@ -80,7 +80,7 @@ defmodule GiTF.Intelligence.RetryFeedbackTest do
       updated_at: DateTime.utc_now()
     }
 
-    Store.insert(:jobs, job)
-    job
+    Store.insert(:ops, op)
+    op
   end
 end

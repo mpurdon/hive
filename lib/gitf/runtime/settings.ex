@@ -3,7 +3,7 @@ defmodule GiTF.Runtime.Settings do
   Generates `.claude/settings.json` for ghost working directories.
 
   Each ghost needs a settings file that wires Claude Code's hook system into
-  the section. The `SessionStart` hook primes the ghost with its job context,
+  the section. The `SessionStart` hook primes the ghost with its op context,
   and the `Stop` hook records cost data back to the section database.
 
   In API mode, no settings file is needed (no CLI process to configure),
@@ -132,11 +132,11 @@ defmodule GiTF.Runtime.Settings do
   end
 
   @doc """
-  Generates settings for a ghost's cell worktree.
+  Generates settings for a ghost's shell worktree.
 
   Writes both `.claude/settings.json` (local settings) and
   `.claude/settings.json` at the project level within the worktree.
-  This is called during cell provisioning to ensure the ghost has
+  This is called during shell provisioning to ensure the ghost has
   proper permissions before Claude launches.
   """
   @spec generate_for_cell(String.t(), String.t(), String.t()) :: :ok | {:error, term()}
@@ -150,7 +150,7 @@ defmodule GiTF.Runtime.Settings do
   Generates a `.claude/settings.local.json` file that restricts tool access
   based on the ghost's role.
 
-  Scouts get read-only access, builders get full access with safety rails,
+  Recons get read-only access, builders get full access with safety rails,
   and reviewers get read plus test-runner access.
 
   This is written as `settings.local.json` (not `settings.json`) so it
@@ -158,7 +158,7 @@ defmodule GiTF.Runtime.Settings do
 
   Returns `:ok`.
   """
-  @spec generate_role_settings(:scout | :builder | :reviewer, String.t()) :: :ok
+  @spec generate_role_settings(:recon | :builder | :reviewer, String.t()) :: :ok
   def generate_role_settings(role, worktree_path) do
     role
     |> role_permissions()
@@ -170,8 +170,8 @@ defmodule GiTF.Runtime.Settings do
 
   Useful for testing or inspection.
   """
-  @spec role_permissions(:scout | :builder | :reviewer) :: map()
-  def role_permissions(:scout) do
+  @spec role_permissions(:recon | :builder | :reviewer) :: map()
+  def role_permissions(:recon) do
     %{
       "permissions" => %{
         "allow" => [

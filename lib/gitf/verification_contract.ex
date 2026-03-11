@@ -1,13 +1,13 @@
 defmodule GiTF.VerificationContract do
   @moduledoc """
-  Per-job verification contracts.
+  Per-op verification contracts.
 
-  Instead of relying solely on global comb-level quality thresholds, each job
+  Instead of relying solely on global sector-level quality thresholds, each op
   can declare its own verification policy: required checks, minimum thresholds,
   skip rules, and custom validation commands.
 
-  Contracts are built by merging job-level overrides over comb-level defaults.
-  High/critical risk jobs automatically get stricter requirements.
+  Contracts are built by merging op-level overrides over sector-level defaults.
+  High/critical risk ops automatically get stricter requirements.
   """
 
   @default_contract %{
@@ -25,7 +25,7 @@ defmodule GiTF.VerificationContract do
   def default_contract, do: @default_contract
 
   @doc """
-  Builds a contract for a job by merging layers:
+  Builds a contract for a op by merging layers:
 
   1. Defaults
   2. Comb-level `quality_thresholds`
@@ -33,14 +33,14 @@ defmodule GiTF.VerificationContract do
   4. Risk-based adjustments (high/critical adds :performance, raises thresholds 10%)
   """
   @spec build_contract(map()) :: map()
-  def build_contract(job) do
+  def build_contract(op) do
     base = @default_contract
 
-    # Layer 2: comb-level thresholds
+    # Layer 2: sector-level thresholds
     comb_thresholds =
-      case GiTF.Store.get(:combs, job.comb_id) do
+      case GiTF.Store.get(:sectors, op.sector_id) do
         nil -> %{}
-        comb -> Map.get(comb, :quality_thresholds, %{})
+        sector -> Map.get(sector, :quality_thresholds, %{})
       end
 
     with_comb =
@@ -50,12 +50,12 @@ defmodule GiTF.VerificationContract do
         base
       end
 
-    # Layer 3: job-level contract overrides
-    job_contract = Map.get(job, :verification_contract) || %{}
+    # Layer 3: op-level contract overrides
+    job_contract = Map.get(op, :verification_contract) || %{}
     merged = merge(with_comb, normalize_contract(job_contract))
 
     # Layer 4: risk-based adjustments
-    risk = Map.get(job, :risk_level, :low)
+    risk = Map.get(op, :risk_level, :low)
     apply_risk_adjustments(merged, risk)
   end
 

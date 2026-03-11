@@ -4,14 +4,14 @@ defmodule GiTF.Quality.Performance do
   """
 
   @doc """
-  Run performance benchmarks on a cell.
+  Run performance benchmarks on a shell.
   Returns {:ok, results} with performance score and metrics.
   """
-  def benchmark(cell_path, comb) do
-    benchmark_command = Map.get(comb, :benchmark_command)
+  def benchmark(shell_path, sector) do
+    benchmark_command = Map.get(sector, :benchmark_command)
     
     if benchmark_command do
-      run_benchmark(cell_path, benchmark_command)
+      run_benchmark(shell_path, benchmark_command)
     else
       {:ok, %{
         metrics: [],

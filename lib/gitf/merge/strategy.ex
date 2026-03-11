@@ -1,6 +1,6 @@
 defmodule GiTF.Merge.Strategy do
   @moduledoc """
-  Computes optimal merge order for pending jobs.
+  Computes optimal merge order for pending ops.
 
   Uses dependency-aware topological sort with multi-factor tie-breaking
   to minimize merge conflicts and maximize throughput.
@@ -8,7 +8,7 @@ defmodule GiTF.Merge.Strategy do
   ## Ordering rules (in priority order)
 
   1. Dependency graph: topological sort respecting depends_on
-  2. File disjointness: jobs touching unique files merge first
+  2. File disjointness: ops touching unique files merge first
   3. Smaller diffs first: fewer changed_files = less conflict surface
   4. Phase order: research < implementation < verification
   5. Conflict history penalty: historically-conflicting files go later
@@ -28,9 +28,9 @@ defmodule GiTF.Merge.Strategy do
   # -- Public API --------------------------------------------------------------
 
   @doc """
-  Returns an optimally-ordered list of `{job_id, cell_id}` tuples.
+  Returns an optimally-ordered list of `{op_id, shell_id}` tuples.
 
-  Input: list of `{job_id, cell_id}` tuples representing merge-ready jobs.
+  Input: list of `{op_id, shell_id}` tuples representing merge-ready ops.
   Output: same tuples reordered for optimal merge sequence.
   """
   @spec optimal_order([{String.t(), String.t()}]) :: [{String.t(), String.t()}]
@@ -38,18 +38,18 @@ defmodule GiTF.Merge.Strategy do
   def optimal_order([single]), do: [single]
 
   def optimal_order(pending_jobs) do
-    job_ids = Enum.map(pending_jobs, &elem(&1, 0))
+    op_ids = Enum.map(pending_jobs, &elem(&1, 0))
     job_map = Map.new(pending_jobs, fn {jid, cid} -> {jid, cid} end)
 
-    # Load job records
-    jobs = load_jobs(job_ids)
+    # Load op records
+    ops = load_jobs(op_ids)
 
-    # Build dependency edges (only between pending jobs)
-    pending_set = MapSet.new(job_ids)
-    edges = build_dependency_edges(job_ids, pending_set)
+    # Build dependency edges (only between pending ops)
+    pending_set = MapSet.new(op_ids)
+    edges = build_dependency_edges(op_ids, pending_set)
 
     # Topological sort with tie-breaking
-    sorted_ids = topo_sort_with_tiebreak(job_ids, edges, jobs)
+    sorted_ids = topo_sort_with_tiebreak(op_ids, edges, ops)
 
     Enum.map(sorted_ids, fn jid -> {jid, Map.get(job_map, jid)} end)
   rescue
@@ -60,10 +60,10 @@ defmodule GiTF.Merge.Strategy do
 
   # -- Private: topological sort -----------------------------------------------
 
-  defp topo_sort_with_tiebreak(job_ids, edges, jobs) do
+  defp topo_sort_with_tiebreak(op_ids, edges, ops) do
     # Build in-degree map and adjacency list
-    in_degree = Map.new(job_ids, fn id -> {id, 0} end)
-    adj = Map.new(job_ids, fn id -> {id, []} end)
+    in_degree = Map.new(op_ids, fn id -> {id, 0} end)
+    adj = Map.new(op_ids, fn id -> {id, []} end)
 
     {in_degree, adj} =
       Enum.reduce(edges, {in_degree, adj}, fn {from, to}, {deg, a} ->
@@ -74,10 +74,10 @@ defmodule GiTF.Merge.Strategy do
 
     # Kahn's algorithm with tie-breaking at each level
     conflict_prone = conflict_prone_set()
-    do_topo_sort(in_degree, adj, jobs, conflict_prone, [])
+    do_topo_sort(in_degree, adj, ops, conflict_prone, [])
   end
 
-  defp do_topo_sort(in_degree, adj, jobs, conflict_prone, acc) do
+  defp do_topo_sort(in_degree, adj, ops, conflict_prone, acc) do
     # Find all nodes with in-degree 0
     ready =
       in_degree
@@ -90,7 +90,7 @@ defmodule GiTF.Merge.Strategy do
       acc ++ remaining
     else
       # Sort ready nodes by tie-breaking heuristics
-      sorted_ready = sort_by_heuristics(ready, jobs, conflict_prone)
+      sorted_ready = sort_by_heuristics(ready, ops, conflict_prone)
 
       # Take the best candidate
       [best | rest_ready] = sorted_ready
@@ -109,63 +109,63 @@ defmodule GiTF.Merge.Strategy do
       # (they'll be picked up in the next iteration)
       _ = rest_ready
 
-      do_topo_sort(new_in_degree, adj, jobs, conflict_prone, acc ++ [best])
+      do_topo_sort(new_in_degree, adj, ops, conflict_prone, acc ++ [best])
     end
   end
 
   # -- Private: tie-breaking heuristics ----------------------------------------
 
-  defp sort_by_heuristics(job_ids, jobs, conflict_prone) do
-    Enum.sort_by(job_ids, fn jid ->
-      job = Map.get(jobs, jid, %{})
+  defp sort_by_heuristics(op_ids, ops, conflict_prone) do
+    Enum.sort_by(op_ids, fn jid ->
+      op = Map.get(ops, jid, %{})
       {
-        file_overlap_score(job, conflict_prone),
-        diff_size(job),
-        phase_score(job),
-        conflict_history_penalty(job, conflict_prone)
+        file_overlap_score(op, conflict_prone),
+        diff_size(op),
+        phase_score(op),
+        conflict_history_penalty(op, conflict_prone)
       }
     end)
   end
 
-  # Lower = better. Jobs touching files no other job touches get score 0.
-  defp file_overlap_score(job, conflict_prone) do
-    files = Map.get(job, :changed_files, []) |> List.wrap()
+  # Lower = better. Jobs touching files no other op touches get score 0.
+  defp file_overlap_score(op, conflict_prone) do
+    files = Map.get(op, :changed_files, []) |> List.wrap()
     Enum.count(files, &MapSet.member?(conflict_prone, &1))
   end
 
   # Smaller diffs first
-  defp diff_size(job) do
-    Map.get(job, :files_changed, 0) || 0
+  defp diff_size(op) do
+    Map.get(op, :files_changed, 0) || 0
   end
 
   # Research before implementation before verification
-  defp phase_score(job) do
-    phase = Map.get(job, :phase) || Map.get(job, :job_type) || "implementation"
+  defp phase_score(op) do
+    phase = Map.get(op, :phase) || Map.get(op, :op_type) || "implementation"
     Map.get(@phase_order, phase, 3)
   end
 
   # Files that historically conflict get a penalty
-  defp conflict_history_penalty(job, conflict_prone) do
-    files = Map.get(job, :changed_files, []) |> List.wrap()
+  defp conflict_history_penalty(op, conflict_prone) do
+    files = Map.get(op, :changed_files, []) |> List.wrap()
     Enum.count(files, &MapSet.member?(conflict_prone, &1))
   end
 
   # -- Private: helpers --------------------------------------------------------
 
-  defp load_jobs(job_ids) do
-    Map.new(job_ids, fn jid ->
-      case Store.get(:jobs, jid) do
+  defp load_jobs(op_ids) do
+    Map.new(op_ids, fn jid ->
+      case Store.get(:ops, jid) do
         nil -> {jid, %{}}
-        job -> {jid, job}
+        op -> {jid, op}
       end
     end)
   end
 
-  defp build_dependency_edges(job_ids, pending_set) do
-    Enum.flat_map(job_ids, fn jid ->
-      Store.filter(:job_dependencies, fn d -> d.job_id == jid end)
+  defp build_dependency_edges(op_ids, pending_set) do
+    Enum.flat_map(op_ids, fn jid ->
+      Store.filter(:op_dependencies, fn d -> d.op_id == jid end)
       |> Enum.filter(fn d -> MapSet.member?(pending_set, d.depends_on_id) end)
-      |> Enum.map(fn d -> {d.depends_on_id, d.job_id} end)
+      |> Enum.map(fn d -> {d.depends_on_id, d.op_id} end)
     end)
   end
 

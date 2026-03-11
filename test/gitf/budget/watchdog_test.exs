@@ -26,24 +26,24 @@ defmodule GiTF.Budget.WatchdogTest do
 
     # Use unique IDs to avoid collisions
     suffix = :erlang.unique_integer([:positive])
-    quest_id = "q-test-budget-#{suffix}"
+    mission_id = "q-test-budget-#{suffix}"
     ghost_id = "b-test-budget-#{suffix}"
-    job_id = "j-test-budget-#{suffix}"
+    op_id = "j-test-budget-#{suffix}"
 
     # Create test data
-    Store.insert(:quests, %{id: quest_id, status: "active", goal: "Test Budget"})
-    Store.insert(:jobs, %{id: job_id, quest_id: quest_id, ghost_id: ghost_id, status: "assigned"})
-    Store.insert(:ghosts, %{id: ghost_id, job_id: job_id, status: "working", pid: "dummy"})
+    Store.insert(:missions, %{id: mission_id, status: "active", goal: "Test Budget"})
+    Store.insert(:ops, %{id: op_id, mission_id: mission_id, ghost_id: ghost_id, status: "assigned"})
+    Store.insert(:ghosts, %{id: ghost_id, op_id: op_id, status: "working", pid: "dummy"})
 
-    {:ok, %{quest_id: quest_id, ghost_id: ghost_id}}
+    {:ok, %{mission_id: mission_id, ghost_id: ghost_id}}
   end
 
-  test "watchdog kills ghost when budget exceeded", %{quest_id: quest_id, ghost_id: ghost_id} do
+  test "watchdog kills ghost when budget exceeded", %{mission_id: mission_id, ghost_id: ghost_id} do
     # 1. Artificially inflate the cost (default budget is 10.0)
     GiTF.Costs.record(ghost_id, %{cost_usd: 100.0})
 
     # Verify budget is actually exceeded
-    assert {:error, :budget_exceeded, _} = GiTF.Budget.check(quest_id)
+    assert {:error, :budget_exceeded, _} = GiTF.Budget.check(mission_id)
 
     # 2. Trigger watchdog check manually
     watchdog = Process.whereis(GiTF.Budget.Watchdog)
@@ -55,7 +55,7 @@ defmodule GiTF.Budget.WatchdogTest do
 
     # 4. Quest should be marked as failed_budget or paused_budget
     # (paused_budget when no active ghosts are running worker processes)
-    quest = Store.get(:quests, quest_id)
-    assert quest.status in ["failed_budget", "paused_budget"]
+    mission = Store.get(:missions, mission_id)
+    assert mission.status in ["failed_budget", "paused_budget"]
   end
 end

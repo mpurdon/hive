@@ -48,7 +48,7 @@ defmodule GiTF.TUI.App do
       chat_scroll: 0,
       # Dashboard state
       right_panel: :activity,
-      jobs: [],
+      ops: [],
       health: %{status: :unknown, checks: %{}, timestamp: nil},
       alerts: [],
       merge_queue: %{pending: [], active: nil, completed: []},
@@ -236,7 +236,7 @@ defmodule GiTF.TUI.App do
   # Every 20th tick (~10s): health, identities, budget, checkpoints
   defp maybe_refresh_slow(model, count) when rem(count, 20) == 0 do
     ghosts = model.activity.ghosts
-    quests = model.activity.quests
+    missions = model.activity.missions
 
     checkpoints =
       ghosts
@@ -248,7 +248,7 @@ defmodule GiTF.TUI.App do
         end
       end)
 
-    budget_status = load_budget_status(quests)
+    budget_status = load_budget_status(missions)
 
     model
     |> Map.put(:health, safe_call(fn -> GiTF.Observability.Health.check() end, model.health))
@@ -266,14 +266,14 @@ defmodule GiTF.TUI.App do
 
   defp maybe_refresh_events(model, _count), do: model
 
-  defp load_budget_status(quests) do
-    quests
+  defp load_budget_status(missions) do
+    missions
     |> Enum.filter(&(&1[:status] in ["active", "pending"]))
     |> Enum.map(fn q ->
       budget = safe_call(fn -> GiTF.Budget.budget_for(q[:id]) end, 0.0)
       spent = safe_call(fn -> GiTF.Budget.spent_for(q[:id]) end, 0.0)
       remaining = Float.round(budget - spent, 2)
-      %{quest_id: q[:id], budget: budget, spent: spent, remaining: max(remaining, 0.0)}
+      %{mission_id: q[:id], budget: budget, spent: spent, remaining: max(remaining, 0.0)}
     end)
   rescue
     _ -> []
@@ -283,23 +283,23 @@ defmodule GiTF.TUI.App do
 
   defp handle_plan_confirm(model) do
     specs = Plan.to_confirmed_specs(model.plan)
-    quest_id = model.plan.quest_id
+    mission_id = model.plan.mission_id
     chat = Chat.add_message(model.chat, :system, "Confirming plan...")
     plan = %{model.plan | mode: :confirmed}
     model = %{model | chat: chat, plan: plan, busy: true, chat_scroll: chat_bottom(chat)}
 
     cmd = Command.new(fn ->
-      case GiTF.Client.confirm_plan(quest_id, specs) do
+      case GiTF.Client.confirm_plan(mission_id, specs) do
         {:ok, data} ->
-          jobs = data[:jobs_created] || 0
-          {:ok, "Plan confirmed. #{jobs} job(s) created for quest #{quest_id}.", nil}
+          ops = data[:jobs_created] || 0
+          {:ok, "Plan confirmed. #{ops} op(s) created for mission #{mission_id}.", nil}
 
         {:error, reason} ->
           # Fallback to local if not remote
           unless GiTF.Client.remote?() do
-            {:ok, jobs} = GiTF.Major.Planner.create_jobs_from_specs(quest_id, specs)
-            GiTF.Quests.store_artifact(quest_id, "planning", specs)
-            {:ok, "Plan confirmed. #{length(jobs)} job(s) created.", nil}
+            {:ok, ops} = GiTF.Major.Planner.create_jobs_from_specs(mission_id, specs)
+            GiTF.Missions.store_artifact(mission_id, "planning", specs)
+            {:ok, "Plan confirmed. #{length(ops)} op(s) created.", nil}
           else
             {:error, inspect(reason)}
           end
@@ -325,7 +325,7 @@ defmodule GiTF.TUI.App do
 
   defp handle_switch_candidate(model) do
     plan = Plan.next_candidate(model.plan)
-    quest_id = plan.quest_id
+    mission_id = plan.mission_id
 
     case Plan.current_strategy(plan) do
       {strategy, _score} ->
@@ -335,10 +335,10 @@ defmodule GiTF.TUI.App do
         cmd = Command.new(fn ->
           result =
             if GiTF.Client.remote?() do
-              GiTF.Client.select_plan_candidate(quest_id, strategy)
+              GiTF.Client.select_plan_candidate(mission_id, strategy)
             else
-              # Local mode: find candidate from quest record
-              quest_record = GiTF.Store.get(:quests, quest_id)
+              # Local mode: find candidate from mission record
+              quest_record = GiTF.Store.get(:missions, mission_id)
               candidates = if quest_record, do: Map.get(quest_record, :plan_candidates, []), else: []
 
               case Enum.find(candidates, fn c -> (c[:strategy] || c.strategy) == strategy end) do
@@ -346,7 +346,7 @@ defmodule GiTF.TUI.App do
                 candidate ->
                   if quest_record do
                     updated = Map.put(quest_record, :draft_plan, candidate)
-                    GiTF.Store.put(:quests, updated)
+                    GiTF.Store.put(:missions, updated)
                   end
                   {:ok, candidate}
               end
@@ -464,24 +464,24 @@ defmodule GiTF.TUI.App do
 
   defp build_system_prompt(cwd) do
     ghosts = try do GiTF.Store.all(:ghosts) rescue _ -> [] end
-    quests = try do GiTF.Store.all(:quests) rescue _ -> [] end
-    jobs = try do GiTF.Store.all(:jobs) rescue _ -> [] end
+    missions = try do GiTF.Store.all(:missions) rescue _ -> [] end
+    ops = try do GiTF.Store.all(:ops) rescue _ -> [] end
 
     # Only show active ghosts in context — crashed/stopped are noise
     active_ghosts = Enum.filter(ghosts, fn b -> (b[:status] || b[:state]) in ["working", "provisioning"] end)
 
     bee_summary = if active_ghosts == [], do: "None active", else:
       Enum.map_join(active_ghosts, "\n", fn b ->
-        "  - #{b[:id] || b.id}: #{b[:status] || b[:state] || "unknown"} (job: #{b[:job_id] || "none"})"
+        "  - #{b[:id] || b.id}: #{b[:status] || b[:state] || "unknown"} (op: #{b[:op_id] || "none"})"
       end)
 
-    quest_summary = if quests == [], do: "None", else:
-      Enum.map_join(quests, "\n", fn q ->
+    quest_summary = if missions == [], do: "None", else:
+      Enum.map_join(missions, "\n", fn q ->
         phase = q[:current_phase] || q[:status] || "unknown"
         "  - #{q[:id] || q.id}: #{q[:name] || q[:goal] || "unnamed"} [#{phase}]"
       end)
 
-    active_jobs = Enum.reject(jobs, fn j -> j[:status] in ["done"] end)
+    active_jobs = Enum.reject(ops, fn j -> j[:status] in ["done"] end)
 
     job_summary = if active_jobs == [], do: "All done", else:
       Enum.map_join(Enum.take(active_jobs, 10), "\n", fn j ->
@@ -497,19 +497,19 @@ defmodule GiTF.TUI.App do
     GiTF concepts:
     - Comb: a managed git repository (has id, name, path, repo_url)
     - Quest: a high-level objective broken into phases (research > requirements > design > review > planning > implementation > validation)
-    - Job: a discrete unit of work within a quest
-    - Bee: an autonomous AI coding agent that works on jobs in isolated git worktrees (cells)
-    - Waggle: a message between agents (like ghost-to-queen status updates)
-    - Major: the central coordinator that manages quests, spawns ghosts, handles retries
-    - Drone: autonomous watchdog that monitors quality
+    - Job: a discrete unit of work within a mission
+    - Bee: an autonomous AI coding agent that works on ops in isolated git worktrees (shells)
+    - Link: a message between agents (like ghost-to-queen status updates)
+    - Major: the central coordinator that manages missions, spawns ghosts, handles retries
+    - Tachikoma: autonomous watchdog that monitors quality
 
     CLI commands the user can run outside the TUI:
-    - section quest new "goal" --comb <name>  (create a quest)
-    - section comb add <path>                 (register a repository)
-    - section comb list                       (list combs)
+    - section mission new "goal" --sector <name>  (create a mission)
+    - section sector add <path>                 (register a repository)
+    - section sector list                       (list sectors)
     - section ghost list                        (list ghosts)
-    - section quest list                      (list quests)
-    - section quest show <id>                 (show quest details)
+    - section mission list                      (list missions)
+    - section mission show <id>                 (show mission details)
     - section status                          (overall section status)
 
     Workspace: #{cwd}
@@ -520,7 +520,7 @@ defmodule GiTF.TUI.App do
     Jobs: #{job_summary}
 
     You have full access to the workspace to read files and execute commands.
-    You can run section CLI commands directly to create quests, spawn ghosts, etc.
+    You can run section CLI commands directly to create missions, spawn ghosts, etc.
     Act autonomously — the user wants a dark factory, not hand-holding.
 
     STRUCTURED QUESTIONS: When you need to ask the user clarifying questions,
@@ -532,11 +532,11 @@ defmodule GiTF.TUI.App do
 
     Only use this format for multi-question clarification. For simple yes/no or single questions, just ask normally in plain text.
 
-    STRUCTURED PLANS: When the user asks you to plan a quest or you generate a plan,
+    STRUCTURED PLANS: When the user asks you to plan a mission or you generate a plan,
     wrap the plan in this exact format so the TUI can display it for review:
 
     <<<PLAN
-    {"quest_id": "qst-xxx", "goal": "What we're building", "tasks": [
+    {"mission_id": "qst-xxx", "goal": "What we're building", "tasks": [
       {"title": "Task title", "description": "Details", "target_files": ["file.py"], "model_recommendation": "sonnet"},
       {"title": "Another task", "description": "More details", "target_files": [], "depends_on_indices": [0], "model_recommendation": "sonnet"}
     ]}
@@ -664,17 +664,17 @@ defmodule GiTF.TUI.App do
 
   defp refresh_activity(model) do
     ghosts = try do GiTF.Store.all(:ghosts) rescue _ -> [] end
-    quests = try do GiTF.Store.all(:quests) rescue _ -> [] end
-    jobs = try do GiTF.Store.all(:jobs) rescue _ -> [] end
+    missions = try do GiTF.Store.all(:missions) rescue _ -> [] end
+    ops = try do GiTF.Store.all(:ops) rescue _ -> [] end
 
     # Reap dead ghosts — detect ghosts marked "working" but actually finished/dead
     # Returns list of {ghost_id, :done | :failed, summary} events
-    reap_events = reap_dead_bees(ghosts, jobs)
+    reap_events = reap_dead_bees(ghosts, ops)
 
     # Add reap events to chat
     model = Enum.reduce(reap_events, model, fn
       {ghost_id, :done, summary}, m ->
-        job_title = Enum.find_value(jobs, "unknown", fn j -> if j[:ghost_id] == ghost_id, do: j[:title] end)
+        job_title = Enum.find_value(ops, "unknown", fn j -> if j[:ghost_id] == ghost_id, do: j[:title] end)
         msg = "#{ghost_id} finished: #{job_title}\n#{summary}"
         %{m | chat: Chat.add_message(m.chat, :system, msg), chat_scroll: chat_bottom(m.chat)}
 
@@ -686,21 +686,21 @@ defmodule GiTF.TUI.App do
     # Re-read after reaping
     ghosts = try do GiTF.Store.all(:ghosts) rescue _ -> [] end
 
-    # Build job_id -> quest_id lookup
-    job_quest_map = Map.new(jobs, fn j -> {j[:id], j[:quest_id]} end)
+    # Build op_id -> mission_id lookup
+    job_quest_map = Map.new(ops, fn j -> {j[:id], j[:mission_id]} end)
 
-    # Filter to active ghosts and attach quest_id
+    # Filter to active ghosts and attach mission_id
     active_ghosts = ghosts
     |> Enum.filter(fn b -> (b[:status] || b[:state]) in ["working", "provisioning"] end)
-    |> Enum.map(fn b -> Map.put(b, :quest_id, job_quest_map[b[:job_id]]) end)
+    |> Enum.map(fn b -> Map.put(b, :mission_id, job_quest_map[b[:op_id]]) end)
 
     bee_logs = read_bee_logs(active_ghosts)
 
     activity = model.activity
     |> Activity.update_bees(active_ghosts)
-    |> Activity.update_quests(quests)
+    |> Activity.update_quests(missions)
     |> Activity.update_bee_logs(bee_logs)
-    %{model | activity: activity, jobs: jobs}
+    %{model | activity: activity, ops: ops}
   end
 
   defp reap_dead_bees(ghosts, _jobs) do
@@ -831,18 +831,18 @@ defmodule GiTF.TUI.App do
       updated = Map.put(ghost, :status, "stopped")
       GiTF.Store.put(:ghosts, updated)
 
-      if ghost[:job_id] do
-        GiTF.Jobs.complete(ghost[:job_id])
-        GiTF.Jobs.unblock_dependents(ghost[:job_id])
-        GiTF.Waggle.send(ghost[:id], "major", "job_complete", "Job #{ghost[:job_id]} completed (reaped)")
+      if ghost[:op_id] do
+        GiTF.Ops.complete(ghost[:op_id])
+        GiTF.Ops.unblock_dependents(ghost[:op_id])
+        GiTF.Link.send(ghost[:id], "major", "job_complete", "Job #{ghost[:op_id]} completed (reaped)")
 
         # Tell Major to advance
         case Process.whereis(GiTF.Major) do
           nil -> :ok
           _pid ->
             try do
-              {:ok, job} = GiTF.Jobs.get(ghost[:job_id])
-              GiTF.Major.Orchestrator.advance_quest(job.quest_id)
+              {:ok, op} = GiTF.Ops.get(ghost[:op_id])
+              GiTF.Major.Orchestrator.advance_quest(op.mission_id)
             rescue
               _ -> :ok
             end
@@ -858,9 +858,9 @@ defmodule GiTF.TUI.App do
       updated = Map.put(ghost, :status, "crashed")
       GiTF.Store.put(:ghosts, updated)
 
-      if ghost[:job_id] do
-        GiTF.Jobs.fail(ghost[:job_id])
-        GiTF.Waggle.send(ghost[:id], "major", "job_failed", "Job #{ghost[:job_id]} failed: #{reason}")
+      if ghost[:op_id] do
+        GiTF.Ops.fail(ghost[:op_id])
+        GiTF.Link.send(ghost[:id], "major", "job_failed", "Job #{ghost[:op_id]} failed: #{reason}")
       end
     rescue
       _ -> :ok
@@ -972,7 +972,7 @@ defmodule GiTF.TUI.App do
 
     active_text = case mq[:active] do
       nil -> ""
-      active -> " >>" <> ((active[:job_id] || active.job_id) |> to_string() |> String.slice(0, 8))
+      active -> " >>" <> ((active[:op_id] || active.op_id) |> to_string() |> String.slice(0, 8))
     end
 
     {_kpi_text, kpi_parts} = build_kpi_parts(stats)
@@ -1004,7 +1004,7 @@ defmodule GiTF.TUI.App do
     parts = [
       {" | ", :white},
       {"B:#{stats.ghosts.active}", :cyan},
-      {" J:#{stats.jobs.running}", :yellow},
+      {" J:#{stats.ops.running}", :yellow},
       {" $#{Float.round(stats.costs.total, 2)}", :red}
     ]
 
@@ -1032,7 +1032,7 @@ defmodule GiTF.TUI.App do
   defp short_check_name(:store), do: "S"
   defp short_check_name(:disk), do: "D"
   defp short_check_name(:memory), do: "M"
-  defp short_check_name(:quests), do: "Q"
+  defp short_check_name(:missions), do: "Q"
   defp short_check_name(:model_api), do: "A"
   defp short_check_name(:git), do: "G"
   defp short_check_name(name), do: name |> to_string() |> String.first() |> String.upcase()

@@ -29,16 +29,16 @@ defmodule GiTF.CLI.VerifyTest do
       System.cmd("git", ["config", "user.email", "test@test.com"], cd: repo_path)
       System.cmd("git", ["config", "user.name", "Test"], cd: repo_path)
 
-      {:ok, comb} = GiTF.Comb.add(repo_path, name: "test")
-      {:ok, quest} = GiTF.Quests.create(%{name: "Test Quest", goal: "Test goal", comb_id: comb.id})
-      {:ok, job} = GiTF.Jobs.create(%{title: "Test Job", quest_id: quest.id, comb_id: comb.id, status: "done"})
+      {:ok, sector} = GiTF.Sector.add(repo_path, name: "test")
+      {:ok, mission} = GiTF.Missions.create(%{name: "Test Quest", goal: "Test goal", sector_id: sector.id})
+      {:ok, op} = GiTF.Ops.create(%{title: "Test Job", mission_id: mission.id, sector_id: sector.id, status: "done"})
 
       # Record a passing verification result
       result = %{status: "passed", validations: [], output: "All tests passed"}
-      {:ok, _} = GiTF.Verification.record_result(job.id, result)
+      {:ok, _} = GiTF.Verification.record_result(op.id, result)
       
       # Check status was updated
-      {:ok, updated_job} = GiTF.Jobs.get(job.id)
+      {:ok, updated_job} = GiTF.Ops.get(op.id)
       assert updated_job.verification_status == "passed"
 
       File.rm_rf!(repo_path)
@@ -51,15 +51,15 @@ defmodule GiTF.CLI.VerifyTest do
       System.cmd("git", ["config", "user.email", "test@test.com"], cd: repo_path)
       System.cmd("git", ["config", "user.name", "Test"], cd: repo_path)
 
-      {:ok, comb} = GiTF.Comb.add(repo_path, name: "test")
-      {:ok, quest} = GiTF.Quests.create(%{name: "Test Quest", goal: "Test goal", comb_id: comb.id})
-      {:ok, job} = GiTF.Jobs.create(%{title: "Test Job", quest_id: quest.id, comb_id: comb.id, status: "done"})
+      {:ok, sector} = GiTF.Sector.add(repo_path, name: "test")
+      {:ok, mission} = GiTF.Missions.create(%{name: "Test Quest", goal: "Test goal", sector_id: sector.id})
+      {:ok, op} = GiTF.Ops.create(%{title: "Test Job", mission_id: mission.id, sector_id: sector.id, status: "done"})
 
       # Record a failing verification result
       result = %{status: "failed", validations: [%{name: "test", status: "fail", output: "Test failed"}], output: "Tests failed"}
-      {:ok, _} = GiTF.Verification.record_result(job.id, result)
+      {:ok, _} = GiTF.Verification.record_result(op.id, result)
       
-      {:ok, updated_job} = GiTF.Jobs.get(job.id)
+      {:ok, updated_job} = GiTF.Ops.get(op.id)
       assert updated_job.verification_status == "failed"
 
       File.rm_rf!(repo_path)

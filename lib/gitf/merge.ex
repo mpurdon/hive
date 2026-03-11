@@ -2,12 +2,12 @@ defmodule GiTF.Merge do
   @moduledoc """
   Handles merging ghost worktree branches back into the main codebase.
 
-  After a ghost completes its job, the merge module applies the comb's
+  After a ghost completes its op, the merge module applies the sector's
   configured merge strategy to integrate the ghost's changes.
 
   ## Strategies
 
-    * `"manual"` -- No auto-merge. Sends a waggle with instructions.
+    * `"manual"` -- No auto-merge. Sends a link_msg with instructions.
     * `"auto_merge"` -- Checks out the main branch and merges the ghost branch.
     * `"pr_branch"` -- Keeps the branch intact for a PR workflow.
   """
@@ -20,53 +20,53 @@ defmodule GiTF.Merge do
   @lock_retry_interval 500
 
   @doc """
-  Merges a ghost's worktree branch back according to the comb's merge strategy.
+  Merges a ghost's worktree branch back according to the sector's merge strategy.
 
-  Looks up the cell, finds the comb, reads the merge_strategy, and dispatches.
+  Looks up the shell, finds the sector, reads the merge_strategy, and dispatches.
   Returns `{:ok, strategy_applied}` or `{:error, reason}`.
   """
   @spec merge_back(String.t(), keyword()) :: {:ok, String.t()} | {:error, term()}
-  def merge_back(cell_id, _opts \\ []) do
-    with {:ok, cell} <- fetch_cell(cell_id),
-         {:ok, comb} <- fetch_comb(cell.comb_id) do
-      strategy = comb.merge_strategy || "manual"
+  def merge_back(shell_id, _opts \\ []) do
+    with {:ok, shell} <- fetch_cell(shell_id),
+         {:ok, sector} <- fetch_comb(shell.sector_id) do
+      strategy = sector.merge_strategy || "manual"
 
       if strategy == "auto_merge" do
-        with_comb_lock(comb.id, fn -> apply_strategy(strategy, cell, comb) end)
+        with_comb_lock(sector.id, fn -> apply_strategy(strategy, shell, sector) end)
       else
-        apply_strategy(strategy, cell, comb)
+        apply_strategy(strategy, shell, sector)
       end
     end
   end
 
   @doc """
-  Merges all completed ghost branches for a quest into a single quest branch.
+  Merges all completed ghost branches for a mission into a single mission branch.
 
-  Creates `quest/<quest-name>` off the main branch, then merges each ghost's
+  Creates `mission/<mission-name>` off the main branch, then merges each ghost's
   branch into it sequentially. Returns `{:ok, quest_branch}` with the branch
   name, or `{:error, reason}` if any merge fails.
   """
   @spec merge_quest(String.t()) :: {:ok, String.t()} | {:error, term()}
-  def merge_quest(quest_id) do
-    with {:ok, quest} <- GiTF.Quests.get(quest_id),
-         cells <- cells_for_quest(quest),
-         true <- cells != [] || {:error, :no_cells},
-         {:ok, comb} <- fetch_comb_for_cells(cells) do
-      with_comb_lock(comb.id, fn ->
-        with {:ok, main_branch} <- detect_main_branch(comb.path),
-             quest_branch = "quest/#{quest.name}",
-             :ok <- create_quest_branch(comb.path, quest_branch, main_branch) do
-          merge_cells_into_quest_branch(comb.path, quest_branch, cells)
+  def merge_quest(mission_id) do
+    with {:ok, mission} <- GiTF.Missions.get(mission_id),
+         shells <- cells_for_quest(mission),
+         true <- shells != [] || {:error, :no_cells},
+         {:ok, sector} <- fetch_comb_for_cells(shells) do
+      with_comb_lock(sector.id, fn ->
+        with {:ok, main_branch} <- detect_main_branch(sector.path),
+             quest_branch = "mission/#{mission.name}",
+             :ok <- create_quest_branch(sector.path, quest_branch, main_branch) do
+          merge_cells_into_quest_branch(sector.path, quest_branch, shells)
         end
       end)
     end
   end
 
-  # -- Private: per-comb merge lock --------------------------------------------
+  # -- Private: per-sector merge lock --------------------------------------------
 
   @doc false
-  def with_comb_lock(comb_id, fun) do
-    lock_key = {:merge_lock, comb_id}
+  def with_comb_lock(sector_id, fun) do
+    lock_key = {:merge_lock, sector_id}
     acquire_lock(lock_key, @lock_timeout, fun)
   end
 
@@ -92,13 +92,13 @@ defmodule GiTF.Merge do
 
   # -- Private: strategy dispatch ----------------------------------------------
 
-  defp apply_strategy("manual", cell, _comb) do
-    Logger.info("Merge strategy: manual. Branch #{cell.branch} ready for manual merge.")
+  defp apply_strategy("manual", shell, _comb) do
+    Logger.info("Merge strategy: manual. Branch #{shell.branch} ready for manual merge.")
     {:ok, "manual"}
   end
 
-  defp apply_strategy("auto_merge", cell, comb) do
-    repo_path = comb.path
+  defp apply_strategy("auto_merge", shell, sector) do
+    repo_path = sector.path
 
     # Clean up any stale merge state from interrupted previous merge
     cleanup_stale_merge_state(repo_path)
@@ -112,20 +112,20 @@ defmodule GiTF.Merge do
 
     with {:ok, main_branch} <- detect_main_branch(repo_path),
          :ok <- GiTF.Git.checkout(repo_path, main_branch),
-         :ok <- GiTF.Git.merge(repo_path, cell.branch, no_ff: true) do
-      Logger.info("Auto-merged #{cell.branch} into #{main_branch}")
+         :ok <- GiTF.Git.merge(repo_path, shell.branch, no_ff: true) do
+      Logger.info("Auto-merged #{shell.branch} into #{main_branch}")
       {:ok, "auto_merge"}
     else
       {:error, reason} ->
-        Logger.warning("Auto-merge failed for #{cell.branch}: #{inspect(reason)}, rolling back")
+        Logger.warning("Auto-merge failed for #{shell.branch}: #{inspect(reason)}, rolling back")
         rollback_merge(repo_path, original_head)
         {:error, {:merge_conflict, reason}}
     end
   end
 
-  defp apply_strategy("pr_branch", cell, comb) do
-    Logger.info("Branch #{cell.branch} ready for PR.")
-    maybe_create_github_pr(comb, cell)
+  defp apply_strategy("pr_branch", shell, sector) do
+    Logger.info("Branch #{shell.branch} ready for PR.")
+    maybe_create_github_pr(sector, shell)
     {:ok, "pr_branch"}
   end
 
@@ -140,15 +140,15 @@ defmodule GiTF.Merge do
   Returns `{:ok, "rebase_merge"}` or `{:error, reason}`.
   """
   @spec merge_back_with_rebase(String.t(), keyword()) :: {:ok, String.t()} | {:error, term()}
-  def merge_back_with_rebase(cell_id, _opts \\ []) do
-    with {:ok, cell} <- fetch_cell(cell_id),
-         {:ok, comb} <- fetch_comb(cell.comb_id) do
-      with_comb_lock(comb.id, fn ->
-        with {:ok, main_branch} <- detect_main_branch(comb.path),
-             :ok <- rebase_branch(cell.worktree_path, main_branch),
-             :ok <- GiTF.Git.checkout(comb.path, main_branch),
-             :ok <- GiTF.Git.merge(comb.path, cell.branch, []) do
-          Logger.info("Rebase-merged #{cell.branch} into #{main_branch}")
+  def merge_back_with_rebase(shell_id, _opts \\ []) do
+    with {:ok, shell} <- fetch_cell(shell_id),
+         {:ok, sector} <- fetch_comb(shell.sector_id) do
+      with_comb_lock(sector.id, fn ->
+        with {:ok, main_branch} <- detect_main_branch(sector.path),
+             :ok <- rebase_branch(shell.worktree_path, main_branch),
+             :ok <- GiTF.Git.checkout(sector.path, main_branch),
+             :ok <- GiTF.Git.merge(sector.path, shell.branch, []) do
+          Logger.info("Rebase-merged #{shell.branch} into #{main_branch}")
           {:ok, "rebase_merge"}
         else
           {:error, reason} ->
@@ -161,32 +161,32 @@ defmodule GiTF.Merge do
 
   # -- Private: data fetching --------------------------------------------------
 
-  defp fetch_cell(cell_id) do
-    case Store.get(:cells, cell_id) do
+  defp fetch_cell(shell_id) do
+    case Store.get(:shells, shell_id) do
       nil -> {:error, :cell_not_found}
-      cell -> {:ok, cell}
+      shell -> {:ok, shell}
     end
   end
 
-  defp fetch_comb(comb_id) do
-    case Store.get(:combs, comb_id) do
+  defp fetch_comb(sector_id) do
+    case Store.get(:sectors, sector_id) do
       nil -> {:error, :comb_not_found}
-      comb -> {:ok, comb}
+      sector -> {:ok, sector}
     end
   end
 
-  defp maybe_create_github_pr(comb, cell) do
-    if Map.get(comb, :github_owner) && Map.get(comb, :github_repo) do
-      # Look up the job for this cell's ghost
-      case Store.find_one(:jobs, fn j -> j.ghost_id == cell.ghost_id end) do
+  defp maybe_create_github_pr(sector, shell) do
+    if Map.get(sector, :github_owner) && Map.get(sector, :github_repo) do
+      # Look up the op for this shell's ghost
+      case Store.find_one(:ops, fn j -> j.ghost_id == shell.ghost_id end) do
         nil ->
-          Logger.debug("No job found for ghost #{cell.ghost_id}, skipping GitHub PR")
+          Logger.debug("No op found for ghost #{shell.ghost_id}, skipping GitHub PR")
 
-        job ->
-          case GiTF.GitHub.create_pr(comb, cell, job) do
+        op ->
+          case GiTF.GitHub.create_pr(sector, shell, op) do
             {:ok, url} ->
               Logger.info("GitHub PR created: #{url}")
-              GiTF.Waggle.send("system", "major", "pr_created", "PR: #{url}")
+              GiTF.Link.send("system", "major", "pr_created", "PR: #{url}")
 
             {:error, reason} ->
               Logger.warning("GitHub PR creation failed: #{inspect(reason)}")
@@ -207,21 +207,21 @@ defmodule GiTF.Merge do
     end
   end
 
-  # -- Private: quest merge helpers -------------------------------------------
+  # -- Private: mission merge helpers -------------------------------------------
 
-  defp cells_for_quest(quest) do
+  defp cells_for_quest(mission) do
     ghost_ids =
-      quest.jobs
+      mission.ops
       |> Enum.map(& &1.ghost_id)
       |> Enum.reject(&is_nil/1)
 
-    Store.filter(:cells, fn c ->
+    Store.filter(:shells, fn c ->
       c.ghost_id in ghost_ids and c.status == "active"
     end)
   end
 
-  defp fetch_comb_for_cells([cell | _]) do
-    fetch_comb(cell.comb_id)
+  defp fetch_comb_for_cells([shell | _]) do
+    fetch_comb(shell.sector_id)
   end
 
   defp create_quest_branch(repo_path, quest_branch, main_branch) do
@@ -233,22 +233,22 @@ defmodule GiTF.Merge do
     end
   end
 
-  defp merge_cells_into_quest_branch(repo_path, quest_branch, cells) do
+  defp merge_cells_into_quest_branch(repo_path, quest_branch, shells) do
     # Save starting point for rollback
     {:ok, savepoint} = get_head(repo_path)
 
     results =
-      Enum.map(cells, fn cell ->
-        case GiTF.Git.merge(repo_path, cell.branch, no_ff: true) do
+      Enum.map(shells, fn shell ->
+        case GiTF.Git.merge(repo_path, shell.branch, no_ff: true) do
           :ok ->
-            Logger.info("Merged #{cell.branch} into #{quest_branch}")
-            {:ok, cell.branch}
+            Logger.info("Merged #{shell.branch} into #{quest_branch}")
+            {:ok, shell.branch}
 
           {:error, reason} ->
-            Logger.warning("Failed to merge #{cell.branch}: #{inspect(reason)}")
+            Logger.warning("Failed to merge #{shell.branch}: #{inspect(reason)}")
             # Abort the failed merge so subsequent merges can proceed
             GiTF.Git.safe_cmd( ["merge", "--abort"], cd: repo_path, stderr_to_stdout: true)
-            {:error, cell.branch, reason}
+            {:error, shell.branch, reason}
         end
       end)
 
@@ -259,7 +259,7 @@ defmodule GiTF.Merge do
       {:ok, quest_branch}
     else
       # Roll back to savepoint — none of the merges should persist if any failed
-      Logger.warning("Rolling back quest branch #{quest_branch} to savepoint due to merge failures")
+      Logger.warning("Rolling back mission branch #{quest_branch} to savepoint due to merge failures")
       GiTF.Git.safe_cmd( ["reset", "--hard", savepoint], cd: repo_path, stderr_to_stdout: true)
       failed_branches = Enum.map(failures, fn {:error, branch, _} -> branch end)
       {:error, {:merge_conflicts, quest_branch, failed_branches}}

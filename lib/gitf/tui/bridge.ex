@@ -2,7 +2,7 @@ defmodule GiTF.TUI.Bridge do
   @moduledoc """
   Connects TUI <-> GiTF core.
 
-  Subscribes to PubSub topics, converts waggles to TUI messages.
+  Subscribes to PubSub topics, converts links to TUI messages.
   Forwards user input via the intent event bus.
   Queries Store for state snapshots.
 
@@ -91,8 +91,8 @@ defmodule GiTF.TUI.Bridge do
   def state_snapshot do
     %{
       ghosts: list_bees(),
-      quests: list_quests(),
-      jobs: list_jobs(),
+      missions: list_quests(),
+      ops: list_jobs(),
       progress: list_progress()
     }
   end
@@ -105,18 +105,18 @@ defmodule GiTF.TUI.Bridge do
     _ -> []
   end
 
-  @doc "Lists all quests."
+  @doc "Lists all missions."
   @spec list_quests() :: [map()]
   def list_quests do
-    GiTF.Quests.list()
+    GiTF.Missions.list()
   rescue
     _ -> []
   end
 
-  @doc "Lists all jobs."
+  @doc "Lists all ops."
   @spec list_jobs() :: [map()]
   def list_jobs do
-    GiTF.Jobs.list()
+    GiTF.Ops.list()
   rescue
     _ -> []
   end

@@ -4,14 +4,14 @@ defmodule GiTF.Quality.Security do
   """
 
   @doc """
-  Run security scans on a cell.
+  Run security scans on a shell.
   Returns {:ok, results} with security score and findings.
   """
-  def scan(cell_path, language) do
+  def scan(shell_path, language) do
     findings = [
-      check_secrets(cell_path),
-      check_dependencies(cell_path, language),
-      check_vulnerabilities(cell_path, language)
+      check_secrets(shell_path),
+      check_dependencies(shell_path, language),
+      check_vulnerabilities(shell_path, language)
     ]
     |> List.flatten()
     |> Enum.reject(&is_nil/1)

@@ -1,6 +1,6 @@
 defmodule GiTF.CLI.Chat do
   @moduledoc """
-  Interactive chat for quest planning.
+  Interactive chat for mission planning.
 
   Runs a multi-turn conversation via ReqLLM (provider-agnostic) to gather
   requirements and produce a structured implementation plan. Supports image
@@ -35,7 +35,7 @@ defmodule GiTF.CLI.Chat do
   }
 
   defstruct [
-    :quest,
+    :mission,
     :model,
     :system_prompt,
     context: nil,
@@ -49,10 +49,10 @@ defmodule GiTF.CLI.Chat do
   # -- Public API -------------------------------------------------------------
 
   @doc """
-  Start an interactive planning chat for a quest.
+  Start an interactive planning chat for a mission.
   Returns `{:ok, plan}` on success or `{:error, reason}` if cancelled/failed.
   """
-  def start(quest, opts \\ []) do
+  def start(mission, opts \\ []) do
     # Ensure API keys from .gitf/config.toml are loaded into env vars
     GiTF.Runtime.Keys.load()
 
@@ -68,18 +68,18 @@ defmodule GiTF.CLI.Chat do
     end
 
     model = opts[:model] || ModelResolver.resolve("opus")
-    codebase = build_codebase_context(quest)
-    system_prompt = build_system_prompt(quest, codebase)
+    codebase = build_codebase_context(mission)
+    system_prompt = build_system_prompt(mission, codebase)
     tools = build_tools()
 
     context =
       ReqLLM.Context.new([
         ReqLLM.Context.system(system_prompt),
-        ReqLLM.Context.user("I want to: #{quest.goal}\n\nPlease help me plan this. Start by asking me clarifying questions about what I need.")
+        ReqLLM.Context.user("I want to: #{mission.goal}\n\nPlease help me plan this. Start by asking me clarifying questions about what I need.")
       ])
 
     state = %__MODULE__{
-      quest: quest,
+      mission: mission,
       model: model,
       system_prompt: system_prompt,
       context: context,
@@ -89,7 +89,7 @@ defmodule GiTF.CLI.Chat do
     provider = ModelResolver.provider(model)
 
     IO.puts("")
-    IO.puts(color(:cyan) <> "Planning: " <> reset() <> quest.goal)
+    IO.puts(color(:cyan) <> "Planning: " <> reset() <> mission.goal)
     IO.puts(dim("Provider: #{provider} · Model: #{ModelResolver.model_id(model)}"))
     IO.puts(dim("Commands: /image <path>  /paste  /done  /quit  /help"))
     IO.puts("")
@@ -600,22 +600,22 @@ defmodule GiTF.CLI.Chat do
 
   defp do_submit_plan(state, args) do
     # Handle both string and atom keys
-    name = args["name"] || args[:name] || state.quest.goal
+    name = args["name"] || args[:name] || state.mission.goal
     summary = args["summary"] || args[:summary] || ""
-    jobs = args["jobs"] || args[:jobs] || []
+    ops = args["ops"] || args[:ops] || []
 
     IO.puts("")
     IO.puts(color(:green) <> color(:bright) <> "Plan: #{name}" <> reset())
     IO.puts(dim(summary))
     IO.puts("")
 
-    jobs
+    ops
     |> Enum.with_index(1)
-    |> Enum.each(fn {job, idx} ->
-      type = job["job_type"] || job[:job_type] || "implementation"
-      title = job["title"] || job[:title] || "Untitled"
-      desc = job["description"] || job[:description]
-      deps = job["depends_on"] || job[:depends_on]
+    |> Enum.each(fn {op, idx} ->
+      type = op["op_type"] || op[:op_type] || "implementation"
+      title = op["title"] || op[:title] || "Untitled"
+      desc = op["description"] || op[:description]
+      deps = op["depends_on"] || op[:depends_on]
 
       type_color = case type do
         "research" -> :cyan
@@ -643,18 +643,18 @@ defmodule GiTF.CLI.Chat do
     answer = IO.gets("  Accept this plan? [y/n] ") |> String.trim() |> String.downcase()
 
     if answer in ["y", "yes", ""] do
-      # Normalize job keys to strings for plan_handler
-      normalized_jobs = Enum.map(jobs, fn job ->
+      # Normalize op keys to strings for plan_handler
+      normalized_jobs = Enum.map(ops, fn op ->
         %{
-          "title" => job["title"] || job[:title] || "Untitled",
-          "description" => job["description"] || job[:description] || "",
-          "job_type" => job["job_type"] || job[:job_type] || "implementation",
-          "depends_on" => job["depends_on"] || job[:depends_on] || []
+          "title" => op["title"] || op[:title] || "Untitled",
+          "description" => op["description"] || op[:description] || "",
+          "op_type" => op["op_type"] || op[:op_type] || "implementation",
+          "depends_on" => op["depends_on"] || op[:depends_on] || []
         }
       end)
 
-      plan = %{name: name, summary: summary, jobs: normalized_jobs}
-      Format.success("Plan accepted with #{length(jobs)} job(s).")
+      plan = %{name: name, summary: summary, ops: normalized_jobs}
+      Format.success("Plan accepted with #{length(ops)} op(s).")
       {%{state | plan: plan, done: true}, true}
     else
       IO.puts(dim("  Sending feedback to revise the plan..."))
@@ -754,9 +754,9 @@ defmodule GiTF.CLI.Chat do
         parameter_schema: %{
           "type" => "object",
           "properties" => %{
-            "name" => %{"type" => "string", "description" => "Short quest name"},
+            "name" => %{"type" => "string", "description" => "Short mission name"},
             "summary" => %{"type" => "string", "description" => "1-2 sentence summary"},
-            "jobs" => %{
+            "ops" => %{
               "type" => "array",
               "items" => %{
                 "type" => "object",
@@ -766,21 +766,21 @@ defmodule GiTF.CLI.Chat do
                     "type" => "string",
                     "description" => "Detailed description for an AI agent to execute"
                   },
-                  "job_type" => %{
+                  "op_type" => %{
                     "type" => "string",
                     "enum" => ["research", "implementation", "verification"]
                   },
                   "depends_on" => %{
                     "type" => "array",
                     "items" => %{"type" => "integer"},
-                    "description" => "0-based indices of prerequisite jobs"
+                    "description" => "0-based indices of prerequisite ops"
                   }
                 },
-                "required" => ["title", "description", "job_type"]
+                "required" => ["title", "description", "op_type"]
               }
             }
           },
-          "required" => ["name", "summary", "jobs"]
+          "required" => ["name", "summary", "ops"]
         },
         callback: fn _args -> {:ok, "handled"} end
       )
@@ -789,27 +789,27 @@ defmodule GiTF.CLI.Chat do
 
   # -- Codebase context -------------------------------------------------------
 
-  defp build_codebase_context(quest) do
-    comb_id = Map.get(quest, :comb_id)
+  defp build_codebase_context(mission) do
+    sector_id = Map.get(mission, :sector_id)
 
-    case comb_id && GiTF.Store.get(:combs, comb_id) do
+    case sector_id && GiTF.Store.get(:sectors, sector_id) do
       nil ->
         "No codebase context available."
 
-      comb ->
-        path = comb.path
+      sector ->
+        path = sector.path
 
         if File.dir?(path) do
           files = list_files(path, 3) |> Enum.sort() |> Enum.take(150)
 
           """
-          Comb: #{Map.get(comb, :name, "unknown")} (#{path})
+          Comb: #{Map.get(sector, :name, "unknown")} (#{path})
 
           File tree:
           #{Enum.join(files, "\n")}
           """
         else
-          "Comb: #{Map.get(comb, :name, "unknown")} (#{path}, not accessible)"
+          "Comb: #{Map.get(sector, :name, "unknown")} (#{path}, not accessible)"
         end
     end
   rescue
@@ -848,12 +848,12 @@ defmodule GiTF.CLI.Chat do
 
   # -- System prompt ----------------------------------------------------------
 
-  defp build_system_prompt(quest, codebase) do
+  defp build_system_prompt(mission, codebase) do
     """
     You are an expert software architect helping plan an implementation.
 
     ## Your Role
-    Gather requirements and create an implementation plan for: "#{quest.goal}"
+    Gather requirements and create an implementation plan for: "#{mission.goal}"
 
     ## Codebase Context
     #{codebase}
@@ -874,12 +874,12 @@ defmodule GiTF.CLI.Chat do
     3. Be thoughtful — aim for 3-5 exchanges to fully understand what the user wants before submitting the plan. Don't rush to a plan before you understand the problem.
 
     ## Plan Guidelines (for `submit_plan`)
-    - Break work into small, focused jobs (1-3 hours each for an AI coding agent)
-    - Use job_type "research" for unknowns and exploration
-    - Use job_type "implementation" for coding work
-    - Use job_type "verification" for testing and validation
+    - Break work into small, focused ops (1-3 hours each for an AI coding agent)
+    - Use op_type "research" for unknowns and exploration
+    - Use op_type "implementation" for coding work
+    - Use op_type "verification" for testing and validation
     - Set depends_on (0-based indices) to define execution order
-    - Each job description must have enough detail for an AI agent to execute independently
+    - Each op description must have enough detail for an AI agent to execute independently
     """
   end
 

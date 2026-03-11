@@ -11,32 +11,32 @@ defmodule GiTF.Conflict do
   alias GiTF.Store
 
   @doc """
-  Checks a cell's branch for conflicts against the main branch.
+  Checks a shell's branch for conflicts against the main branch.
 
   Returns `{:ok, :clean}` or `{:error, :conflicts, file_list}`.
   """
   @spec check(String.t()) :: {:ok, :clean} | {:error, :conflicts, [String.t()]} | {:error, term()}
-  def check(cell_id) do
-    with {:ok, cell} <- fetch_cell(cell_id),
-         {:ok, comb} <- fetch_comb(cell.comb_id),
-         {:ok, main_branch} <- detect_main_branch(comb.path) do
-      check_conflicts(comb.path, cell.branch, main_branch)
+  def check(shell_id) do
+    with {:ok, shell} <- fetch_cell(shell_id),
+         {:ok, sector} <- fetch_comb(shell.sector_id),
+         {:ok, main_branch} <- detect_main_branch(sector.path) do
+      check_conflicts(sector.path, shell.branch, main_branch)
     end
   end
 
   @doc """
-  Checks all active cells for conflicts.
+  Checks all active shells for conflicts.
 
-  Returns a list of `{:ok, cell_id, :clean}` or `{:error, cell_id, :conflicts, files}`.
+  Returns a list of `{:ok, shell_id, :clean}` or `{:error, shell_id, :conflicts, files}`.
   """
   @spec check_all_active() :: [tuple()]
   def check_all_active do
-    Store.filter(:cells, fn c -> c.status == "active" end)
-    |> Enum.map(fn cell ->
-      case check(cell.id) do
-        {:ok, :clean} -> {:ok, cell.id, :clean}
-        {:error, :conflicts, files} -> {:error, cell.id, :conflicts, files}
-        {:error, _reason} -> {:ok, cell.id, :clean}
+    Store.filter(:shells, fn c -> c.status == "active" end)
+    |> Enum.map(fn shell ->
+      case check(shell.id) do
+        {:ok, :clean} -> {:ok, shell.id, :clean}
+        {:error, :conflicts, files} -> {:error, shell.id, :conflicts, files}
+        {:error, _reason} -> {:ok, shell.id, :clean}
       end
     end)
   rescue
@@ -44,22 +44,22 @@ defmodule GiTF.Conflict do
   end
 
   @doc """
-  Attempts to resolve conflicts for a cell using the given strategy.
+  Attempts to resolve conflicts for a shell using the given strategy.
 
   Strategies:
-    * `:rebase` — Fetches latest main and rebases the cell's branch onto it.
-    * `:defer` — Marks the cell as needing manual merge and notifies the Major.
+    * `:rebase` — Fetches latest main and rebases the shell's branch onto it.
+    * `:defer` — Marks the shell as needing manual merge and notifies the Major.
 
   Returns `{:ok, :resolved}` or `{:error, reason}`.
   """
   @spec resolve(String.t(), :rebase | :defer) :: {:ok, :resolved} | {:error, term()}
-  def resolve(cell_id, strategy \\ :rebase)
+  def resolve(shell_id, strategy \\ :rebase)
 
-  def resolve(cell_id, :rebase) do
-    with {:ok, cell} <- fetch_cell(cell_id),
-         {:ok, comb} <- fetch_comb(cell.comb_id),
-         {:ok, main_branch} <- detect_main_branch(comb.path) do
-      worktree_path = cell.worktree_path
+  def resolve(shell_id, :rebase) do
+    with {:ok, shell} <- fetch_cell(shell_id),
+         {:ok, sector} <- fetch_comb(shell.sector_id),
+         {:ok, main_branch} <- detect_main_branch(sector.path) do
+      worktree_path = shell.worktree_path
 
       # Fetch latest from origin (best-effort, may not have remote)
       GiTF.Git.safe_cmd( ["fetch", "origin"], cd: worktree_path, stderr_to_stdout: true)
@@ -71,13 +71,13 @@ defmodule GiTF.Conflict do
            ) do
         {_output, 0} ->
           # Verify the rebase resolved conflicts
-          case check(cell_id) do
+          case check(shell_id) do
             {:ok, :clean} ->
-              Logger.info("Rebase resolved conflicts for cell #{cell_id}")
+              Logger.info("Rebase resolved conflicts for shell #{shell_id}")
               {:ok, :resolved}
 
             {:error, :conflicts, files} ->
-              Logger.warning("Rebase did not resolve all conflicts for cell #{cell_id}: #{inspect(files)}")
+              Logger.warning("Rebase did not resolve all conflicts for shell #{shell_id}: #{inspect(files)}")
               {:error, {:rebase_incomplete, files}}
 
             _ ->
@@ -87,22 +87,22 @@ defmodule GiTF.Conflict do
         {output, _code} ->
           # Rebase failed — abort to restore clean state
           GiTF.Git.safe_cmd( ["rebase", "--abort"], cd: worktree_path, stderr_to_stdout: true)
-          Logger.warning("Rebase failed for cell #{cell_id}: #{String.slice(output, 0, 200)}")
+          Logger.warning("Rebase failed for shell #{shell_id}: #{String.slice(output, 0, 200)}")
           {:error, :rebase_failed}
       end
     end
   end
 
-  def resolve(cell_id, :defer) do
-    case fetch_cell(cell_id) do
-      {:ok, cell} ->
-        Store.put(:cells, Map.put(cell, :needs_manual_merge, true))
+  def resolve(shell_id, :defer) do
+    case fetch_cell(shell_id) do
+      {:ok, shell} ->
+        Store.put(:shells, Map.put(shell, :needs_manual_merge, true))
 
-        GiTF.Waggle.send(
+        GiTF.Link.send(
           "system",
           "major",
           "manual_merge_needed",
-          "Cell #{cell_id} deferred for manual merge"
+          "Cell #{shell_id} deferred for manual merge"
         )
 
         {:ok, :resolved}
@@ -113,20 +113,20 @@ defmodule GiTF.Conflict do
   end
 
   @doc """
-  Checks for conflicts between two active cells by comparing their changed files.
+  Checks for conflicts between two active shells by comparing their changed files.
 
   Returns `{:ok, :clean}` if no overlapping files, or
-  `{:error, :conflicts, overlapping_files}` if both cells touch the same files.
+  `{:error, :conflicts, overlapping_files}` if both shells touch the same files.
   """
   @spec check_between_cells(String.t(), String.t()) ::
           {:ok, :clean} | {:error, :conflicts, [String.t()]} | {:error, term()}
   def check_between_cells(cell_id_a, cell_id_b) do
     with {:ok, cell_a} <- fetch_cell(cell_id_a),
          {:ok, cell_b} <- fetch_cell(cell_id_b),
-         {:ok, comb} <- fetch_comb(cell_a.comb_id),
-         {:ok, main_branch} <- detect_main_branch(comb.path) do
-      files_a = changed_files(comb.path, cell_a.branch, main_branch)
-      files_b = changed_files(comb.path, cell_b.branch, main_branch)
+         {:ok, sector} <- fetch_comb(cell_a.sector_id),
+         {:ok, main_branch} <- detect_main_branch(sector.path) do
+      files_a = changed_files(sector.path, cell_a.branch, main_branch)
+      files_b = changed_files(sector.path, cell_b.branch, main_branch)
 
       overlap = MapSet.intersection(MapSet.new(files_a), MapSet.new(files_b)) |> MapSet.to_list()
 
@@ -216,17 +216,17 @@ defmodule GiTF.Conflict do
     end
   end
 
-  defp fetch_cell(cell_id) do
-    case Store.get(:cells, cell_id) do
+  defp fetch_cell(shell_id) do
+    case Store.get(:shells, shell_id) do
       nil -> {:error, :cell_not_found}
-      cell -> {:ok, cell}
+      shell -> {:ok, shell}
     end
   end
 
-  defp fetch_comb(comb_id) do
-    case Store.get(:combs, comb_id) do
+  defp fetch_comb(sector_id) do
+    case Store.get(:sectors, sector_id) do
       nil -> {:error, :comb_not_found}
-      comb -> {:ok, comb}
+      sector -> {:ok, sector}
     end
   end
 

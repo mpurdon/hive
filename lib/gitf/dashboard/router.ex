@@ -18,10 +18,10 @@ defmodule GiTF.Dashboard.Router do
     pipe_through(:browser)
 
     live("/", OverviewLive)
-    live("/quests", QuestsLive)
+    live("/missions", MissionsLive)
     live("/ghosts", GhostsLive)
     live("/costs", CostsLive)
-    live("/waggles", WagglesLive)
+    live("/links", LinksLive)
     live("/progress", ProgressLive)
   end
 end

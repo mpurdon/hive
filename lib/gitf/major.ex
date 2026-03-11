@@ -2,9 +2,9 @@ defmodule GiTF.Major do
   @moduledoc """
   GenServer for the Major orchestrator process.
 
-  The Major coordinates work across ghosts by subscribing to waggle messages
+  The Major coordinates work across ghosts by subscribing to link_msg messages
   and reacting to status updates. This is a thin GenServer -- the business
-  logic for waggle processing lives in `GiTF.Waggle` and `GiTF.Prime`,
+  logic for link_msg processing lives in `GiTF.Link` and `GiTF.Prime`,
   while the Major merely maintains session state and dispatches reactions.
 
   ## State
@@ -61,7 +61,7 @@ defmodule GiTF.Major do
 
   Sets up the queen workspace with settings, then spawns Claude
   interactively. The GenServer monitors the port and handles its
-  messages alongside waggle processing.
+  messages alongside link_msg processing.
   """
   @spec launch() :: :ok | {:error, term()}
   def launch do
@@ -86,8 +86,8 @@ defmodule GiTF.Major do
   def init(%{gitf_root: gitf_root}) do
     GiTF.Logger.set_major_context()
 
-    # Subscribe to waggle messages addressed to the queen
-    GiTF.Waggle.subscribe("link:major")
+    # Subscribe to link_msg messages addressed to the queen
+    GiTF.Link.subscribe("link:major")
 
     max_ghosts = read_max_ghosts(gitf_root)
 
@@ -103,37 +103,37 @@ defmodule GiTF.Major do
       pending_verifications: %{}
     }
 
-    # Drone is now supervised by Application — just verify it's running
-    case GiTF.Drone.lookup() do
-      {:ok, _pid} -> Logger.debug("Drone is running")
-      :error -> Logger.warning("Drone is not running")
+    # Tachikoma is now supervised by Application — just verify it's running
+    case GiTF.Tachikoma.lookup() do
+      {:ok, _pid} -> Logger.debug("Tachikoma is running")
+      :error -> Logger.warning("Tachikoma is not running")
     end
 
     Logger.info("Major initialized at #{gitf_root}")
 
-    # Recover stuck jobs whose worker processes died
+    # Recover stuck ops whose worker processes died
     recover_stuck_jobs()
 
-    # Recover any missed waggles from before we started
+    # Recover any missed links from before we started
     send(self(), :recover_missed_waggles)
     schedule_waggle_recovery()
 
-    # Periodically check for pending jobs that need ghosts
+    # Periodically check for pending ops that need ghosts
     schedule_job_spawner()
 
     # Periodically check for stalled ghosts
     schedule_stall_check()
 
-    # Periodically recover stuck jobs (workers died without waggle)
+    # Periodically recover stuck ops (workers died without link_msg)
     schedule_stuck_recovery()
 
     # Periodically check post-review windows
     schedule_post_review_check()
 
-    # Periodically advance stuck quest phases
+    # Periodically advance stuck mission phases
     schedule_phase_advancement()
 
-    # On startup, resume active quests that may have stalled during crash
+    # On startup, resume active missions that may have stalled during crash
     Process.send_after(self(), :resume_active_quests, 10_000)
 
     {:ok, state}
@@ -169,8 +169,8 @@ defmodule GiTF.Major do
   end
 
   @impl true
-  def handle_info({:waggle_received, waggle}, state) do
-    state = handle_waggle(waggle, state)
+  def handle_info({:waggle_received, link_msg}, state) do
+    state = handle_waggle(link_msg, state)
     {:noreply, state}
   end
 
@@ -217,46 +217,46 @@ defmodule GiTF.Major do
     {:noreply, %{state | port: nil, status: :idle, awaiter: nil}}
   end
 
-  def handle_info({ref, {:verification_passed, ghost_id, job_id}}, state) do
+  def handle_info({ref, {:verification_passed, ghost_id, op_id}}, state) do
     # Flush task monitor
     Process.demonitor(ref, [:flush])
     state = %{state | pending_verifications: Map.delete(state.pending_verifications, ref)}
-    Logger.info("Verification passed for job #{job_id} (ghost #{ghost_id})")
-    notify_run_job_completed(job_id)
-    GiTF.Reputation.update_after_job(job_id)
+    Logger.info("Verification passed for op #{op_id} (ghost #{ghost_id})")
+    notify_run_job_completed(op_id)
+    GiTF.Reputation.update_after_job(op_id)
     state = advance_quest(ghost_id, state)
     {:noreply, state}
   end
 
-  def handle_info({ref, {:verification_failed, ghost_id, job_id, result}}, state) do
+  def handle_info({ref, {:verification_failed, ghost_id, op_id, result}}, state) do
     Process.demonitor(ref, [:flush])
     state = %{state | pending_verifications: Map.delete(state.pending_verifications, ref)}
-    Logger.warning("Verification failed for job #{job_id}: #{inspect(result[:output])}")
-    notify_run_job_failed(job_id)
-    GiTF.Reputation.update_after_job(job_id)
+    Logger.warning("Verification failed for op #{op_id}: #{inspect(result[:output])}")
+    notify_run_job_failed(op_id)
+    GiTF.Reputation.update_after_job(op_id)
 
-    # Treat as job failure -> trigger retry logic
-    waggle = %{
+    # Treat as op failure -> trigger retry logic
+    link_msg = %{
       from: ghost_id,
       subject: "verification_failed",
       body: "Verification failed: #{result[:output]}"
     }
-    state = maybe_retry_job(waggle, state)
+    state = maybe_retry_job(link_msg, state)
     {:noreply, state}
   end
 
-  def handle_info({ref, {:verification_error, ghost_id, job_id, reason}}, state) do
+  def handle_info({ref, {:verification_error, ghost_id, op_id, reason}}, state) do
     Process.demonitor(ref, [:flush])
     state = %{state | pending_verifications: Map.delete(state.pending_verifications, ref)}
-    Logger.error("Verification system error for job #{job_id}: #{inspect(reason)}")
+    Logger.error("Verification system error for op #{op_id}: #{inspect(reason)}")
 
     # Fail safe: retry
-    waggle = %{
+    link_msg = %{
       from: ghost_id,
       subject: "verification_error",
       body: "System error during verification: #{inspect(reason)}"
     }
-    state = maybe_retry_job(waggle, state)
+    state = maybe_retry_job(link_msg, state)
     {:noreply, state}
   end
 
@@ -297,7 +297,7 @@ defmodule GiTF.Major do
   end
 
   def handle_info(:advance_stuck_phases, state) do
-    advance_stuck_quest_phases()
+    advance_stuck_mission_phases()
     schedule_phase_advancement()
     {:noreply, state}
   end
@@ -312,15 +312,15 @@ defmodule GiTF.Major do
     {:noreply, state}
   end
 
-  # -- Private: stuck job recovery --------------------------------------------
+  # -- Private: stuck op recovery --------------------------------------------
 
   defp recover_stuck_jobs do
     stuck_jobs =
-      GiTF.Store.filter(:jobs, fn j -> j.status == "running" end)
+      GiTF.Store.filter(:ops, fn j -> j.status == "running" end)
 
-    Enum.each(stuck_jobs, fn job ->
+    Enum.each(stuck_jobs, fn op ->
       worker_alive? =
-        case job.ghost_id do
+        case op.ghost_id do
           nil -> false
           ghost_id ->
             case GiTF.Ghost.Worker.lookup(ghost_id) do
@@ -330,16 +330,16 @@ defmodule GiTF.Major do
         end
 
       unless worker_alive? do
-        Logger.warning("Recovering stuck job #{job.id} (worker dead)")
-        GiTF.Jobs.fail(job.id)
+        Logger.warning("Recovering stuck op #{op.id} (worker dead)")
+        GiTF.Ops.fail(op.id)
       end
     end)
   rescue
     e ->
-      Logger.warning("Stuck job recovery failed: #{Exception.message(e)}")
+      Logger.warning("Stuck op recovery failed: #{Exception.message(e)}")
   end
 
-  # -- Private: job state timeout detection ------------------------------------
+  # -- Private: op state timeout detection ------------------------------------
 
   @pending_timeout_seconds 600
   @assigned_timeout_seconds 600
@@ -347,35 +347,35 @@ defmodule GiTF.Major do
   defp timeout_stale_jobs do
     now = DateTime.utc_now()
 
-    # Timeout jobs stuck in "pending" for too long (>10 min)
-    GiTF.Store.filter(:jobs, fn j -> j.status == "pending" end)
-    |> Enum.each(fn job ->
-      age = DateTime.diff(now, job.updated_at || job.inserted_at, :second)
+    # Timeout ops stuck in "pending" for too long (>10 min)
+    GiTF.Store.filter(:ops, fn j -> j.status == "pending" end)
+    |> Enum.each(fn op ->
+      age = DateTime.diff(now, op.updated_at || op.inserted_at, :second)
 
       if age > @pending_timeout_seconds do
-        # Only fail if the job is supposed to be active (has a quest that's running)
+        # Only fail if the op is supposed to be active (has a mission that's running)
         quest_active? =
-          case GiTF.Store.get(:quests, job.quest_id) do
+          case GiTF.Store.get(:missions, op.mission_id) do
             %{status: s} when s in ["active", "implementation"] -> true
             _ -> false
           end
 
-        if quest_active? and GiTF.Jobs.ready?(job.id) do
-          Logger.warning("Job #{job.id} stuck pending for #{age}s, resetting")
-          GiTF.Jobs.fail(job.id)
-          GiTF.Jobs.reset(job.id, "Timed out in pending state after #{age}s")
+        if quest_active? and GiTF.Ops.ready?(op.id) do
+          Logger.warning("Job #{op.id} stuck pending for #{age}s, resetting")
+          GiTF.Ops.fail(op.id)
+          GiTF.Ops.reset(op.id, "Timed out in pending state after #{age}s")
         end
       end
     end)
 
-    # Timeout jobs stuck in "assigned" (ghost never started working)
-    GiTF.Store.filter(:jobs, fn j -> j.status == "assigned" end)
-    |> Enum.each(fn job ->
-      age = DateTime.diff(now, job.updated_at || job.inserted_at, :second)
+    # Timeout ops stuck in "assigned" (ghost never started working)
+    GiTF.Store.filter(:ops, fn j -> j.status == "assigned" end)
+    |> Enum.each(fn op ->
+      age = DateTime.diff(now, op.updated_at || op.inserted_at, :second)
 
       if age > @assigned_timeout_seconds do
-        Logger.warning("Job #{job.id} stuck assigned for #{age}s, failing for retry")
-        GiTF.Jobs.fail(job.id)
+        Logger.warning("Job #{op.id} stuck assigned for #{age}s, failing for retry")
+        GiTF.Ops.fail(op.id)
       end
     end)
   rescue
@@ -383,107 +383,107 @@ defmodule GiTF.Major do
       Logger.warning("Job timeout check failed: #{Exception.message(e)}")
   end
 
-  # -- Private: waggle handling ----------------------------------------------
+  # -- Private: link_msg handling ----------------------------------------------
   # Business logic is deliberately minimal here. The Major GenServer
   # dispatches to pattern-matched handlers. Heavier orchestration logic
   # will move to dedicated context modules as the system grows.
 
-  defp handle_waggle(%{subject: "job_complete"} = waggle, state) do
-    Logger.info("Bee #{waggle.from} reports job complete. Initiating verification...")
+  defp handle_waggle(%{subject: "job_complete"} = link_msg, state) do
+    Logger.info("Bee #{link_msg.from} reports op complete. Initiating verification...")
 
     # We remove from active_ghosts immediately so Major doesn't think it's still "working"
-    # but we don't advance quest yet.
-    state = update_in(state.active_ghosts, &Map.delete(&1, waggle.from))
+    # but we don't advance mission yet.
+    state = update_in(state.active_ghosts, &Map.delete(&1, link_msg.from))
 
-    job_id = find_job_for_bee(waggle.from)
+    op_id = find_job_for_bee(link_msg.from)
 
-    if job_id do
-      # Phase jobs (research, design, etc.) don't need verification — skip straight to advance
-      case GiTF.Jobs.get(job_id) do
+    if op_id do
+      # Phase ops (research, design, etc.) don't need verification — skip straight to advance
+      case GiTF.Ops.get(op_id) do
         {:ok, %{phase_job: true}} ->
-          Logger.info("Phase job #{job_id} completed, skipping verification")
-          notify_run_job_completed(job_id)
-          state = advance_quest(waggle.from, state)
+          Logger.info("Phase op #{op_id} completed, skipping verification")
+          notify_run_job_completed(op_id)
+          state = advance_quest(link_msg.from, state)
           state
 
         {:ok, %{verification_status: vs}} when vs in ["passed", "failed"] ->
           # Already verified (e.g., by worker inline) — skip Major-side verification
-          Logger.info("Job #{job_id} already verified (#{vs}), skipping duplicate verification")
+          Logger.info("Job #{op_id} already verified (#{vs}), skipping duplicate verification")
           if vs == "passed" do
-            notify_run_job_completed(job_id)
-            GiTF.Reputation.update_after_job(job_id)
-            advance_quest(waggle.from, state)
+            notify_run_job_completed(op_id)
+            GiTF.Reputation.update_after_job(op_id)
+            advance_quest(link_msg.from, state)
           else
-            notify_run_job_failed(job_id)
-            waggle_msg = %{from: waggle.from, subject: "verification_failed", body: "Already failed verification"}
+            notify_run_job_failed(op_id)
+            waggle_msg = %{from: link_msg.from, subject: "verification_failed", body: "Already failed verification"}
             maybe_retry_job(waggle_msg, state)
           end
 
         _ ->
-          # Implementation jobs go through verification
+          # Implementation ops go through verification
           task = Task.async(fn ->
-            case GiTF.Verification.verify_job(job_id) do
-              {:ok, :pass, _result} -> {:verification_passed, waggle.from, job_id}
-              {:ok, :fail, result} -> {:verification_failed, waggle.from, job_id, result}
-              {:error, reason} -> {:verification_error, waggle.from, job_id, reason}
+            case GiTF.Verification.verify_job(op_id) do
+              {:ok, :pass, _result} -> {:verification_passed, link_msg.from, op_id}
+              {:ok, :fail, result} -> {:verification_failed, link_msg.from, op_id, result}
+              {:error, reason} -> {:verification_error, link_msg.from, op_id, reason}
             end
           end)
 
-          pending = Map.put(state.pending_verifications, task.ref, {waggle.from, job_id})
+          pending = Map.put(state.pending_verifications, task.ref, {link_msg.from, op_id})
           %{state | pending_verifications: pending}
       end
     else
-      Logger.warning("Could not find job for ghost #{waggle.from}, skipping verification")
+      Logger.warning("Could not find op for ghost #{link_msg.from}, skipping verification")
       # Fallback: try to advance anyway if we can't verify (orphan ghost?)
-      state = advance_quest(waggle.from, state)
+      state = advance_quest(link_msg.from, state)
       state
     end
   end
 
-  defp handle_waggle(%{subject: "job_failed"} = waggle, state) do
-    Logger.warning("Bee #{waggle.from} reports job failed: #{waggle.body}")
-    state = update_in(state.active_ghosts, &Map.delete(&1, waggle.from))
+  defp handle_waggle(%{subject: "job_failed"} = link_msg, state) do
+    Logger.warning("Bee #{link_msg.from} reports op failed: #{link_msg.body}")
+    state = update_in(state.active_ghosts, &Map.delete(&1, link_msg.from))
 
-    job_id = find_job_for_bee(waggle.from)
-    if job_id, do: notify_run_job_failed(job_id)
+    op_id = find_job_for_bee(link_msg.from)
+    if op_id, do: notify_run_job_failed(op_id)
 
-    maybe_retry_job(waggle, state)
+    maybe_retry_job(link_msg, state)
   end
 
-  defp handle_waggle(%{subject: "validation_failed"} = waggle, state) do
-    Logger.warning("Bee #{waggle.from} reports validation failed: #{waggle.body}")
-    state = update_in(state.active_ghosts, &Map.delete(&1, waggle.from))
-    maybe_retry_job(waggle, state)
+  defp handle_waggle(%{subject: "validation_failed"} = link_msg, state) do
+    Logger.warning("Bee #{link_msg.from} reports validation failed: #{link_msg.body}")
+    state = update_in(state.active_ghosts, &Map.delete(&1, link_msg.from))
+    maybe_retry_job(link_msg, state)
   end
 
-  defp handle_waggle(%{subject: "merge_conflict_warning"} = waggle, state) do
-    Logger.warning("Merge conflict detected from ghost #{waggle.from}: #{waggle.body}")
+  defp handle_waggle(%{subject: "merge_conflict_warning"} = link_msg, state) do
+    Logger.warning("Merge conflict detected from ghost #{link_msg.from}: #{link_msg.body}")
 
-    # Extract cell_id from the ghost record
-    cell_id =
-      case GiTF.Ghosts.get(waggle.from) do
+    # Extract shell_id from the ghost record
+    shell_id =
+      case GiTF.Ghosts.get(link_msg.from) do
         {:ok, ghost} ->
-          case GiTF.Store.find_one(:cells, fn c -> c.ghost_id == ghost.id end) do
+          case GiTF.Store.find_one(:shells, fn c -> c.ghost_id == ghost.id end) do
             nil -> nil
-            cell -> cell.id
+            shell -> shell.id
           end
 
         _ ->
           nil
       end
 
-    if cell_id do
+    if shell_id do
       # Attempt rebase-based resolution
-      case GiTF.Conflict.resolve(cell_id, :rebase) do
+      case GiTF.Conflict.resolve(shell_id, :rebase) do
         {:ok, :resolved} ->
-          Logger.info("Conflict resolved via rebase for cell #{cell_id}")
+          Logger.info("Conflict resolved via rebase for shell #{shell_id}")
 
           # Re-run validation after rebase before merging
-          job_id = find_job_for_bee(waggle.from)
+          op_id = find_job_for_bee(link_msg.from)
 
           validation_ok? =
-            if job_id do
-              case GiTF.Validator.validate(waggle.from, %{id: job_id}, cell_id) do
+            if op_id do
+              case GiTF.Validator.validate(link_msg.from, %{id: op_id}, shell_id) do
                 {:ok, _} -> true
                 _ -> false
               end
@@ -493,48 +493,48 @@ defmodule GiTF.Major do
 
           if validation_ok? do
             # Re-attempt merge after successful rebase + validation
-            case GiTF.Merge.merge_back(cell_id) do
+            case GiTF.Merge.merge_back(shell_id) do
               {:ok, strategy} ->
-                Logger.info("Post-rebase merge succeeded (#{strategy}) for cell #{cell_id}")
+                Logger.info("Post-rebase merge succeeded (#{strategy}) for shell #{shell_id}")
                 state
 
               {:error, reason} ->
-                Logger.warning("Post-rebase merge failed for cell #{cell_id}: #{inspect(reason)}")
-                reimagine_conflicted_job(cell_id, waggle, state)
+                Logger.warning("Post-rebase merge failed for shell #{shell_id}: #{inspect(reason)}")
+                reimagine_conflicted_job(shell_id, link_msg, state)
             end
           else
-            Logger.warning("Post-rebase validation failed for cell #{cell_id}")
-            reimagine_conflicted_job(cell_id, waggle, state)
+            Logger.warning("Post-rebase validation failed for shell #{shell_id}")
+            reimagine_conflicted_job(shell_id, link_msg, state)
           end
 
         {:error, reason} ->
-          Logger.warning("Conflict resolution failed for cell #{cell_id}: #{inspect(reason)}")
-          reimagine_conflicted_job(cell_id, waggle, state)
+          Logger.warning("Conflict resolution failed for shell #{shell_id}: #{inspect(reason)}")
+          reimagine_conflicted_job(shell_id, link_msg, state)
       end
     else
-      # No cell found — reimagine directly by finding the job
-      Logger.warning("No cell for ghost #{waggle.from}, reimagining job directly")
-      reimagine_conflicted_job(nil, waggle, state)
+      # No shell found — reimagine directly by finding the op
+      Logger.warning("No shell for ghost #{link_msg.from}, reimagining op directly")
+      reimagine_conflicted_job(nil, link_msg, state)
     end
   end
 
-  defp handle_waggle(%{subject: "merge_failed"} = waggle, state) do
-    Logger.warning("Merge failed from #{waggle.from}: #{waggle.body}")
+  defp handle_waggle(%{subject: "merge_failed"} = link_msg, state) do
+    Logger.warning("Merge failed from #{link_msg.from}: #{link_msg.body}")
     state
   end
 
-  defp handle_waggle(%{subject: "job_merged"} = waggle, state) do
-    Logger.info("MergeQueue reports: #{waggle.body}")
+  defp handle_waggle(%{subject: "job_merged"} = link_msg, state) do
+    Logger.info("MergeQueue reports: #{link_msg.body}")
 
-    # Extract job_id from body (format: "Job <job_id> merged successfully (tier N)")
-    job_id = extract_job_id_from_body(waggle.body)
+    # Extract op_id from body (format: "Job <op_id> merged successfully (tier N)")
+    op_id = extract_op_id_from_body(link_msg.body)
 
-    if job_id do
-      notify_run_job_completed(job_id)
+    if op_id do
+      notify_run_job_completed(op_id)
 
       ghost_id =
-        case GiTF.Jobs.get(job_id) do
-          {:ok, job} -> job.ghost_id
+        case GiTF.Ops.get(op_id) do
+          {:ok, op} -> op.ghost_id
           _ -> nil
         end
 
@@ -548,52 +548,52 @@ defmodule GiTF.Major do
     end
   end
 
-  defp handle_waggle(%{subject: "scout_complete"} = waggle, state) do
-    # A scout ghost finished. Parse its findings and inject them into the parent job.
-    case Jason.decode(waggle.body) do
-      {:ok, %{"scout_job_id" => scout_job_id, "parent_job_id" => parent_job_id, "output" => output}} ->
-        findings = GiTF.Scout.parse_findings(output)
+  defp handle_waggle(%{subject: "scout_complete"} = link_msg, state) do
+    # A recon ghost finished. Parse its findings and inject them into the parent op.
+    case Jason.decode(link_msg.body) do
+      {:ok, %{"scout_op_id" => scout_op_id, "parent_op_id" => parent_op_id, "output" => output}} ->
+        findings = GiTF.Recon.parse_findings(output)
 
-        case GiTF.Scout.inject_findings(parent_job_id, findings) do
+        case GiTF.Recon.inject_findings(parent_op_id, findings) do
           {:ok, _updated} ->
-            Logger.info("Scout findings injected into job #{parent_job_id}")
+            Logger.info("Recon findings injected into op #{parent_op_id}")
 
           {:error, reason} ->
-            Logger.warning("Failed to inject scout findings into #{parent_job_id}: #{inspect(reason)}")
+            Logger.warning("Failed to inject recon findings into #{parent_op_id}: #{inspect(reason)}")
         end
 
-        # Unblock dependents (the parent job depends on the scout job)
-        GiTF.Jobs.unblock_dependents(scout_job_id)
+        # Unblock dependents (the parent op depends on the recon op)
+        GiTF.Ops.unblock_dependents(scout_op_id)
 
       _ ->
-        Logger.warning("Invalid scout_complete waggle body: #{waggle.body}")
+        Logger.warning("Invalid scout_complete link_msg body: #{link_msg.body}")
     end
 
     state
   end
 
-  defp handle_waggle(%{subject: "job_retry_created"} = waggle, state) do
-    Logger.info("Drone created retry job: #{waggle.body}")
-    # The retry job will be picked up by the periodic job spawner
+  defp handle_waggle(%{subject: "job_retry_created"} = link_msg, state) do
+    Logger.info("Tachikoma created retry op: #{link_msg.body}")
+    # The retry op will be picked up by the periodic op spawner
     state
   end
 
-  defp handle_waggle(%{subject: "job_exhausted_retries"} = waggle, state) do
-    Logger.warning("Job exhausted retries: #{waggle.body}")
+  defp handle_waggle(%{subject: "job_exhausted_retries"} = link_msg, state) do
+    Logger.warning("Job exhausted retries: #{link_msg.body}")
     state
   end
 
-  defp handle_waggle(%{subject: "reimagine_job_created"} = waggle, state) do
-    Logger.info("Merge resolver created re-imagine job: #{waggle.body}")
+  defp handle_waggle(%{subject: "reimagine_job_created"} = link_msg, state) do
+    Logger.info("Merge resolver created re-imagine op: #{link_msg.body}")
     state
   end
 
-  defp handle_waggle(%{subject: "checkpoint"} = waggle, state) do
-    ghost_id = waggle.from
-    Logger.debug("Checkpoint from ghost #{ghost_id}: #{waggle.body}")
+  defp handle_waggle(%{subject: "checkpoint"} = link_msg, state) do
+    ghost_id = link_msg.from
+    Logger.debug("Checkpoint from ghost #{ghost_id}: #{link_msg.body}")
 
     checkpoint_data =
-      case Jason.decode(waggle.body) do
+      case Jason.decode(link_msg.body) do
         {:ok, data} -> data
         _ -> %{}
       end
@@ -616,15 +616,15 @@ defmodule GiTF.Major do
     _ -> state
   end
 
-  defp handle_waggle(%{subject: "resource_warning"} = waggle, state) do
-    ghost_id = waggle.from
-    Logger.warning("Resource warning from ghost #{ghost_id}: #{waggle.body}")
+  defp handle_waggle(%{subject: "resource_warning"} = link_msg, state) do
+    ghost_id = link_msg.from
+    Logger.warning("Resource warning from ghost #{ghost_id}: #{link_msg.body}")
 
     # Broadcast alert
     Phoenix.PubSub.broadcast(
       GiTF.PubSub,
       "section:alerts",
-      {:resource_warning, ghost_id, waggle.body}
+      {:resource_warning, ghost_id, link_msg.body}
     )
 
     state
@@ -632,35 +632,35 @@ defmodule GiTF.Major do
     _ -> state
   end
 
-  defp handle_waggle(%{subject: "quest_advance"} = waggle, state) do
-    # Handle quest phase advancement requests
-    quest_id = waggle.body
-    case GiTF.Major.Orchestrator.advance_quest(quest_id) do
+  defp handle_waggle(%{subject: "quest_advance"} = link_msg, state) do
+    # Handle mission phase advancement requests
+    mission_id = link_msg.body
+    case GiTF.Major.Orchestrator.advance_quest(mission_id) do
       {:ok, new_phase} ->
-        Logger.info("Quest #{quest_id} advanced to #{new_phase} phase")
+        Logger.info("Quest #{mission_id} advanced to #{new_phase} phase")
       {:error, reason} ->
-        Logger.warning("Failed to advance quest #{quest_id}: #{inspect(reason)}")
+        Logger.warning("Failed to advance mission #{mission_id}: #{inspect(reason)}")
     end
     state
   end
 
-  defp handle_waggle(%{subject: "human_approval"} = waggle, state) do
-    case Jason.decode(waggle.body) do
-      {:ok, %{"action" => "approve", "quest_id" => quest_id} = data} ->
+  defp handle_waggle(%{subject: "human_approval"} = link_msg, state) do
+    case Jason.decode(link_msg.body) do
+      {:ok, %{"action" => "approve", "mission_id" => mission_id} = data} ->
         opts = %{
-          approved_by: Map.get(data, "approved_by", waggle.from),
+          approved_by: Map.get(data, "approved_by", link_msg.from),
           notes: Map.get(data, "notes")
         }
-        GiTF.HumanGate.approve(quest_id, opts)
-        GiTF.Major.Orchestrator.advance_quest(quest_id)
+        GiTF.HumanGate.approve(mission_id, opts)
+        GiTF.Major.Orchestrator.advance_quest(mission_id)
 
-      {:ok, %{"action" => "reject", "quest_id" => quest_id} = data} ->
-        reason = Map.get(data, "reason", "Rejected via waggle")
-        GiTF.HumanGate.reject(quest_id, reason)
-        GiTF.Major.Orchestrator.advance_quest(quest_id)
+      {:ok, %{"action" => "reject", "mission_id" => mission_id} = data} ->
+        reason = Map.get(data, "reason", "Rejected via link_msg")
+        GiTF.HumanGate.reject(mission_id, reason)
+        GiTF.Major.Orchestrator.advance_quest(mission_id)
 
       _ ->
-        Logger.warning("Invalid human_approval waggle body: #{waggle.body}")
+        Logger.warning("Invalid human_approval link_msg body: #{link_msg.body}")
     end
 
     state
@@ -668,13 +668,13 @@ defmodule GiTF.Major do
     _ -> state
   end
 
-  defp handle_waggle(%{subject: "clarification_needed"} = waggle, state) do
-    Logger.warning("Clarification request from ghost #{waggle.from}: #{waggle.body}")
+  defp handle_waggle(%{subject: "clarification_needed"} = link_msg, state) do
+    Logger.warning("Clarification request from ghost #{link_msg.from}: #{link_msg.body}")
 
     Phoenix.PubSub.broadcast(
       GiTF.PubSub,
       "section:alerts",
-      {:clarification_needed, waggle.from, waggle.body}
+      {:clarification_needed, link_msg.from, link_msg.body}
     )
 
     state
@@ -682,41 +682,41 @@ defmodule GiTF.Major do
     _ -> state
   end
 
-  defp handle_waggle(waggle, state) do
-    Logger.debug("Major received waggle from #{waggle.from}: #{waggle.subject}")
+  defp handle_waggle(link_msg, state) do
+    Logger.debug("Major received link_msg from #{link_msg.from}: #{link_msg.subject}")
     state
   end
 
   # -- Private: retry logic ---------------------------------------------------
 
-  defp maybe_retry_job(waggle, state) do
-    case GiTF.Ghosts.get(waggle.from) do
-      {:ok, ghost} when not is_nil(ghost.job_id) ->
-        job_id = ghost.job_id
-        feedback = waggle.body
+  defp maybe_retry_job(link_msg, state) do
+    case GiTF.Ghosts.get(link_msg.from) do
+      {:ok, ghost} when not is_nil(ghost.op_id) ->
+        op_id = ghost.op_id
+        feedback = link_msg.body
 
-        # Read persisted retry count from job record (survives Major restarts)
+        # Read persisted retry count from op record (survives Major restarts)
         attempts =
-          case GiTF.Jobs.get(job_id) do
-            {:ok, job} -> Map.get(job, :retry_count, 0)
+          case GiTF.Ops.get(op_id) do
+            {:ok, op} -> Map.get(op, :retry_count, 0)
             _ -> 0
           end
 
         if attempts < state.max_retries do
-          Logger.info("Retrying job #{job_id} (attempt #{attempts + 1}/#{state.max_retries})")
+          Logger.info("Retrying op #{op_id} (attempt #{attempts + 1}/#{state.max_retries})")
 
           # Try intelligent retry first, fall back to simple retry
-          case try_intelligent_retry(job_id, feedback, state) do
+          case try_intelligent_retry(op_id, feedback, state) do
             {:ok, _} -> state
-            {:error, _} -> simple_retry(job_id, feedback, state)
+            {:error, _} -> simple_retry(op_id, feedback, state)
           end
         else
-          Logger.warning("Job #{job_id} exhausted #{state.max_retries} retries")
+          Logger.warning("Job #{op_id} exhausted #{state.max_retries} retries")
           # Unblock dependents so downstream work isn't permanently stuck
-          GiTF.Jobs.unblock_dependents(job_id)
-          # Handle scout job exhaustion: unblock parent explicitly
-          unblock_scout_parent(job_id)
-          best_effort_update_quest_status(job_id)
+          GiTF.Ops.unblock_dependents(op_id)
+          # Handle recon op exhaustion: unblock parent explicitly
+          unblock_scout_parent(op_id)
+          best_effort_update_quest_status(op_id)
           state
         end
 
@@ -725,12 +725,12 @@ defmodule GiTF.Major do
     end
   end
 
-  defp try_intelligent_retry(job_id, feedback, state) do
-    case GiTF.Intelligence.Retry.retry_with_strategy(job_id, feedback) do
+  defp try_intelligent_retry(op_id, feedback, state) do
+    case GiTF.Intelligence.Retry.retry_with_strategy(op_id, feedback) do
       {:ok, new_job} ->
-        case check_quest_budget(new_job.quest_id) do
+        case check_quest_budget(new_job.mission_id) do
           :ok ->
-            case GiTF.Ghosts.spawn(new_job.id, new_job.comb_id, state.gitf_root) do
+            case GiTF.Ghosts.spawn(new_job.id, new_job.sector_id, state.gitf_root) do
               {:ok, _bee} -> {:ok, :intelligent_retry}
               error -> error
             end
@@ -740,86 +740,86 @@ defmodule GiTF.Major do
         end
 
       {:error, reason} ->
-        Logger.debug("Intelligent retry unavailable for job #{job_id}: #{inspect(reason)}")
+        Logger.debug("Intelligent retry unavailable for op #{op_id}: #{inspect(reason)}")
         {:error, reason}
     end
   rescue
     e ->
-      Logger.debug("Intelligent retry crashed for job #{job_id}: #{inspect(e)}")
+      Logger.debug("Intelligent retry crashed for op #{op_id}: #{inspect(e)}")
       {:error, :intelligent_retry_failed}
   end
 
-  defp simple_retry(job_id, feedback, state) do
-    case GiTF.Jobs.reset(job_id, feedback) do
-      {:ok, job} ->
-        case check_quest_budget(job.quest_id) do
+  defp simple_retry(op_id, feedback, state) do
+    case GiTF.Ops.reset(op_id, feedback) do
+      {:ok, op} ->
+        case check_quest_budget(op.mission_id) do
           :ok ->
-            case GiTF.Ghosts.spawn(job_id, job.comb_id, state.gitf_root) do
+            case GiTF.Ghosts.spawn(op_id, op.sector_id, state.gitf_root) do
               {:ok, _bee} ->
                 state
 
               {:error, reason} ->
-                Logger.warning("Retry spawn failed for job #{job_id}: #{inspect(reason)}")
+                Logger.warning("Retry spawn failed for op #{op_id}: #{inspect(reason)}")
                 state
             end
 
           {:error, :budget_exceeded} ->
-            Logger.warning("Budget exceeded for quest #{job.quest_id}, skipping retry")
+            Logger.warning("Budget exceeded for mission #{op.mission_id}, skipping retry")
 
-            GiTF.Waggle.send(
+            GiTF.Link.send(
               "major",
               "major",
               "budget_exceeded",
-              "Quest #{job.quest_id} budget exceeded, job #{job_id} retry skipped"
+              "Quest #{op.mission_id} budget exceeded, op #{op_id} retry skipped"
             )
 
             state
         end
 
       {:error, reason} ->
-        Logger.warning("Could not reset job #{job_id} for retry: #{inspect(reason)}")
+        Logger.warning("Could not reset op #{op_id} for retry: #{inspect(reason)}")
         state
     end
   end
 
-  # -- Private: quest advancement -----------------------------------------------
+  # -- Private: mission advancement -----------------------------------------------
 
   defp advance_quest(ghost_id, state) do
     with {:ok, ghost} <- GiTF.Ghosts.get(ghost_id),
-         true <- not is_nil(ghost[:job_id]),
-         {:ok, job} <- GiTF.Jobs.get(ghost[:job_id]) do
-      quest_id = job[:quest_id]
-      GiTF.Quests.update_status!(quest_id)
+         true <- not is_nil(ghost[:op_id]),
+         {:ok, op} <- GiTF.Ops.get(ghost[:op_id]) do
+      mission_id = op[:mission_id]
+      GiTF.Missions.update_status!(mission_id)
 
-      # Try to advance quest through orchestrator
-      case GiTF.Major.Orchestrator.advance_quest(quest_id) do
+      # Try to advance mission through orchestrator
+      case GiTF.Major.Orchestrator.advance_quest(mission_id) do
         {:ok, "completed"} ->
-          Logger.info("Quest completed: #{quest_id}")
-          GiTF.Waggle.send(
+          Logger.info("Quest completed: #{mission_id}")
+          GiTF.Link.send(
             "system",
             "major",
             "quest_completed",
-            "Quest #{quest_id} — all jobs done"
+            "Quest #{mission_id} — all ops done"
           )
           state
 
         {:ok, _new_phase} ->
-          # Orchestrator returned a non-completed phase; check actual quest status
-          # in case update_status! already marked it completed (simple quests
+          # Orchestrator returned a non-completed phase; check actual mission status
+          # in case update_status! already marked it completed (simple missions
           # without the phase system)
-          case GiTF.Quests.get(quest_id) do
-            {:ok, %{status: "completed"} = quest} ->
-              Logger.info("Quest completed: #{quest.name} (#{quest_id})")
-              GiTF.Waggle.send(
+          case GiTF.Missions.get(mission_id) do
+            {:ok, %{status: "completed"} = mission} ->
+              Logger.info("Quest completed: #{mission.name} (#{mission_id})")
+              GiTF.Link.send(
                 "system",
                 "major",
                 "quest_completed",
-                "Quest \"#{quest.name}\" (#{quest_id}) — all jobs done"
+                "Quest \"#{mission.name}\" (#{mission_id}) — all ops done"
               )
               state
 
-            {:ok, quest} ->
-              spawn_ready_jobs(quest, state)
+            {:ok, mission} ->
+              spawn_ready_jobs(mission, state)
 
             _ ->
               state
@@ -827,19 +827,19 @@ defmodule GiTF.Major do
 
         {:error, _reason} ->
           # Fall back to original logic
-          case GiTF.Quests.get(quest_id) do
-            {:ok, %{status: "completed"} = quest} ->
-              Logger.info("Quest completed: #{quest.name} (#{quest_id})")
-              GiTF.Waggle.send(
+          case GiTF.Missions.get(mission_id) do
+            {:ok, %{status: "completed"} = mission} ->
+              Logger.info("Quest completed: #{mission.name} (#{mission_id})")
+              GiTF.Link.send(
                 "system",
                 "major",
                 "quest_completed",
-                "Quest \"#{quest.name}\" (#{quest_id}) — all jobs done"
+                "Quest \"#{mission.name}\" (#{mission_id}) — all ops done"
               )
               state
 
-            {:ok, quest} ->
-              spawn_ready_jobs(quest, state)
+            {:ok, mission} ->
+              spawn_ready_jobs(mission, state)
 
             _ ->
               state
@@ -850,9 +850,9 @@ defmodule GiTF.Major do
     end
   end
 
-  defp best_effort_update_quest_status(job_id) do
-    with {:ok, job} <- GiTF.Jobs.get(job_id) do
-      GiTF.Quests.update_status!(job.quest_id)
+  defp best_effort_update_quest_status(op_id) do
+    with {:ok, op} <- GiTF.Ops.get(op_id) do
+      GiTF.Missions.update_status!(op.mission_id)
     end
   rescue
     _ -> :ok
@@ -860,23 +860,23 @@ defmodule GiTF.Major do
 
   defp spawn_ready_jobs(%{status: "planning"}, state), do: state
 
-  defp spawn_ready_jobs(quest, state) do
+  defp spawn_ready_jobs(mission, state) do
     # Check API circuit breaker — don't spawn into an outage
     if GiTF.CircuitBreaker.get_state("api:llm") == :open do
-      Logger.warning("API circuit breaker is OPEN — skipping job spawning until recovery")
+      Logger.warning("API circuit breaker is OPEN — skipping op spawning until recovery")
       state
     else
     # Check budget proactively before spawning
-    case check_quest_budget(quest.id) do
+    case check_quest_budget(mission.id) do
       {:error, :budget_exceeded} ->
-        Logger.warning("Budget exceeded for quest #{quest.id}, skipping spawn")
+        Logger.warning("Budget exceeded for mission #{mission.id}, skipping spawn")
         state
 
       :ok ->
         pending_jobs =
-          quest.jobs
+          mission.ops
           |> Enum.filter(&(&1.status == "pending"))
-          |> Enum.filter(&GiTF.Jobs.ready?(&1.id))
+          |> Enum.filter(&GiTF.Ops.ready?(&1.id))
 
         active_count = GiTF.Ghosts.list(status: "working") |> length()
         available_slots = max(state.max_ghosts - active_count, 0)
@@ -884,41 +884,41 @@ defmodule GiTF.Major do
 
         jobs_to_spawn = Enum.take(pending_jobs, available_slots)
 
-        # Ensure an active run exists for this quest when spawning jobs
-        run = ensure_active_run(quest.id, jobs_to_spawn)
+        # Ensure an active run exists for this mission when spawning ops
+        run = ensure_active_run(mission.id, jobs_to_spawn)
 
         jobs_to_spawn
         |> Enum.with_index()
-        |> Enum.reduce(state, fn {job, idx}, acc ->
+        |> Enum.reduce(state, fn {op, idx}, acc ->
           # Stagger: sleep before every spawn except the first
           if idx > 0 and stagger_delay > 0, do: Process.sleep(stagger_delay)
 
           # Triage before spawning
-          {complexity, pipeline} = GiTF.Triage.triage(job)
-          triage_store_job(job, complexity, pipeline)
+          {complexity, pipeline} = GiTF.Triage.triage(op)
+          triage_store_job(op, complexity, pipeline)
 
-          # If complex and no scout exists yet, create one and skip spawning the parent
-          if complexity == :complex and GiTF.Scout.should_scout?(job) and not scout_exists?(job.id) do
-            case GiTF.Scout.create_scout_job(job.id, job.comb_id) do
+          # If complex and no recon exists yet, create one and skip spawning the parent
+          if complexity == :complex and GiTF.Recon.should_scout?(op) and not scout_exists?(op.id) do
+            case GiTF.Recon.create_scout_job(op.id, op.sector_id) do
               {:ok, scout_job} ->
-                Logger.info("Created scout for complex job #{job.id}, deferring spawn")
-                # Spawn the scout job instead
+                Logger.info("Created recon for complex op #{op.id}, deferring spawn")
+                # Spawn the recon op instead
                 spawn_single_job(scout_job, acc, run)
 
               {:error, reason} ->
-                Logger.warning("Failed to create scout for job #{job.id}: #{inspect(reason)}, spawning directly")
-                spawn_single_job(job, acc, run)
+                Logger.warning("Failed to create recon for op #{op.id}: #{inspect(reason)}, spawning directly")
+                spawn_single_job(op, acc, run)
             end
           else
-            spawn_single_job(job, acc, run)
+            spawn_single_job(op, acc, run)
           end
         end)
     end
     end
   end
 
-  defp check_quest_budget(quest_id) do
-    case GiTF.Budget.check(quest_id) do
+  defp check_quest_budget(mission_id) do
+    case GiTF.Budget.check(mission_id) do
       {:ok, _remaining} -> :ok
       {:error, :budget_exceeded, _spent} -> {:error, :budget_exceeded}
     end
@@ -928,11 +928,11 @@ defmodule GiTF.Major do
 
   # -- Private: triage helpers -------------------------------------------------
 
-  defp triage_store_job(job, complexity, pipeline) do
-    case GiTF.Jobs.get(job.id) do
+  defp triage_store_job(op, complexity, pipeline) do
+    case GiTF.Ops.get(op.id) do
       {:ok, current} ->
         updated = %{current | triage_result: %{complexity: complexity, pipeline: pipeline}}
-        GiTF.Store.put(:jobs, updated)
+        GiTF.Store.put(:ops, updated)
 
       _ ->
         :ok
@@ -941,9 +941,9 @@ defmodule GiTF.Major do
     _ -> :ok
   end
 
-  defp scout_exists?(parent_job_id) do
-    GiTF.Store.filter(:jobs, fn j ->
-      Map.get(j, :scout_for) == parent_job_id and
+  defp scout_exists?(parent_op_id) do
+    GiTF.Store.filter(:ops, fn j ->
+      Map.get(j, :scout_for) == parent_op_id and
         j.status not in ["failed", "rejected"]
     end)
     |> Enum.any?()
@@ -951,22 +951,22 @@ defmodule GiTF.Major do
     _ -> false
   end
 
-  defp spawn_single_job(job, state, run) do
+  defp spawn_single_job(op, state, run) do
     if GiTF.Distributed.clustered?() do
       GiTF.Distributed.spawn_on_cluster(fn ->
-        GiTF.Ghosts.spawn_detached(job.id, job.comb_id, state.gitf_root)
+        GiTF.Ghosts.spawn_detached(op.id, op.sector_id, state.gitf_root)
       end)
-      Logger.info("Dispatched distributed spawn for job #{job.id}")
+      Logger.info("Dispatched distributed spawn for op #{op.id}")
       state
     else
-      case GiTF.Ghosts.spawn_detached(job.id, job.comb_id, state.gitf_root) do
+      case GiTF.Ghosts.spawn_detached(op.id, op.sector_id, state.gitf_root) do
         {:ok, ghost} ->
-          Logger.info("Auto-spawned ghost #{ghost.id} for job #{job.id} (#{job.title})")
-          register_with_run(run, ghost.id, job.id)
+          Logger.info("Auto-spawned ghost #{ghost.id} for op #{op.id} (#{op.title})")
+          register_with_run(run, ghost.id, op.id)
           state
 
         {:error, reason} ->
-          Logger.warning("Failed to auto-spawn ghost for job #{job.id}: #{inspect(reason)}")
+          Logger.warning("Failed to auto-spawn ghost for op #{op.id}: #{inspect(reason)}")
           state
       end
     end
@@ -985,15 +985,15 @@ defmodule GiTF.Major do
 
     Enum.each(reviews, fn review ->
       if GiTF.PostReview.expired?(review) do
-        Logger.info("Post-review expired for quest #{review.quest_id}, closing")
-        GiTF.PostReview.close_review(review.quest_id)
+        Logger.info("Post-review expired for mission #{review.mission_id}, closing")
+        GiTF.PostReview.close_review(review.mission_id)
       else
-        case GiTF.PostReview.check_regressions(review.quest_id) do
+        case GiTF.PostReview.check_regressions(review.mission_id) do
           {:ok, :clean} ->
             :ok
 
           {:ok, :regression, findings} ->
-            GiTF.PostReview.handle_regression(review.quest_id, findings)
+            GiTF.PostReview.handle_regression(review.mission_id, findings)
 
           {:error, _reason} ->
             :ok
@@ -1024,22 +1024,22 @@ defmodule GiTF.Major do
   end
 
   defp resume_active_quests(_state) do
-    # On startup, find active quests with no running jobs or phase ghosts and kick them
+    # On startup, find active missions with no running ops or phase ghosts and kick them
     active_quests =
-      GiTF.Store.all(:quests)
+      GiTF.Store.all(:missions)
       |> Enum.filter(fn q ->
         q[:status] not in [nil, "completed", "failed", "cancelled", "paused"] and
           q[:current_phase] not in [nil, "completed", "failed", "cancelled"]
       end)
 
-    Enum.each(active_quests, fn quest ->
-      quest_jobs = GiTF.Store.filter(:jobs, fn j ->
-        j.quest_id == quest.id and j.status in ["running", "assigned", "pending"]
+    Enum.each(active_quests, fn mission ->
+      quest_jobs = GiTF.Store.filter(:ops, fn j ->
+        j.mission_id == mission.id and j.status in ["running", "assigned", "pending"]
       end)
 
       if Enum.empty?(quest_jobs) do
-        Logger.info("Resuming stalled quest #{quest.id} (phase: #{quest[:current_phase]}, no active jobs)")
-        GiTF.Major.Orchestrator.advance_quest(quest.id)
+        Logger.info("Resuming stalled mission #{mission.id} (phase: #{mission[:current_phase]}, no active ops)")
+        GiTF.Major.Orchestrator.advance_quest(mission.id)
       end
     end)
   rescue
@@ -1047,21 +1047,21 @@ defmodule GiTF.Major do
       Logger.warning("Quest resumption failed: #{Exception.message(e)}")
   end
 
-  defp advance_stuck_quest_phases do
-    # Periodically call advance_quest for quests in non-terminal phases.
-    # This catches cases where a phase ghost completed but the waggle was lost.
+  defp advance_stuck_mission_phases do
+    # Periodically call advance_quest for missions in non-terminal phases.
+    # This catches cases where a phase ghost completed but the link_msg was lost.
     phase_statuses = ["research", "requirements", "design", "review", "planning",
                       "implementation", "validation", "awaiting_approval"]
 
-    GiTF.Store.all(:quests)
+    GiTF.Store.all(:missions)
     |> Enum.filter(fn q -> q[:status] in phase_statuses or q[:current_phase] in phase_statuses end)
-    |> Enum.each(fn quest ->
-      current_phase = quest[:current_phase]
+    |> Enum.each(fn mission ->
+      current_phase = mission[:current_phase]
 
-      case GiTF.Major.Orchestrator.advance_quest(quest.id) do
+      case GiTF.Major.Orchestrator.advance_quest(mission.id) do
         {:ok, new_phase} ->
           if new_phase != current_phase do
-            Logger.info("Periodic phase check advanced quest #{quest.id} to #{new_phase}")
+            Logger.info("Periodic phase check advanced mission #{mission.id} to #{new_phase}")
           end
 
         _ ->
@@ -1089,13 +1089,13 @@ defmodule GiTF.Major do
 
       seconds_since = DateTime.diff(now, reference_time, :second)
 
-      # Scale stall timeout with job complexity
+      # Scale stall timeout with op complexity
       stall_seconds = adaptive_stall_timeout(ghost, base_stall_seconds)
 
       if seconds_since > stall_seconds * 2 do
         # Double the stall threshold = hard-fail the ghost
         Logger.warning(
-          "Hard-stall: ghost #{ghost.id} unresponsive for #{seconds_since}s, failing job"
+          "Hard-stall: ghost #{ghost.id} unresponsive for #{seconds_since}s, failing op"
         )
 
         # Kill the worker process if it exists
@@ -1104,17 +1104,17 @@ defmodule GiTF.Major do
           :error -> :ok
         end
 
-        # Fail the job so retry logic picks it up
-        if ghost.job_id do
-          GiTF.Jobs.fail(ghost.job_id)
-          notify_run_job_failed(ghost.job_id)
+        # Fail the op so retry logic picks it up
+        if ghost.op_id do
+          GiTF.Ops.fail(ghost.op_id)
+          notify_run_job_failed(ghost.op_id)
 
-          waggle = %{
+          link_msg = %{
             from: ghost.id,
             subject: "stall_timeout",
             body: "Bee stalled for #{seconds_since}s without checkpoint. Auto-failed for retry."
           }
-          maybe_retry_job(waggle, state)
+          maybe_retry_job(link_msg, state)
         end
 
         GiTF.Store.put(:ghosts, %{ghost | status: "failed"})
@@ -1137,7 +1137,7 @@ defmodule GiTF.Major do
     _ -> :ok
   end
 
-  # -- Private: periodic job spawning ------------------------------------------
+  # -- Private: periodic op spawning ------------------------------------------
 
   @job_spawn_interval :timer.seconds(15)
 
@@ -1146,24 +1146,24 @@ defmodule GiTF.Major do
   end
 
   defp spawn_all_ready_jobs(state) do
-    quests = GiTF.Store.all(:quests)
-    all_jobs = GiTF.Store.all(:jobs)
+    missions = GiTF.Store.all(:missions)
+    all_jobs = GiTF.Store.all(:ops)
 
-    Enum.reduce(quests, state, fn quest, acc ->
-      if quest[:status] in ["active", "pending", "planning", "research", "implementation", "awaiting_approval"] do
+    Enum.reduce(missions, state, fn mission, acc ->
+      if mission[:status] in ["active", "pending", "planning", "research", "implementation", "awaiting_approval"] do
         # Check for deadlocks before spawning
-        case GiTF.Resilience.detect_deadlock(quest.id) do
+        case GiTF.Resilience.detect_deadlock(mission.id) do
           {:error, {:deadlock, cycles}} ->
-            Logger.warning("Deadlock in quest #{quest.id}, auto-resolving")
-            GiTF.Resilience.resolve_deadlock(quest.id, cycles)
+            Logger.warning("Deadlock in mission #{mission.id}, auto-resolving")
+            GiTF.Resilience.resolve_deadlock(mission.id, cycles)
 
           _ ->
             :ok
         end
 
-        # Attach jobs to quest (they're stored separately)
-        quest_jobs = Enum.filter(all_jobs, fn j -> j[:quest_id] == quest[:id] end)
-        quest_with_jobs = Map.put(quest, :jobs, quest_jobs)
+        # Attach ops to mission (they're stored separately)
+        quest_jobs = Enum.filter(all_jobs, fn j -> j[:mission_id] == mission[:id] end)
+        quest_with_jobs = Map.put(mission, :ops, quest_jobs)
         spawn_ready_jobs(quest_with_jobs, acc)
       else
         acc
@@ -1175,7 +1175,7 @@ defmodule GiTF.Major do
       state
   end
 
-  # -- Private: waggle recovery ------------------------------------------------
+  # -- Private: link_msg recovery ------------------------------------------------
 
   defp schedule_waggle_recovery do
     Process.send_after(self(), :schedule_waggle_recovery, @waggle_recovery_interval)
@@ -1185,26 +1185,26 @@ defmodule GiTF.Major do
     cutoff = DateTime.add(DateTime.utc_now(), -@waggle_stale_seconds, :second)
 
     unread =
-      GiTF.Waggle.list(to: "major", read: false)
+      GiTF.Link.list(to: "major", read: false)
       |> Enum.filter(fn w ->
         DateTime.compare(w.inserted_at, cutoff) == :lt
       end)
 
-    Enum.reduce(unread, state, fn waggle, acc ->
-      Logger.info("Recovering missed waggle: #{waggle.subject} from #{waggle.from}")
-      GiTF.Waggle.mark_read(waggle.id)
+    Enum.reduce(unread, state, fn link_msg, acc ->
+      Logger.info("Recovering missed link_msg: #{link_msg.subject} from #{link_msg.from}")
+      GiTF.Link.mark_read(link_msg.id)
 
       try do
-        handle_waggle(waggle, acc)
+        handle_waggle(link_msg, acc)
       rescue
         e ->
-          Logger.warning("Failed to process recovered waggle #{waggle.id} (#{waggle.subject}): #{Exception.message(e)}")
+          Logger.warning("Failed to process recovered link_msg #{link_msg.id} (#{link_msg.subject}): #{Exception.message(e)}")
           acc
       end
     end)
   rescue
     e ->
-      Logger.warning("Waggle recovery failed: #{Exception.message(e)}")
+      Logger.warning("Link recovery failed: #{Exception.message(e)}")
       state
   end
 
@@ -1236,7 +1236,7 @@ defmodule GiTF.Major do
     task = Task.async(fn ->
       GiTF.Runtime.AgentLoop.run(
         "You are the Major orchestrator for a GiTF of AI coding agents. " <>
-          "Monitor active quests, manage ghost workers, and coordinate work.",
+          "Monitor active missions, manage ghost workers, and coordinate work.",
         queen_workspace,
         tool_set: :major,
         max_iterations: 200,
@@ -1292,64 +1292,64 @@ defmodule GiTF.Major do
 
   defp find_job_for_bee(ghost_id) do
     case GiTF.Ghosts.get(ghost_id) do
-      {:ok, ghost} -> ghost.job_id
+      {:ok, ghost} -> ghost.op_id
       _ -> nil
     end
   rescue
     _ -> nil
   end
 
-  defp extract_job_id_from_body(body) when is_binary(body) do
+  defp extract_op_id_from_body(body) when is_binary(body) do
     case Regex.run(~r/Job ([\w-]+)/, body) do
-      [_, job_id] -> job_id
+      [_, op_id] -> op_id
       _ -> nil
     end
   end
 
-  defp extract_job_id_from_body(_), do: nil
+  defp extract_op_id_from_body(_), do: nil
 
-  defp reimagine_conflicted_job(cell_id, waggle, state) do
-    job_id = find_job_for_bee(waggle.from)
+  defp reimagine_conflicted_job(shell_id, link_msg, state) do
+    op_id = find_job_for_bee(link_msg.from)
 
-    if job_id do
-      Logger.info("Reimagining conflicted job #{job_id} (cell #{inspect(cell_id)})")
-      GiTF.Jobs.fail(job_id)
+    if op_id do
+      Logger.info("Reimagining conflicted op #{op_id} (shell #{inspect(shell_id)})")
+      GiTF.Ops.fail(op_id)
 
-      cell_info = if cell_id, do: "on cell #{cell_id}", else: "no cell"
+      cell_info = if shell_id, do: "on shell #{shell_id}", else: "no shell"
 
       conflict_waggle = %{
-        from: waggle.from,
+        from: link_msg.from,
         subject: "merge_conflict",
-        body: "Merge conflict #{cell_info}: #{waggle.body}. " <>
+        body: "Merge conflict #{cell_info}: #{link_msg.body}. " <>
               "Redo the work avoiding conflicting file regions."
       }
 
       maybe_retry_job(conflict_waggle, state)
     else
-      Logger.warning("Could not reimagine: no job found for ghost #{waggle.from}")
+      Logger.warning("Could not reimagine: no op found for ghost #{link_msg.from}")
       state
     end
   rescue
     e ->
-      Logger.warning("Reimagine failed for cell #{inspect(cell_id)}: #{Exception.message(e)}")
+      Logger.warning("Reimagine failed for shell #{inspect(shell_id)}: #{Exception.message(e)}")
       state
   end
 
-  # Scale stall timeout based on job complexity:
+  # Scale stall timeout based on op complexity:
   # simple = 1x (10 min default), moderate = 2x (20 min), complex = 4x (40 min)
   defp adaptive_stall_timeout(ghost, base_seconds) do
     multiplier =
-      case ghost.job_id do
+      case ghost.op_id do
         nil -> 1
-        job_id ->
-          case GiTF.Jobs.get(job_id) do
-            {:ok, job} ->
-              case Map.get(job, :triage_result) do
+        op_id ->
+          case GiTF.Ops.get(op_id) do
+            {:ok, op} ->
+              case Map.get(op, :triage_result) do
                 %{complexity: :complex} -> 4
                 %{complexity: :moderate} -> 2
                 _ ->
                   # Also check string complexity from classifier
-                  case Map.get(job, :complexity) do
+                  case Map.get(op, :complexity) do
                     c when c in ["high", "critical"] -> 4
                     "moderate" -> 2
                     _ -> 1
@@ -1365,11 +1365,11 @@ defmodule GiTF.Major do
     _ -> base_seconds
   end
 
-  defp unblock_scout_parent(job_id) do
-    case GiTF.Jobs.get(job_id) do
-      {:ok, %{scout: true, scout_for: parent_id}} when is_binary(parent_id) ->
-        Logger.info("Scout job #{job_id} exhausted retries, unblocking parent #{parent_id}")
-        GiTF.Jobs.unblock_dependents(job_id)
+  defp unblock_scout_parent(op_id) do
+    case GiTF.Ops.get(op_id) do
+      {:ok, %{recon: true, scout_for: parent_id}} when is_binary(parent_id) ->
+        Logger.info("Recon op #{op_id} exhausted retries, unblocking parent #{parent_id}")
+        GiTF.Ops.unblock_dependents(op_id)
 
       _ ->
         :ok
@@ -1389,19 +1389,19 @@ defmodule GiTF.Major do
 
   # -- Private: run management ------------------------------------------------
 
-  defp ensure_active_run(quest_id, jobs_to_spawn) do
-    case GiTF.Run.active_for_quest(quest_id) do
+  defp ensure_active_run(mission_id, jobs_to_spawn) do
+    case GiTF.Run.active_for_quest(mission_id) do
       nil ->
-        job_ids = Enum.map(jobs_to_spawn, & &1.id)
-        {:ok, run} = GiTF.Run.create(quest_id, job_ids: job_ids)
-        Logger.info("Created run #{run.id} for quest #{quest_id} with #{length(job_ids)} jobs")
+        op_ids = Enum.map(jobs_to_spawn, & &1.id)
+        {:ok, run} = GiTF.Run.create(mission_id, op_ids: op_ids)
+        Logger.info("Created run #{run.id} for mission #{mission_id} with #{length(op_ids)} ops")
         run
 
       run ->
-        # Add any new jobs that aren't already tracked
-        Enum.each(jobs_to_spawn, fn job ->
-          unless job.id in run.job_ids do
-            GiTF.Run.add_job(run.id, job.id)
+        # Add any new ops that aren't already tracked
+        Enum.each(jobs_to_spawn, fn op ->
+          unless op.id in run.op_ids do
+            GiTF.Run.add_job(run.id, op.id)
           end
         end)
 
@@ -1409,17 +1409,17 @@ defmodule GiTF.Major do
     end
   rescue
     e ->
-      Logger.warning("Failed to ensure active run for quest #{quest_id}: #{inspect(e)}")
+      Logger.warning("Failed to ensure active run for mission #{mission_id}: #{inspect(e)}")
       nil
   end
 
-  defp register_with_run(nil, _ghost_id, _job_id), do: :ok
+  defp register_with_run(nil, _ghost_id, _op_id), do: :ok
 
-  defp register_with_run(run, ghost_id, job_id) do
+  defp register_with_run(run, ghost_id, op_id) do
     GiTF.Run.add_bee(run.id, ghost_id)
 
-    unless job_id in run.job_ids do
-      GiTF.Run.add_job(run.id, job_id)
+    unless op_id in run.op_ids do
+      GiTF.Run.add_job(run.id, op_id)
     end
 
     :ok
@@ -1427,18 +1427,18 @@ defmodule GiTF.Major do
     _ -> :ok
   end
 
-  defp notify_run_job_completed(job_id) do
-    quest_id = job_quest_id(job_id)
+  defp notify_run_job_completed(op_id) do
+    mission_id = job_mission_id(op_id)
 
-    if quest_id do
-      case GiTF.Run.active_for_quest(quest_id) do
+    if mission_id do
+      case GiTF.Run.active_for_quest(mission_id) do
         nil ->
           :ok
 
         run ->
-          case GiTF.Run.job_completed(run.id, job_id) do
+          case GiTF.Run.job_completed(run.id, op_id) do
             {:ok, _run, :run_complete} ->
-              Logger.info("Run #{run.id} complete for quest #{quest_id}")
+              Logger.info("Run #{run.id} complete for mission #{mission_id}")
 
             {:ok, _run} ->
               :ok
@@ -1452,18 +1452,18 @@ defmodule GiTF.Major do
     _ -> :ok
   end
 
-  defp notify_run_job_failed(job_id) do
-    quest_id = job_quest_id(job_id)
+  defp notify_run_job_failed(op_id) do
+    mission_id = job_mission_id(op_id)
 
-    if quest_id do
-      case GiTF.Run.active_for_quest(quest_id) do
+    if mission_id do
+      case GiTF.Run.active_for_quest(mission_id) do
         nil ->
           :ok
 
         run ->
-          case GiTF.Run.job_failed(run.id, job_id) do
+          case GiTF.Run.job_failed(run.id, op_id) do
             {:ok, _run, :run_complete} ->
-              Logger.info("Run #{run.id} complete (with failures) for quest #{quest_id}")
+              Logger.info("Run #{run.id} complete (with failures) for mission #{mission_id}")
 
             {:ok, _run} ->
               :ok
@@ -1477,9 +1477,9 @@ defmodule GiTF.Major do
     _ -> :ok
   end
 
-  defp job_quest_id(job_id) do
-    case GiTF.Jobs.get(job_id) do
-      {:ok, job} -> job[:quest_id]
+  defp job_mission_id(op_id) do
+    case GiTF.Ops.get(op_id) do
+      {:ok, op} -> op[:mission_id]
       _ -> nil
     end
   rescue

@@ -6,51 +6,51 @@ defmodule GiTF.ScopeGuard do
 
   alias GiTF.Store
 
-  @doc "Check if job stays within scope"
-  def check_scope(job_id) do
-    job = Store.get(:jobs, job_id)
-    quest = Store.get(:quests, job.quest_id)
+  @doc "Check if op stays within scope"
+  def check_scope(op_id) do
+    op = Store.get(:ops, op_id)
+    mission = Store.get(:missions, op.mission_id)
     
     %{
-      in_scope: within_scope?(job, quest),
-      warnings: detect_warnings(job, quest),
-      recommendation: scope_recommendation(job, quest)
+      in_scope: within_scope?(op, mission),
+      warnings: detect_warnings(op, mission),
+      recommendation: scope_recommendation(op, mission)
     }
   end
 
-  @doc "Detect scope creep in quest"
-  def check_quest_scope(quest_id) do
-    quest = Store.get(:quests, quest_id)
-    jobs = Store.all(:jobs) |> Enum.filter(&(&1.quest_id == quest_id))
+  @doc "Detect scope creep in mission"
+  def check_quest_scope(mission_id) do
+    mission = Store.get(:missions, mission_id)
+    ops = Store.all(:ops) |> Enum.filter(&(&1.mission_id == mission_id))
     
     %{
-      total_jobs: length(jobs),
-      scope_warnings: Enum.flat_map(jobs, &detect_warnings(&1, quest)),
-      overall_status: overall_scope_status(jobs, quest)
+      total_jobs: length(ops),
+      scope_warnings: Enum.flat_map(ops, &detect_warnings(&1, mission)),
+      overall_status: overall_scope_status(ops, mission)
     }
   end
 
-  defp within_scope?(job, _quest) do
+  defp within_scope?(op, _quest) do
     # Check common scope violations
-    files_changed = job[:files_changed] || 0
+    files_changed = op[:files_changed] || 0
     
     # Simple heuristic: if too many files, likely scope creep
     files_changed <= 10
   end
 
-  defp detect_warnings(job, _quest) do
+  defp detect_warnings(op, _quest) do
     warnings = []
     
     # Too many files
-    warnings = if (job[:files_changed] || 0) > 10 do
-      [{:too_many_files, "Job modifies #{job[:files_changed]} files"} | warnings]
+    warnings = if (op[:files_changed] || 0) > 10 do
+      [{:too_many_files, "Job modifies #{op[:files_changed]} files"} | warnings]
     else
       warnings
     end
     
     # Job title suggests extra work
-    warnings = if job.title && String.contains?(String.downcase(job.title), ["refactor", "improve", "enhance", "optimize"]) do
-      [{:potential_gold_plating, "Job title suggests extra work: #{job.title}"} | warnings]
+    warnings = if op.title && String.contains?(String.downcase(op.title), ["refactor", "improve", "enhance", "optimize"]) do
+      [{:potential_gold_plating, "Job title suggests extra work: #{op.title}"} | warnings]
     else
       warnings
     end
@@ -58,8 +58,8 @@ defmodule GiTF.ScopeGuard do
     warnings
   end
 
-  defp scope_recommendation(job, quest) do
-    warnings = detect_warnings(job, quest)
+  defp scope_recommendation(op, mission) do
+    warnings = detect_warnings(op, mission)
     
     cond do
       Enum.empty?(warnings) -> :approved
@@ -68,8 +68,8 @@ defmodule GiTF.ScopeGuard do
     end
   end
 
-  defp overall_scope_status(jobs, quest) do
-    all_warnings = Enum.flat_map(jobs, &detect_warnings(&1, quest))
+  defp overall_scope_status(ops, mission) do
+    all_warnings = Enum.flat_map(ops, &detect_warnings(&1, mission))
     
     cond do
       Enum.empty?(all_warnings) -> :clean

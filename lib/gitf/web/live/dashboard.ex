@@ -21,8 +21,8 @@ defmodule GiTF.Web.Live.Dashboard do
       |> assign(:node, Node.self())
       |> assign(:cluster_size, length(Node.list()) + 1)
       |> assign(:emergency_stop_triggered, false)
-      |> assign(:selected_job_id, nil)
-      |> assign(:selected_quest_id, nil)
+      |> assign(:selected_op_id, nil)
+      |> assign(:selected_mission_id, nil)
       |> assign(:feed_expanded, false)
       |> assign(:show_done_jobs, false)
       |> assign(:show_inactive_quests, false)
@@ -42,7 +42,7 @@ defmodule GiTF.Web.Live.Dashboard do
       |> assign(:event_type_filter, nil)
       |> assign(:selected_model, nil)
       |> assign_stats()
-      |> then(fn s -> assign(s, :budget_status, load_budget_status(s.assigns.quests)) end)
+      |> then(fn s -> assign(s, :budget_status, load_budget_status(s.assigns.missions)) end)
 
     {:ok, socket}
   end
@@ -69,39 +69,39 @@ defmodule GiTF.Web.Live.Dashboard do
     {:noreply, assign(socket, :emergency_stop_triggered, false)}
   end
 
-  def handle_event("select_job", %{"id" => job_id}, socket) do
-    current = socket.assigns.selected_job_id
-    new_id = if current == job_id, do: nil, else: job_id
-    {:noreply, socket |> assign(:selected_job_id, new_id) |> assign(:active_tab, :detail)}
+  def handle_event("select_job", %{"id" => op_id}, socket) do
+    current = socket.assigns.selected_op_id
+    new_id = if current == op_id, do: nil, else: op_id
+    {:noreply, socket |> assign(:selected_op_id, new_id) |> assign(:active_tab, :detail)}
   end
 
   def handle_event("close_job_detail", _params, socket) do
-    {:noreply, assign(socket, :selected_job_id, nil)}
+    {:noreply, assign(socket, :selected_op_id, nil)}
   end
 
   def handle_event("toggle_feed", _params, socket) do
     {:noreply, assign(socket, :feed_expanded, !socket.assigns.feed_expanded)}
   end
 
-  def handle_event("retry_job", %{"id" => job_id}, socket) do
-    GiTF.Jobs.reset(job_id)
+  def handle_event("retry_job", %{"id" => op_id}, socket) do
+    GiTF.Ops.reset(op_id)
     {:noreply, assign_stats(socket)}
   end
 
-  def handle_event("kill_job", %{"id" => job_id}, socket) do
-    GiTF.Jobs.kill(job_id)
-    {:noreply, socket |> assign(:selected_job_id, nil) |> assign_stats()}
+  def handle_event("kill_job", %{"id" => op_id}, socket) do
+    GiTF.Ops.kill(op_id)
+    {:noreply, socket |> assign(:selected_op_id, nil) |> assign_stats()}
   end
 
-  def handle_event("kill_quest", %{"id" => quest_id}, socket) do
-    GiTF.Quests.kill(quest_id)
-    {:noreply, socket |> assign(:selected_job_id, nil) |> assign(:selected_quest_id, nil) |> assign_stats()}
+  def handle_event("kill_quest", %{"id" => mission_id}, socket) do
+    GiTF.Missions.kill(mission_id)
+    {:noreply, socket |> assign(:selected_op_id, nil) |> assign(:selected_mission_id, nil) |> assign_stats()}
   end
 
-  def handle_event("select_quest", %{"id" => quest_id}, socket) do
-    current = socket.assigns.selected_quest_id
-    new_id = if current == quest_id, do: nil, else: quest_id
-    {:noreply, socket |> assign(:selected_quest_id, new_id) |> assign(:selected_job_id, nil) |> assign(:active_tab, :detail)}
+  def handle_event("select_quest", %{"id" => mission_id}, socket) do
+    current = socket.assigns.selected_mission_id
+    new_id = if current == mission_id, do: nil, else: mission_id
+    {:noreply, socket |> assign(:selected_mission_id, new_id) |> assign(:selected_op_id, nil) |> assign(:active_tab, :detail)}
   end
 
   def handle_event("toggle_done_jobs", _params, socket) do
@@ -156,8 +156,8 @@ defmodule GiTF.Web.Live.Dashboard do
     {:noreply, assign(socket, :selected_model, new_model)}
   end
 
-  def handle_event("view_quest_timeline", %{"id" => quest_id}, socket) do
-    events = safe_call(fn -> GiTF.EventStore.list(limit: 50, quest_id: quest_id) end, [])
+  def handle_event("view_quest_timeline", %{"id" => mission_id}, socket) do
+    events = safe_call(fn -> GiTF.EventStore.list(limit: 50, mission_id: mission_id) end, [])
 
     socket =
       socket
@@ -221,7 +221,7 @@ defmodule GiTF.Web.Live.Dashboard do
     socket
     |> assign(:health, safe_call(fn -> GiTF.Observability.Health.check() end, socket.assigns.health))
     |> assign(:agent_identities, safe_call(fn -> GiTF.AgentIdentity.list() end, socket.assigns.agent_identities))
-    |> assign(:budget_status, load_budget_status(socket.assigns.quests))
+    |> assign(:budget_status, load_budget_status(socket.assigns.missions))
     |> assign(:checkpoints, checkpoints)
   end
 
@@ -237,39 +237,39 @@ defmodule GiTF.Web.Live.Dashboard do
 
   defp assign_stats(socket) do
     stats = GiTF.Observability.Metrics.collect_metrics()
-    quests = Store.all(:quests)
-    jobs = Store.all(:jobs)
+    missions = Store.all(:missions)
+    ops = Store.all(:ops)
     ghosts = Store.all(:ghosts)
 
     selected_job =
-      case socket.assigns[:selected_job_id] do
+      case socket.assigns[:selected_op_id] do
         nil -> nil
-        id -> Enum.find(jobs, &(&1.id == id))
+        id -> Enum.find(ops, &(&1.id == id))
       end
 
     selected_quest =
-      case socket.assigns[:selected_quest_id] do
+      case socket.assigns[:selected_mission_id] do
         nil -> nil
-        id -> Enum.find(quests, &(&1[:id] == id))
+        id -> Enum.find(missions, &(&1[:id] == id))
       end
 
     socket
     |> assign(:stats, stats)
-    |> assign(:quests, quests)
-    |> assign(:jobs, jobs)
+    |> assign(:missions, missions)
+    |> assign(:ops, ops)
     |> assign(:ghosts, ghosts)
     |> assign(:selected_job, selected_job)
     |> assign(:selected_quest, selected_quest)
   end
 
-  defp load_budget_status(quests) do
-    quests
+  defp load_budget_status(missions) do
+    missions
     |> Enum.filter(&(&1[:status] in ["active", "pending"]))
     |> Enum.map(fn q ->
       budget = GiTF.Budget.budget_for(q[:id])
       spent = safe_call(fn -> GiTF.Budget.spent_for(q[:id]) end, 0.0)
       remaining = Float.round(budget - spent, 2)
-      %{quest_id: q[:id], budget: budget, spent: spent, remaining: max(remaining, 0.0)}
+      %{mission_id: q[:id], budget: budget, spent: spent, remaining: max(remaining, 0.0)}
     end)
   rescue
     _ -> []
@@ -387,13 +387,13 @@ defmodule GiTF.Web.Live.Dashboard do
       </div>
       <div class="bg-gray-800 p-3 rounded-lg shadow border border-gray-700">
         <h3 class="text-gray-400 text-xs uppercase">Jobs</h3>
-        <p class="text-3xl font-mono text-yellow-400"><%= @stats.jobs.pending + @stats.jobs.running %></p>
-        <p class="text-xs text-gray-500"><%= @stats.jobs.pending %> pending · <%= @stats.jobs.running %> running · <%= @stats.jobs.done %> done</p>
+        <p class="text-3xl font-mono text-yellow-400"><%= @stats.ops.pending + @stats.ops.running %></p>
+        <p class="text-xs text-gray-500"><%= @stats.ops.pending %> pending · <%= @stats.ops.running %> running · <%= @stats.ops.done %> done</p>
       </div>
       <div class="bg-gray-800 p-3 rounded-lg shadow border border-gray-700">
         <h3 class="text-gray-400 text-xs uppercase">Quests</h3>
-        <p class="text-3xl font-mono text-green-400"><%= @stats.quests.total %></p>
-        <p class="text-xs text-gray-500"><%= @stats.quests.active %> active · <%= @stats.quests.completed %> completed</p>
+        <p class="text-3xl font-mono text-green-400"><%= @stats.missions.total %></p>
+        <p class="text-xs text-gray-500"><%= @stats.missions.active %> active · <%= @stats.missions.completed %> completed</p>
       </div>
       <div class="bg-gray-800 p-3 rounded-lg shadow border border-gray-700">
         <h3 class="text-gray-400 text-xs uppercase">Burn Rate</h3>
@@ -433,19 +433,19 @@ defmodule GiTF.Web.Live.Dashboard do
         </button>
       </div>
       <% filtered_quests = if @show_inactive_quests do
-        @quests
+        @missions
       else
-        Enum.filter(@quests, fn q -> (q[:status] || "pending") in ["pending", "active", "failed"] end)
+        Enum.filter(@missions, fn q -> (q[:status] || "pending") in ["pending", "active", "failed"] end)
       end %>
       <div class="p-3 space-y-1 max-h-48 overflow-y-auto hive-scrollbar">
         <%= if Enum.empty?(filtered_quests) do %>
-          <p class="text-gray-500 text-sm italic">No quests</p>
+          <p class="text-gray-500 text-sm italic">No missions</p>
         <% end %>
         <%= for q <- filtered_quests do %>
           <div
             phx-click="select_quest"
             phx-value-id={q[:id]}
-            class={"flex items-center justify-between text-sm group cursor-pointer rounded px-2 py-1 hover:bg-gray-700 #{if @selected_quest_id == q[:id], do: "bg-gray-700 ring-1 ring-green-500", else: ""}"}
+            class={"flex items-center justify-between text-sm group cursor-pointer rounded px-2 py-1 hover:bg-gray-700 #{if @selected_mission_id == q[:id], do: "bg-gray-700 ring-1 ring-green-500", else: ""}"}
           >
             <span class="truncate mr-2" title={q[:goal]}><%= q[:name] || q[:goal] || q[:id] %></span>
             <div class="flex items-center gap-1 shrink-0">
@@ -453,9 +453,9 @@ defmodule GiTF.Web.Live.Dashboard do
               <button
                 phx-click="kill_quest"
                 phx-value-id={q[:id]}
-                data-confirm="Kill this quest and all its jobs?"
+                data-confirm="Kill this mission and all its ops?"
                 class="hidden group-hover:inline-block text-red-500 hover:text-red-400 text-xs px-1"
-                title="Kill quest and all jobs"
+                title="Kill mission and all ops"
               >✕</button>
             </div>
           </div>
@@ -500,19 +500,19 @@ defmodule GiTF.Web.Live.Dashboard do
         </button>
       </div>
       <% filtered_jobs = if @show_done_jobs do
-        @jobs
+        @ops
       else
-        Enum.reject(@jobs, fn j -> j[:status] in ["done"] end)
+        Enum.reject(@ops, fn j -> j[:status] in ["done"] end)
       end %>
       <div class="p-3 space-y-1 max-h-48 overflow-y-auto hive-scrollbar">
         <%= if Enum.empty?(filtered_jobs) do %>
-          <p class="text-gray-500 text-sm italic">No jobs</p>
+          <p class="text-gray-500 text-sm italic">No ops</p>
         <% end %>
         <%= for j <- Enum.sort_by(filtered_jobs, & &1[:status]) do %>
           <div
             phx-click="select_job"
             phx-value-id={j[:id]}
-            class={"flex items-center justify-between text-sm cursor-pointer rounded px-2 py-1 hover:bg-gray-700 #{if @selected_job_id == j[:id], do: "bg-gray-700 ring-1 ring-blue-500", else: ""}"}
+            class={"flex items-center justify-between text-sm cursor-pointer rounded px-2 py-1 hover:bg-gray-700 #{if @selected_op_id == j[:id], do: "bg-gray-700 ring-1 ring-blue-500", else: ""}"}
           >
             <span class="truncate mr-2" title={j[:title]}><%= String.slice(j[:title] || "untitled", 0, 30) %></span>
             <span class={"px-1.5 py-0.5 rounded text-xs font-mono shrink-0 #{job_badge(j[:status])}"}><%= j[:status] || "?" %></span>
@@ -529,11 +529,11 @@ defmodule GiTF.Web.Live.Dashboard do
         </div>
         <div class="p-3 space-y-2 max-h-48 overflow-y-auto hive-scrollbar">
           <%= for run <- @runs do %>
-            <% quest = Enum.find(@quests, &(&1[:id] == run.quest_id)) %>
+            <% mission = Enum.find(@missions, &(&1[:id] == run.mission_id)) %>
             <div class="text-sm">
               <div class="flex justify-between items-center mb-1">
-                <span class="text-gray-300 truncate text-xs" title={run.quest_id}>
-                  <%= if quest, do: quest[:name] || quest[:goal] || run.quest_id, else: run.quest_id %>
+                <span class="text-gray-300 truncate text-xs" title={run.mission_id}>
+                  <%= if mission, do: mission[:name] || mission[:goal] || run.mission_id, else: run.mission_id %>
                 </span>
                 <span class={"px-1.5 py-0.5 rounded text-xs font-mono #{run_badge(run.status)}"}><%= run.status %></span>
               </div>
@@ -541,7 +541,7 @@ defmodule GiTF.Web.Live.Dashboard do
                 <% pct = if run.total_jobs > 0, do: run.completed_jobs / run.total_jobs * 100, else: 0 %>
                 <div class="bg-blue-500 h-1.5 rounded-full" style={"width: #{pct}%"}></div>
               </div>
-              <p class="text-xs text-gray-500 mt-0.5"><%= run.completed_jobs %>/<%= run.total_jobs %> jobs</p>
+              <p class="text-xs text-gray-500 mt-0.5"><%= run.completed_jobs %>/<%= run.total_jobs %> ops</p>
             </div>
           <% end %>
         </div>
@@ -613,7 +613,7 @@ defmodule GiTF.Web.Live.Dashboard do
             <%= if @selected_job[:status] in ["failed"] do %>
               <button phx-click="retry_job" phx-value-id={@selected_job[:id]} class="text-xs px-3 py-1 rounded bg-yellow-700 hover:bg-yellow-600 text-white font-bold">Retry</button>
             <% end %>
-            <button phx-click="kill_job" phx-value-id={@selected_job[:id]} data-confirm="Kill this job and clean up its ghost/cell?" class="text-xs px-3 py-1 rounded bg-red-700 hover:bg-red-600 text-white font-bold">Kill</button>
+            <button phx-click="kill_job" phx-value-id={@selected_job[:id]} data-confirm="Kill this op and clean up its ghost/shell?" class="text-xs px-3 py-1 rounded bg-red-700 hover:bg-red-600 text-white font-bold">Kill</button>
             <button phx-click="close_job_detail" class="text-gray-400 hover:text-white text-sm px-2 py-1 rounded hover:bg-gray-600">✕</button>
           </div>
         </div>
@@ -638,7 +638,7 @@ defmodule GiTF.Web.Live.Dashboard do
           <div class="grid grid-cols-2 md:grid-cols-4 gap-4 text-sm shrink-0">
             <div>
               <span class="text-gray-500 block text-xs uppercase">Type</span>
-              <span class="text-gray-300"><%= @selected_job[:job_type] || "—" %></span>
+              <span class="text-gray-300"><%= @selected_job[:op_type] || "—" %></span>
             </div>
             <div>
               <span class="text-gray-500 block text-xs uppercase">Complexity</span>
@@ -658,7 +658,7 @@ defmodule GiTF.Web.Live.Dashboard do
             </div>
             <div>
               <span class="text-gray-500 block text-xs uppercase">Quest</span>
-              <span class="text-gray-300 font-mono text-xs"><%= @selected_job[:quest_id] || "—" %></span>
+              <span class="text-gray-300 font-mono text-xs"><%= @selected_job[:mission_id] || "—" %></span>
             </div>
             <div>
               <span class="text-gray-500 block text-xs uppercase">Verification</span>
@@ -701,10 +701,10 @@ defmodule GiTF.Web.Live.Dashboard do
             </div>
           <% end %>
 
-          <!-- Scout Findings -->
+          <!-- Recon Findings -->
           <%= if @selected_job[:scout_findings] do %>
             <details class="shrink-0">
-              <summary class="text-gray-500 text-xs uppercase cursor-pointer hover:text-gray-300">Scout Findings</summary>
+              <summary class="text-gray-500 text-xs uppercase cursor-pointer hover:text-gray-300">Recon Findings</summary>
               <div class="bg-gray-900 rounded p-3 mt-1 whitespace-pre-wrap font-mono text-xs text-gray-300 max-h-48 overflow-y-auto hive-scrollbar">
                 <%= if is_binary(@selected_job[:scout_findings]), do: @selected_job[:scout_findings], else: inspect(@selected_job[:scout_findings], pretty: true, limit: :infinity) %>
               </div>
@@ -742,9 +742,9 @@ defmodule GiTF.Web.Live.Dashboard do
       </div>
     <% else %>
       <%= if @selected_quest do %>
-        <% quest_jobs = Enum.filter(@jobs, fn j -> j[:quest_id] == @selected_quest[:id] end) %>
-        <% budget_info = Enum.find(@budget_status, &(&1.quest_id == @selected_quest[:id])) %>
-        <% active_run = Enum.find(@runs, &(&1.quest_id == @selected_quest[:id])) %>
+        <% quest_jobs = Enum.filter(@ops, fn j -> j[:mission_id] == @selected_quest[:id] end) %>
+        <% budget_info = Enum.find(@budget_status, &(&1.mission_id == @selected_quest[:id])) %>
+        <% active_run = Enum.find(@runs, &(&1.mission_id == @selected_quest[:id])) %>
         <div class="bg-gray-800 rounded-lg shadow border border-gray-700 h-full flex flex-col">
           <div class="bg-gray-700 px-4 py-2 border-b border-gray-600 flex justify-between items-center shrink-0">
             <h3 class="font-bold">
@@ -753,7 +753,7 @@ defmodule GiTF.Web.Live.Dashboard do
             </h3>
             <div class="flex items-center gap-2">
               <button phx-click="view_quest_timeline" phx-value-id={@selected_quest[:id]} class="text-xs px-3 py-1 rounded bg-gray-600 hover:bg-gray-500 text-white">Timeline</button>
-              <button phx-click="kill_quest" phx-value-id={@selected_quest[:id]} data-confirm="Kill this quest and all its jobs?" class="text-xs px-3 py-1 rounded bg-red-700 hover:bg-red-600 text-white font-bold">Kill</button>
+              <button phx-click="kill_quest" phx-value-id={@selected_quest[:id]} data-confirm="Kill this mission and all its ops?" class="text-xs px-3 py-1 rounded bg-red-700 hover:bg-red-600 text-white font-bold">Kill</button>
               <button phx-click="select_quest" phx-value-id={@selected_quest[:id]} class="text-gray-400 hover:text-white text-sm px-2 py-1 rounded hover:bg-gray-600">✕</button>
             </div>
           </div>
@@ -774,7 +774,7 @@ defmodule GiTF.Web.Live.Dashboard do
               </div>
               <div>
                 <span class="text-gray-500 block text-xs uppercase">Comb</span>
-                <span class="text-gray-300 font-mono text-xs"><%= @selected_quest[:comb_id] || "—" %></span>
+                <span class="text-gray-300 font-mono text-xs"><%= @selected_quest[:sector_id] || "—" %></span>
               </div>
             </div>
 
@@ -805,7 +805,7 @@ defmodule GiTF.Web.Live.Dashboard do
                     <% run_pct = if active_run.total_jobs > 0, do: active_run.completed_jobs / active_run.total_jobs * 100, else: 0 %>
                     <div class="bg-blue-500 h-1.5 rounded-full" style={"width: #{run_pct}%"}></div>
                   </div>
-                  <span class="text-xs text-gray-400 font-mono shrink-0"><%= active_run.completed_jobs %>/<%= active_run.total_jobs %> jobs</span>
+                  <span class="text-xs text-gray-400 font-mono shrink-0"><%= active_run.completed_jobs %>/<%= active_run.total_jobs %> ops</span>
                 </div>
               </div>
             <% end %>
@@ -825,7 +825,7 @@ defmodule GiTF.Web.Live.Dashboard do
                   </div>
                 <% end %>
                 <%= if Enum.empty?(quest_jobs) do %>
-                  <p class="text-gray-500 text-sm italic">No jobs for this quest</p>
+                  <p class="text-gray-500 text-sm italic">No ops for this mission</p>
                 <% end %>
               </div>
             </div>
@@ -851,7 +851,7 @@ defmodule GiTF.Web.Live.Dashboard do
         <!-- Empty state -->
         <div class="bg-gray-800 rounded-lg shadow border border-gray-700 h-full flex items-center justify-center">
           <div class="text-center text-gray-500 py-20">
-            <p class="text-lg mb-2">Select a quest or job</p>
+            <p class="text-lg mb-2">Select a mission or op</p>
             <p class="text-sm">Click any item in the sidebar</p>
           </div>
         </div>
@@ -864,12 +864,12 @@ defmodule GiTF.Web.Live.Dashboard do
 
   defp render_pipeline_tab(assigns) do
     pipeline_jobs =
-      assigns.jobs
+      assigns.ops
       |> Enum.reject(&(&1[:status] == "done" && &1[:merged_at]))
       |> Enum.sort_by(&(&1[:status] || ""), :asc)
-      |> then(fn jobs ->
-        active = Enum.reject(jobs, &(&1[:status] == "done"))
-        done = Enum.filter(jobs, &(&1[:status] == "done")) |> Enum.take(10)
+      |> then(fn ops ->
+        active = Enum.reject(ops, &(&1[:status] == "done"))
+        done = Enum.filter(ops, &(&1[:status] == "done")) |> Enum.take(10)
         active ++ done
       end)
 
@@ -885,22 +885,22 @@ defmodule GiTF.Web.Live.Dashboard do
           <thead class="text-xs text-gray-400 uppercase bg-gray-900 sticky top-0">
             <tr>
               <th class="px-3 py-2 text-left">Job</th>
-              <th class="px-3 py-2 text-center">Scout</th>
+              <th class="px-3 py-2 text-center">Recon</th>
               <th class="px-3 py-2 text-center">Triage</th>
               <th class="px-3 py-2 text-center">Bee</th>
-              <th class="px-3 py-2 text-center">Drone</th>
+              <th class="px-3 py-2 text-center">Tachikoma</th>
               <th class="px-3 py-2 text-center">Merge</th>
             </tr>
           </thead>
           <tbody>
             <%= if Enum.empty?(@pipeline_jobs) do %>
-              <tr><td colspan="6" class="px-3 py-8 text-center text-gray-500 italic">No jobs in pipeline</td></tr>
+              <tr><td colspan="6" class="px-3 py-8 text-center text-gray-500 italic">No ops in pipeline</td></tr>
             <% end %>
-            <%= for job <- @pipeline_jobs do %>
-              <% stages = job_pipeline_stages(job, @merge_queue) %>
-              <tr class="border-b border-gray-700/50 hover:bg-gray-700/30 cursor-pointer" phx-click="select_job" phx-value-id={job[:id]}>
-                <td class="px-3 py-2 text-gray-300 truncate max-w-[200px]" title={job[:title]}>
-                  <%= String.slice(job[:title] || "untitled", 0, 35) %>
+            <%= for op <- @pipeline_jobs do %>
+              <% stages = job_pipeline_stages(op, @merge_queue) %>
+              <tr class="border-b border-gray-700/50 hover:bg-gray-700/30 cursor-pointer" phx-click="select_job" phx-value-id={op[:id]}>
+                <td class="px-3 py-2 text-gray-300 truncate max-w-[200px]" title={op[:title]}>
+                  <%= String.slice(op[:title] || "untitled", 0, 35) %>
                 </td>
                 <%= for {_label, status} <- stages do %>
                   <td class="px-3 py-2 text-center">
@@ -964,10 +964,10 @@ defmodule GiTF.Web.Live.Dashboard do
             <div class="bg-gray-900 rounded p-3 border border-blue-800 flex items-center gap-3">
               <div class="w-2 h-2 rounded-full bg-blue-500 animate-pulse"></div>
               <div>
-                <span class="text-gray-300 font-mono text-sm"><%= short_id(active[:job_id] || active.job_id) %></span>
-                <span class="text-gray-500 text-xs ml-2">cell: <%= active[:cell_id] || active.cell_id %></span>
+                <span class="text-gray-300 font-mono text-sm"><%= short_id(active[:op_id] || active.op_id) %></span>
+                <span class="text-gray-500 text-xs ml-2">shell: <%= active[:shell_id] || active.shell_id %></span>
               </div>
-              <button phx-click="select_job" phx-value-id={active[:job_id] || active.job_id} class="ml-auto text-xs text-blue-400 hover:text-blue-300">View</button>
+              <button phx-click="select_job" phx-value-id={active[:op_id] || active.op_id} class="ml-auto text-xs text-blue-400 hover:text-blue-300">View</button>
             </div>
           <% else %>
             <p class="text-gray-500 text-sm italic">No active merge</p>
@@ -981,12 +981,12 @@ defmodule GiTF.Web.Live.Dashboard do
             <p class="text-gray-500 text-sm italic">Queue empty</p>
           <% end %>
           <div class="space-y-1">
-            <%= for {{job_id, cell_id}, idx} <- Enum.with_index(@merge_queue[:pending] || []) do %>
+            <%= for {{op_id, shell_id}, idx} <- Enum.with_index(@merge_queue[:pending] || []) do %>
               <div class="bg-gray-900 rounded px-3 py-2 flex items-center gap-3 text-sm">
                 <span class="text-gray-500 font-mono text-xs w-6"><%= idx + 1 %></span>
-                <span class="text-gray-300 font-mono"><%= short_id(job_id) %></span>
-                <span class="text-gray-500 text-xs">cell: <%= cell_id %></span>
-                <button phx-click="select_job" phx-value-id={job_id} class="ml-auto text-xs text-blue-400 hover:text-blue-300">View</button>
+                <span class="text-gray-300 font-mono"><%= short_id(op_id) %></span>
+                <span class="text-gray-500 text-xs">shell: <%= shell_id %></span>
+                <button phx-click="select_job" phx-value-id={op_id} class="ml-auto text-xs text-blue-400 hover:text-blue-300">View</button>
               </div>
             <% end %>
           </div>
@@ -1000,12 +1000,12 @@ defmodule GiTF.Web.Live.Dashboard do
           <% end %>
           <div class="space-y-1">
             <%= for item <- @merge_queue[:completed] || [] do %>
-              <% {job_id, outcome, timestamp} = item %>
+              <% {op_id, outcome, timestamp} = item %>
               <div class="bg-gray-900 rounded px-3 py-2 flex items-center gap-3 text-sm">
-                <span class="text-gray-300 font-mono"><%= short_id(job_id) %></span>
+                <span class="text-gray-300 font-mono"><%= short_id(op_id) %></span>
                 <span class={"px-1.5 py-0.5 rounded text-xs font-mono #{merge_outcome_badge(outcome)}"}><%= format_outcome(outcome) %></span>
                 <span class="text-gray-500 text-xs ml-auto"><%= Calendar.strftime(timestamp, "%H:%M:%S") %></span>
-                <button phx-click="select_job" phx-value-id={job_id} class="text-xs text-blue-400 hover:text-blue-300">View</button>
+                <button phx-click="select_job" phx-value-id={op_id} class="text-xs text-blue-400 hover:text-blue-300">View</button>
               </div>
             <% end %>
           </div>
@@ -1022,7 +1022,7 @@ defmodule GiTF.Web.Live.Dashboard do
     <div class="bg-gray-800 rounded-lg shadow border border-gray-700 h-full overflow-y-auto hive-scrollbar">
       <div class="p-4 space-y-3">
         <%= if Enum.empty?(@agent_identities) do %>
-          <p class="text-gray-500 text-sm italic text-center py-8">No model data yet. Models appear after drone scoring.</p>
+          <p class="text-gray-500 text-sm italic text-center py-8">No model data yet. Models appear after tachikoma scoring.</p>
         <% end %>
         <%= for identity <- @agent_identities do %>
           <% pass_rate = if identity.total_jobs > 0, do: identity.total_passed / identity.total_jobs * 100, else: 0 %>
@@ -1035,7 +1035,7 @@ defmodule GiTF.Web.Live.Dashboard do
               <div class="flex justify-between items-center mb-2">
                 <span class="text-white font-semibold"><%= identity.model %></span>
                 <div class="flex items-center gap-3 text-xs text-gray-400">
-                  <span><%= identity.total_jobs %> jobs</span>
+                  <span><%= identity.total_jobs %> ops</span>
                   <span class={"font-mono #{if pass_rate >= 80, do: "text-green-400", else: if(pass_rate >= 60, do: "text-yellow-400", else: "text-red-400")}"}><%= Float.round(pass_rate, 0) %>%</span>
                 </div>
               </div>
@@ -1074,7 +1074,7 @@ defmodule GiTF.Web.Live.Dashboard do
                 <div class="grid grid-cols-2 gap-4 text-xs">
                   <div>
                     <span class="text-gray-500 uppercase block mb-1">Best Job Types</span>
-                    <%= for jt <- identity.best_job_types || [] do %>
+                    <%= for jt <- identity.best_op_types || [] do %>
                       <div class="flex justify-between text-gray-300 mb-0.5">
                         <span><%= jt.type %></span>
                         <span class="text-green-400 font-mono"><%= Float.round(jt.pass_rate * 100, 0) %>% (<%= jt.count %>)</span>
@@ -1083,7 +1083,7 @@ defmodule GiTF.Web.Live.Dashboard do
                   </div>
                   <div>
                     <span class="text-gray-500 uppercase block mb-1">Worst Job Types</span>
-                    <%= for jt <- identity.worst_job_types || [] do %>
+                    <%= for jt <- identity.worst_op_types || [] do %>
                       <div class="flex justify-between text-gray-300 mb-0.5">
                         <span><%= jt.type %></span>
                         <span class="text-red-400 font-mono"><%= Float.round(jt.pass_rate * 100, 0) %>% (<%= jt.count %>)</span>
@@ -1099,7 +1099,7 @@ defmodule GiTF.Web.Live.Dashboard do
                     <%= for rj <- Enum.take(identity.recent_jobs || [], 10) do %>
                       <div class="flex items-center gap-2 text-gray-400">
                         <span class={"w-1.5 h-1.5 rounded-full #{if rj.passed, do: "bg-green-500", else: "bg-red-500"}"}></span>
-                        <span class="font-mono"><%= short_id(rj.job_id) %></span>
+                        <span class="font-mono"><%= short_id(rj.op_id) %></span>
                         <span><%= rj.type %></span>
                         <span class="ml-auto text-gray-500"><%= if rj[:timestamp], do: Calendar.strftime(rj.timestamp, "%m/%d %H:%M"), else: "" %></span>
                       </div>
@@ -1144,7 +1144,7 @@ defmodule GiTF.Web.Live.Dashboard do
       <div class="flex items-center gap-1 text-gray-400">
         <span>MQ: <%= length(@merge_queue[:pending] || []) %> pending</span>
         <%= if active = @merge_queue[:active] do %>
-          <span class="text-blue-400">| merging <%= short_id(active[:job_id] || active.job_id) %></span>
+          <span class="text-blue-400">| merging <%= short_id(active[:op_id] || active.op_id) %></span>
         <% end %>
       </div>
     </div>
@@ -1153,22 +1153,22 @@ defmodule GiTF.Web.Live.Dashboard do
 
   # ── Helpers ────────────────────────────────────────────────────────────
 
-  defp job_pipeline_stages(job, merge_queue) do
-    scout =
+  defp job_pipeline_stages(op, merge_queue) do
+    recon =
       cond do
-        job[:skip_scout] == true -> :skip
-        job[:scout_findings] != nil -> :done
+        op[:skip_scout] == true -> :skip
+        op[:scout_findings] != nil -> :done
         true -> :skip
       end
 
     triage =
-      case job[:complexity] do
+      case op[:complexity] do
         nil -> :skip
         _ -> :done
       end
 
     ghost =
-      case job[:status] do
+      case op[:status] do
         "pending" -> :pending
         "assigned" -> :pending
         "running" -> :active
@@ -1177,37 +1177,37 @@ defmodule GiTF.Web.Live.Dashboard do
         _ -> :pending
       end
 
-    drone =
+    tachikoma =
       cond do
-        job[:skip_verification] == true -> :skip
-        job[:verification_status] == "passed" -> :done
-        job[:verification_status] == "failed" -> :failed
-        job[:verification_status] == "pending" -> :pending
-        job[:status] in ["done", "failed"] && !job[:skip_verification] -> :pending
+        op[:skip_verification] == true -> :skip
+        op[:verification_status] == "passed" -> :done
+        op[:verification_status] == "failed" -> :failed
+        op[:verification_status] == "pending" -> :pending
+        op[:status] in ["done", "failed"] && !op[:skip_verification] -> :pending
         true -> :skip
       end
 
     merge =
       cond do
-        job[:merged_at] != nil -> :done
-        merge_active?(merge_queue, job[:id]) -> :active
-        merge_pending?(merge_queue, job[:id]) -> :pending
-        merge_completed?(merge_queue, job[:id]) -> :done
-        ghost == :done && drone in [:done, :skip] -> :pending
+        op[:merged_at] != nil -> :done
+        merge_active?(merge_queue, op[:id]) -> :active
+        merge_pending?(merge_queue, op[:id]) -> :pending
+        merge_completed?(merge_queue, op[:id]) -> :done
+        ghost == :done && tachikoma in [:done, :skip] -> :pending
         true -> :skip
       end
 
-    [{"Scout", scout}, {"Triage", triage}, {"Bee", ghost}, {"Drone", drone}, {"Merge", merge}]
+    [{"Recon", recon}, {"Triage", triage}, {"Bee", ghost}, {"Tachikoma", tachikoma}, {"Merge", merge}]
   end
 
-  defp merge_active?(%{active: nil}, _job_id), do: false
-  defp merge_active?(%{active: active}, job_id), do: (active[:job_id] || active.job_id) == job_id
+  defp merge_active?(%{active: nil}, _op_id), do: false
+  defp merge_active?(%{active: active}, op_id), do: (active[:op_id] || active.op_id) == op_id
   defp merge_active?(_, _), do: false
 
-  defp merge_pending?(%{pending: pending}, job_id), do: Enum.any?(pending, fn {jid, _} -> jid == job_id end)
+  defp merge_pending?(%{pending: pending}, op_id), do: Enum.any?(pending, fn {jid, _} -> jid == op_id end)
   defp merge_pending?(_, _), do: false
 
-  defp merge_completed?(%{completed: completed}, job_id), do: Enum.any?(completed, fn {jid, _, _} -> jid == job_id end)
+  defp merge_completed?(%{completed: completed}, op_id), do: Enum.any?(completed, fn {jid, _, _} -> jid == op_id end)
   defp merge_completed?(_, _), do: false
 
   defp stage_badge(:done), do: "bg-green-900 text-green-300"

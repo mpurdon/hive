@@ -1,11 +1,11 @@
-defmodule GiTF.Drone.Scoring do
+defmodule GiTF.Tachikoma.Scoring do
   @moduledoc """
-  Model performance scoring after job verification.
+  Model performance scoring after op verification.
 
   Transforms verification results into structured scores that track how
-  well each model performs across job types. Scores are append-only records
+  well each model performs across op types. Scores are append-only records
   in the Store, enabling aggregate analysis of model strengths, weaknesses,
-  and job type affinities over time.
+  and op type affinities over time.
 
   This is a pure context module -- data in, scores out, stored in the Store.
   """
@@ -17,30 +17,30 @@ defmodule GiTF.Drone.Scoring do
   # -- Public API ------------------------------------------------------------
 
   @doc """
-  Scores a model's performance on a job based on verification results.
+  Scores a model's performance on a op based on verification results.
 
-  Takes the job map and the verification result (from `GiTF.Verification.verify_job/1`).
+  Takes the op map and the verification result (from `GiTF.Verification.verify_job/1`).
   Returns a score map with correctness, completeness, code quality, efficiency,
-  strengths, weaknesses, and job type fit assessment.
+  strengths, weaknesses, and op type fit assessment.
   """
   @spec score(map(), map()) :: map()
-  def score(job, verification_result) do
+  def score(op, verification_result) do
     passed = verification_passed?(verification_result)
     base_scores = base_scores(passed)
     quality_scores = extract_quality_scores(verification_result)
     scores = merge_scores(base_scores, quality_scores)
     {strengths, weaknesses} = analyze_traits(verification_result, passed)
-    fit = assess_job_type_fit(passed, scores)
+    fit = assess_op_type_fit(passed, scores)
 
     %{
-      model: Map.get(job, :assigned_model, "unknown"),
-      job_id: job.id,
-      job_type: Map.get(job, :job_type, "general"),
+      model: Map.get(op, :assigned_model, "unknown"),
+      op_id: op.id,
+      op_type: Map.get(op, :op_type, "general"),
       passed: passed,
       scores: scores,
       strengths: strengths,
       weaknesses: weaknesses,
-      job_type_fit: fit
+      op_type_fit: fit
     }
   end
 
@@ -57,8 +57,8 @@ defmodule GiTF.Drone.Scoring do
   @doc """
   Aggregates all scores for a given model.
 
-  Returns a summary with total jobs, pass rate, average scores,
-  most common strengths/weaknesses, and best/worst job types.
+  Returns a summary with total ops, pass rate, average scores,
+  most common strengths/weaknesses, and best/worst op types.
   """
   @spec aggregate(String.t()) :: map()
   def aggregate(model) when is_binary(model) do
@@ -67,14 +67,14 @@ defmodule GiTF.Drone.Scoring do
   end
 
   @doc """
-  Aggregates scores for a given model filtered to a specific job type.
+  Aggregates scores for a given model filtered to a specific op type.
   """
-  @spec aggregate_by_job_type(String.t(), String.t()) :: map()
-  def aggregate_by_job_type(model, job_type)
-      when is_binary(model) and is_binary(job_type) do
+  @spec aggregate_by_op_type(String.t(), String.t()) :: map()
+  def aggregate_by_op_type(model, op_type)
+      when is_binary(model) and is_binary(op_type) do
     scores =
       Store.filter(@collection, fn s ->
-        s.model == model and s.job_type == job_type
+        s.model == model and s.op_type == op_type
       end)
 
     build_aggregate(model, scores)
@@ -183,7 +183,7 @@ defmodule GiTF.Drone.Scoring do
 
   defp maybe_add_weakness(weaknesses, _score, _threshold, _weakness), do: weaknesses
 
-  defp assess_job_type_fit(passed, scores) do
+  defp assess_op_type_fit(passed, scores) do
     avg =
       scores
       |> Map.values()
@@ -210,8 +210,8 @@ defmodule GiTF.Drone.Scoring do
       avg_scores: %{correctness: 0.0, completeness: 0.0, code_quality: 0.0, efficiency: 0.0},
       strengths: [],
       weaknesses: [],
-      best_job_types: [],
-      worst_job_types: []
+      best_op_types: [],
+      worst_op_types: []
     }
   end
 
@@ -223,7 +223,7 @@ defmodule GiTF.Drone.Scoring do
     avg_scores = average_scores(scores)
     strengths = tally_traits(scores, :strengths)
     weaknesses = tally_traits(scores, :weaknesses)
-    {best, worst} = rank_job_types(scores)
+    {best, worst} = rank_op_types(scores)
 
     %{
       model: model,
@@ -232,8 +232,8 @@ defmodule GiTF.Drone.Scoring do
       avg_scores: avg_scores,
       strengths: strengths,
       weaknesses: weaknesses,
-      best_job_types: best,
-      worst_job_types: worst
+      best_op_types: best,
+      worst_op_types: worst
     }
   end
 
@@ -260,10 +260,10 @@ defmodule GiTF.Drone.Scoring do
     |> Enum.take(10)
   end
 
-  defp rank_job_types(scores) do
+  defp rank_op_types(scores) do
     by_type =
       scores
-      |> Enum.group_by(& &1.job_type)
+      |> Enum.group_by(& &1.op_type)
       |> Enum.map(fn {type, type_scores} ->
         total = length(type_scores)
         passed = Enum.count(type_scores, & &1.passed)

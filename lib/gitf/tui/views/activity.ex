@@ -1,6 +1,6 @@
 defmodule GiTF.TUI.Views.Activity do
   @moduledoc """
-  Renders the activity panel with quests, phase progress, their ghosts,
+  Renders the activity panel with missions, phase progress, their ghosts,
   budget info, checkpoints, and active runs.
   """
   import Ratatouille.View
@@ -9,31 +9,31 @@ defmodule GiTF.TUI.Views.Activity do
 
   def render(model) do
     %{activity: activity} = model
-    bees_by_quest = Enum.group_by(activity.ghosts, fn b -> b[:quest_id] end)
+    bees_by_quest = Enum.group_by(activity.ghosts, fn b -> b[:mission_id] end)
     budget_status = model[:budget_status] || []
     checkpoints = model[:checkpoints] || %{}
     runs = model[:runs] || []
 
     panel title: "Activity [F1]", height: :fill do
-      if Enum.empty?(activity.quests) and Enum.empty?(activity.ghosts) do
+      if Enum.empty?(activity.missions) and Enum.empty?(activity.ghosts) do
         label(content: "Idle")
       else
-        render_quests(activity.quests, bees_by_quest, activity.bee_logs, budget_status, checkpoints) ++
+        render_quests(activity.missions, bees_by_quest, activity.bee_logs, budget_status, checkpoints) ++
           render_orphan_bees(bees_by_quest, activity.bee_logs, checkpoints) ++
           render_runs(runs)
       end
     end
   end
 
-  defp render_quests(quests, bees_by_quest, bee_logs, budget_status, checkpoints) do
-    Enum.flat_map(quests, fn quest ->
-      quest_id = quest[:id]
-      quest_bees = Map.get(bees_by_quest, quest_id, [])
-      current_phase = quest[:current_phase] || quest[:status]
-      name = to_s(quest[:name] || quest[:goal] || quest[:title])
+  defp render_quests(missions, bees_by_quest, bee_logs, budget_status, checkpoints) do
+    Enum.flat_map(missions, fn mission ->
+      mission_id = mission[:id]
+      quest_bees = Map.get(bees_by_quest, mission_id, [])
+      current_phase = mission[:current_phase] || mission[:status]
+      name = to_s(mission[:name] || mission[:goal] || mission[:title])
       short_name = String.slice(name, 0, 30)
-      artifacts = quest[:artifacts] || %{}
-      budget = Enum.find(budget_status, &(&1.quest_id == quest_id))
+      artifacts = mission[:artifacts] || %{}
+      budget = Enum.find(budget_status, &(&1.mission_id == mission_id))
 
       {budget_text, budget_color} = format_budget(budget)
 
@@ -161,7 +161,7 @@ defmodule GiTF.TUI.Views.Activity do
 
         [
           label do
-            text(content: " #{String.slice(run.quest_id, 0, 12)} ", color: :white)
+            text(content: " #{String.slice(run.mission_id, 0, 12)} ", color: :white)
             text(content: "[#{bar_str}] ", color: :blue)
             text(content: "#{run.completed_jobs}/#{run.total_jobs}", color: :cyan)
           end

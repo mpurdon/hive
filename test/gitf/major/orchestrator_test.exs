@@ -11,9 +11,9 @@ defmodule GiTF.Major.OrchestratorTest do
   setup do
     GiTF.Test.StoreHelper.ensure_infrastructure()
 
-    # Ensure CombSupervisor is running (needed for ghost spawning)
-    unless Process.whereis(GiTF.CombSupervisor) do
-      DynamicSupervisor.start_link(strategy: :one_for_one, name: GiTF.CombSupervisor)
+    # Ensure SectorSupervisor is running (needed for ghost spawning)
+    unless Process.whereis(GiTF.SectorSupervisor) do
+      DynamicSupervisor.start_link(strategy: :one_for_one, name: GiTF.SectorSupervisor)
     end
 
     # Force API mode for mocking
@@ -35,12 +35,12 @@ defmodule GiTF.Major.OrchestratorTest do
       Application.put_env(:gitf, :llm_client, GiTF.Runtime.LLMClient.Default)
     end)
 
-    # Create test comb and quest
-    {:ok, comb} = Store.insert(:combs, %{name: "test-comb", path: "/tmp/test"})
-    {:ok, quest} = Store.insert(:quests, %{
-      name: "test-quest",
+    # Create test sector and mission
+    {:ok, sector} = Store.insert(:sectors, %{name: "test-sector", path: "/tmp/test"})
+    {:ok, mission} = Store.insert(:missions, %{
+      name: "test-mission",
       goal: "Build a test feature",
-      comb_id: comb.id,
+      sector_id: sector.id,
       status: "pending",
       current_phase: "pending",
       artifacts: %{},
@@ -49,164 +49,164 @@ defmodule GiTF.Major.OrchestratorTest do
       implementation_plan: nil
     })
 
-    %{quest: quest, comb: comb}
+    %{mission: mission, sector: sector}
   end
 
   describe "start_quest/1" do
-    test "transitions quest to research phase", %{quest: quest} do
+    test "transitions mission to research phase", %{mission: mission} do
       # We'll test the phase transition part directly
-      {:ok, _} = GiTF.Quests.transition_phase(quest.id, "research", "Quest started")
+      {:ok, _} = GiTF.Missions.transition_phase(mission.id, "research", "Quest started")
 
       # Verify phase transition was recorded
-      transitions = GiTF.Quests.get_phase_transitions(quest.id)
+      transitions = GiTF.Missions.get_phase_transitions(mission.id)
       assert length(transitions) == 1
       assert hd(transitions).to_phase == "research"
     end
 
-    test "validates quest is ready before starting", %{quest: quest} do
-      # Set quest to completed status (not allowed)
-      updated = Map.put(quest, :status, "completed")
-      Store.put(:quests, updated)
+    test "validates mission is ready before starting", %{mission: mission} do
+      # Set mission to completed status (not allowed)
+      updated = Map.put(mission, :status, "completed")
+      Store.put(:missions, updated)
 
-      {:error, :quest_not_pending} = Orchestrator.start_quest(quest.id)
+      {:error, :quest_not_pending} = Orchestrator.start_quest(mission.id)
     end
 
-    test "requires comb_id to be set", %{quest: quest} do
-      # Remove comb_id
-      updated = Map.put(quest, :comb_id, nil)
-      Store.put(:quests, updated)
+    test "requires sector_id to be set", %{mission: mission} do
+      # Remove sector_id
+      updated = Map.put(mission, :sector_id, nil)
+      Store.put(:missions, updated)
 
-      {:error, :no_comb_assigned} = Orchestrator.start_quest(quest.id)
+      {:error, :no_comb_assigned} = Orchestrator.start_quest(mission.id)
     end
 
-    test "returns error for non-existent quest" do
+    test "returns error for non-existent mission" do
       {:error, :not_found} = Orchestrator.start_quest("non-existent")
     end
   end
 
   describe "get_quest_status/1" do
-    test "returns comprehensive quest status", %{quest: quest} do
+    test "returns comprehensive mission status", %{mission: mission} do
       # Add some phase transitions
-      {:ok, _} = GiTF.Quests.transition_phase(quest.id, "research", "Started")
-      {:ok, _} = GiTF.Quests.transition_phase(quest.id, "planning", "Research done")
+      {:ok, _} = GiTF.Missions.transition_phase(mission.id, "research", "Started")
+      {:ok, _} = GiTF.Missions.transition_phase(mission.id, "planning", "Research done")
 
-      {:ok, status} = Orchestrator.get_quest_status(quest.id)
+      {:ok, status} = Orchestrator.get_quest_status(mission.id)
 
-      assert status.quest.id == quest.id
+      assert status.mission.id == mission.id
       assert status.current_phase == "planning"
       assert status.jobs_created == false
       assert length(status.phase_history) == 2
     end
 
-    test "detects completed phases from artifacts", %{quest: quest} do
+    test "detects completed phases from artifacts", %{mission: mission} do
       # Store a research artifact
-      GiTF.Quests.store_artifact(quest.id, "research", %{"architecture" => "OTP app"})
+      GiTF.Missions.store_artifact(mission.id, "research", %{"architecture" => "OTP app"})
 
-      {:ok, status} = Orchestrator.get_quest_status(quest.id)
+      {:ok, status} = Orchestrator.get_quest_status(mission.id)
       assert "research" in status.completed_phases
     end
 
-    test "detects when jobs are created", %{quest: quest} do
-      # Create a job for the quest
-      {:ok, _job} = GiTF.Jobs.create(%{
-        title: "Test job",
-        quest_id: quest.id,
-        comb_id: quest.comb_id
+    test "detects when ops are created", %{mission: mission} do
+      # Create a op for the mission
+      {:ok, _job} = GiTF.Ops.create(%{
+        title: "Test op",
+        mission_id: mission.id,
+        sector_id: mission.sector_id
       })
 
-      {:ok, status} = Orchestrator.get_quest_status(quest.id)
+      {:ok, status} = Orchestrator.get_quest_status(mission.id)
       assert status.jobs_created == true
     end
 
-    test "returns error for non-existent quest" do
+    test "returns error for non-existent mission" do
       {:error, :not_found} = Orchestrator.get_quest_status("non-existent")
     end
   end
 
   describe "advance_quest/1" do
-    test "advances from research to requirements when research artifact exists", %{quest: quest} do
-      # Set up quest in research phase with artifact
-      quest_record = Store.get(:quests, quest.id)
+    test "advances from research to requirements when research artifact exists", %{mission: mission} do
+      # Set up mission in research phase with artifact
+      quest_record = Store.get(:missions, mission.id)
       updated = Map.put(quest_record, :current_phase, "research")
-      Store.put(:quests, updated)
+      Store.put(:missions, updated)
 
-      GiTF.Quests.store_artifact(quest.id, "research", %{
+      GiTF.Missions.store_artifact(mission.id, "research", %{
         "architecture" => "OTP app",
         "key_files" => ["lib/app.ex"],
         "patterns" => [],
         "tech_stack" => ["elixir"]
       })
 
-      {:ok, phase} = Orchestrator.advance_quest(quest.id)
+      {:ok, phase} = Orchestrator.advance_quest(mission.id)
       assert phase == "requirements"
     end
 
-    test "stays in research when no artifact exists", %{quest: quest} do
-      quest_record = Store.get(:quests, quest.id)
+    test "stays in research when no artifact exists", %{mission: mission} do
+      quest_record = Store.get(:missions, mission.id)
       updated = Map.put(quest_record, :current_phase, "research")
-      Store.put(:quests, updated)
+      Store.put(:missions, updated)
 
-      {:ok, phase} = Orchestrator.advance_quest(quest.id)
+      {:ok, phase} = Orchestrator.advance_quest(mission.id)
       assert phase == "research"
     end
 
-    test "completes quest when all implementation jobs are done", %{quest: quest} do
-      # Create completed non-phase job
-      {:ok, _job} = GiTF.Jobs.create(%{
-        title: "Test job",
-        quest_id: quest.id,
-        comb_id: quest.comb_id,
+    test "completes mission when all implementation ops are done", %{mission: mission} do
+      # Create completed non-phase op
+      {:ok, _job} = GiTF.Ops.create(%{
+        title: "Test op",
+        mission_id: mission.id,
+        sector_id: mission.sector_id,
         status: "done",
         phase_job: false
       })
 
-      # Set quest to implementation phase
-      quest_record = Store.get(:quests, quest.id)
+      # Set mission to implementation phase
+      quest_record = Store.get(:missions, mission.id)
       updated = Map.put(quest_record, :current_phase, "implementation")
-      Store.put(:quests, updated)
+      Store.put(:missions, updated)
 
-      {:ok, phase} = Orchestrator.advance_quest(quest.id)
+      {:ok, phase} = Orchestrator.advance_quest(mission.id)
       # Should advance to validation (not directly to completed)
       assert phase == "validation"
     end
 
-    test "stays in implementation when jobs are not complete", %{quest: quest} do
-      # Create pending job
-      {:ok, _job} = GiTF.Jobs.create(%{
-        title: "Test job",
-        quest_id: quest.id,
-        comb_id: quest.comb_id,
+    test "stays in implementation when ops are not complete", %{mission: mission} do
+      # Create pending op
+      {:ok, _job} = GiTF.Ops.create(%{
+        title: "Test op",
+        mission_id: mission.id,
+        sector_id: mission.sector_id,
         status: "pending",
         phase_job: false
       })
 
-      # Set quest to implementation phase
-      quest_record = Store.get(:quests, quest.id)
+      # Set mission to implementation phase
+      quest_record = Store.get(:missions, mission.id)
       updated = Map.put(quest_record, :current_phase, "implementation")
-      Store.put(:quests, updated)
+      Store.put(:missions, updated)
 
-      {:ok, phase} = Orchestrator.advance_quest(quest.id)
+      {:ok, phase} = Orchestrator.advance_quest(mission.id)
       assert phase == "implementation"
     end
 
-    test "handles review approval and advances to planning", %{quest: quest} do
-      quest_record = Store.get(:quests, quest.id)
+    test "handles review approval and advances to planning", %{mission: mission} do
+      quest_record = Store.get(:missions, mission.id)
       updated = Map.put(quest_record, :current_phase, "review")
-      Store.put(:quests, updated)
+      Store.put(:missions, updated)
 
       # Store approved review artifact
-      GiTF.Quests.store_artifact(quest.id, "review", %{
+      GiTF.Missions.store_artifact(mission.id, "review", %{
         "approved" => true,
         "coverage" => [],
         "issues" => [],
         "risk_assessment" => "Low risk"
       })
 
-      {:ok, phase} = Orchestrator.advance_quest(quest.id)
+      {:ok, phase} = Orchestrator.advance_quest(mission.id)
       assert phase == "planning"
     end
 
-    test "handles review rejection with redesign", %{quest: quest} do
+    test "handles review rejection with redesign", %{mission: mission} do
       # Expect call for expert discovery
       stub(GiTF.Runtime.LLMClient.Mock, :generate_text, fn _model, _messages, _opts ->
         {:ok, %ReqLLM.Response{
@@ -218,29 +218,29 @@ defmodule GiTF.Major.OrchestratorTest do
         }}
       end)
 
-      quest_record = Store.get(:quests, quest.id)
+      quest_record = Store.get(:missions, mission.id)
       updated = Map.put(quest_record, :current_phase, "review")
-      Store.put(:quests, updated)
+      Store.put(:missions, updated)
 
       # Store rejected review artifact
-      GiTF.Quests.store_artifact(quest.id, "review", %{
+      GiTF.Missions.store_artifact(mission.id, "review", %{
         "approved" => false,
         "coverage" => [],
         "issues" => [%{"severity" => "high", "description" => "Missing error handling"}],
         "risk_assessment" => "High risk"
       })
 
-      {:ok, phase} = Orchestrator.advance_quest(quest.id)
+      {:ok, phase} = Orchestrator.advance_quest(mission.id)
       assert phase == "design"
     end
 
-    test "returns current phase for unknown phases", %{quest: quest} do
-      # Set quest to unknown phase
-      quest_record = Store.get(:quests, quest.id)
+    test "returns current phase for unknown phases", %{mission: mission} do
+      # Set mission to unknown phase
+      quest_record = Store.get(:missions, mission.id)
       updated = Map.put(quest_record, :current_phase, "unknown")
-      Store.put(:quests, updated)
+      Store.put(:missions, updated)
 
-      {:ok, phase} = Orchestrator.advance_quest(quest.id)
+      {:ok, phase} = Orchestrator.advance_quest(mission.id)
       assert phase == "unknown"
     end
   end
@@ -259,18 +259,18 @@ defmodule GiTF.Major.OrchestratorTest do
   end
 
   describe "phase transitions" do
-    test "records phase transitions with reasons", %{quest: quest} do
+    test "records phase transitions with reasons", %{mission: mission} do
       # Clear ALL phase transitions to ensure clean state
-      for t <- Store.all(:quest_phase_transitions) do
-        Store.delete(:quest_phase_transitions, t.id)
+      for t <- Store.all(:mission_phase_transitions) do
+        Store.delete(:mission_phase_transitions, t.id)
       end
 
-      {:ok, _} = GiTF.Quests.transition_phase(quest.id, "research", "Quest started")
+      {:ok, _} = GiTF.Missions.transition_phase(mission.id, "research", "Quest started")
       # Brief pause between transitions
       Process.sleep(1)
-      {:ok, _} = GiTF.Quests.transition_phase(quest.id, "planning", "Research complete")
+      {:ok, _} = GiTF.Missions.transition_phase(mission.id, "planning", "Research complete")
 
-      transitions = GiTF.Quests.get_phase_transitions(quest.id)
+      transitions = GiTF.Missions.get_phase_transitions(mission.id)
       assert length(transitions) == 2
 
       # Both transitions should be present (order may vary when timestamps match)
@@ -285,10 +285,10 @@ defmodule GiTF.Major.OrchestratorTest do
       assert planning_t.reason == "Research complete"
     end
 
-    test "updates quest current_phase field", %{quest: quest} do
-      {:ok, _} = GiTF.Quests.transition_phase(quest.id, "research", "Started")
+    test "updates mission current_phase field", %{mission: mission} do
+      {:ok, _} = GiTF.Missions.transition_phase(mission.id, "research", "Started")
 
-      updated_quest = Store.get(:quests, quest.id)
+      updated_quest = Store.get(:missions, mission.id)
       assert updated_quest.current_phase == "research"
     end
   end

@@ -1,11 +1,11 @@
-defmodule GiTF.Scout do
+defmodule GiTF.Recon do
   @moduledoc """
-  Scouts are read-only ghosts that examine the codebase before implementation.
+  Recons are read-only ghosts that examine the codebase before implementation.
 
-  When triage flags a job as complex, a scout ghost is spawned first to
+  When triage flags a op as complex, a recon ghost is spawned first to
   analyze the codebase, identify relevant files, note patterns and risks,
   and produce structured findings. These findings are injected into the
-  parent job's description before the implementation ghost starts.
+  parent op's description before the implementation ghost starts.
 
   This is a pure context module -- no process state, just data transformations.
   """
@@ -19,26 +19,26 @@ defmodule GiTF.Scout do
   # -- Public API --------------------------------------------------------------
 
   @doc """
-  Returns true if triage says this job is complex and needs scouting.
+  Returns true if triage says this op is complex and needs scouting.
   """
   @spec should_scout?(map()) :: boolean()
-  def should_scout?(job) do
-    {complexity, _pipeline} = Triage.triage(job)
+  def should_scout?(op) do
+    {complexity, _pipeline} = Triage.triage(op)
     complexity == :complex
   end
 
   @doc """
-  Builds the prompt for a scout ghost.
+  Builds the prompt for a recon ghost.
 
-  Instructs the scout to examine the codebase relevant to the job,
+  Instructs the recon to examine the codebase relevant to the op,
   identify key files, note patterns/conventions, flag risks, assess
   complexity, and output structured markdown findings.
   """
   @spec build_scout_prompt(map()) :: String.t()
-  def build_scout_prompt(job) do
-    title = Map.get(job, :title, "")
-    description = Map.get(job, :description, "")
-    target_files = Map.get(job, :target_files, []) |> List.wrap()
+  def build_scout_prompt(op) do
+    title = Map.get(op, :title, "")
+    description = Map.get(op, :description, "")
+    target_files = Map.get(op, :target_files, []) |> List.wrap()
 
     target_section =
       if target_files != [] do
@@ -48,7 +48,7 @@ defmodule GiTF.Scout do
       end
 
     """
-    You are a Scout — a read-only analyst. Your job is to examine the codebase \
+    You are a Recon — a read-only analyst. Your op is to examine the codebase \
     and produce a structured report for the implementation ghost that will follow you.
 
     DO NOT modify any files. Only read and analyze.
@@ -93,7 +93,7 @@ defmodule GiTF.Scout do
   end
 
   @doc """
-  Parses scout output markdown into a structured findings map.
+  Parses recon output markdown into a structured findings map.
 
   Extracts sections: relevant_files, patterns, risks, complexity, approach.
   """
@@ -111,51 +111,51 @@ defmodule GiTF.Scout do
   def parse_findings(_), do: empty_findings()
 
   @doc """
-  Injects scout findings into the parent job's description.
+  Injects recon findings into the parent op's description.
 
-  Reads the job from store, prepends a `## Scout Report` section to the
-  description, and updates the job in store.
+  Reads the op from store, prepends a `## Recon Report` section to the
+  description, and updates the op in store.
   """
   @spec inject_findings(String.t(), map()) :: {:ok, map()} | {:error, term()}
-  def inject_findings(job_id, findings) do
-    with {:ok, job} <- Jobs.get(job_id) do
+  def inject_findings(op_id, findings) do
+    with {:ok, op} <- Jobs.get(op_id) do
       report = format_report(findings)
-      new_description = report <> "\n\n" <> (job.description || "")
+      new_description = report <> "\n\n" <> (op.description || "")
 
-      updated = %{job | description: new_description, scout_findings: findings}
-      Store.put(:jobs, updated)
+      updated = %{op | description: new_description, scout_findings: findings}
+      Store.put(:ops, updated)
     end
   end
 
   @doc """
-  Creates a scout job linked to a parent job.
+  Creates a recon op linked to a parent op.
 
-  The scout job:
-  - Has `scout: true` and `scout_for: parent_job_id`
-  - Shares the parent's quest_id
-  - Uses the provided comb_id
-  - Becomes a dependency of the parent (parent depends on scout)
-  - Blocks the parent until the scout completes
+  The recon op:
+  - Has `recon: true` and `scout_for: parent_op_id`
+  - Shares the parent's mission_id
+  - Uses the provided sector_id
+  - Becomes a dependency of the parent (parent depends on recon)
+  - Blocks the parent until the recon completes
   """
   @spec create_scout_job(String.t(), String.t()) :: {:ok, map()} | {:error, term()}
-  def create_scout_job(parent_job_id, comb_id) do
-    with {:ok, parent_job} <- Jobs.get(parent_job_id) do
+  def create_scout_job(parent_op_id, sector_id) do
+    with {:ok, parent_job} <- Jobs.get(parent_op_id) do
       prompt = build_scout_prompt(parent_job)
 
       attrs = %{
-        title: "[Scout] #{parent_job.title}",
+        title: "[Recon] #{parent_job.title}",
         description: prompt,
-        quest_id: parent_job.quest_id,
-        comb_id: comb_id,
-        scout: true,
-        scout_for: parent_job_id,
+        mission_id: parent_job.mission_id,
+        sector_id: sector_id,
+        recon: true,
+        scout_for: parent_op_id,
         skip_verification: true
       }
 
       with {:ok, scout_job} <- Jobs.create(attrs),
-           {:ok, _dep} <- Jobs.add_dependency(parent_job_id, scout_job.id),
-           {:ok, _blocked} <- Jobs.block(parent_job_id) do
-        Logger.info("Created scout job #{scout_job.id} for parent #{parent_job_id}")
+           {:ok, _dep} <- Jobs.add_dependency(parent_op_id, scout_job.id),
+           {:ok, _blocked} <- Jobs.block(parent_op_id) do
+        Logger.info("Created recon op #{scout_job.id} for parent #{parent_op_id}")
         {:ok, scout_job}
       end
     end
@@ -189,7 +189,7 @@ defmodule GiTF.Scout do
       |> Enum.map_join("\n", &("- `#{&1}`"))
 
     """
-    ## Scout Report
+    ## Recon Report
 
     ### Relevant Files
     #{files}

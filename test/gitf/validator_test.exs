@@ -4,14 +4,14 @@ defmodule GiTF.ValidatorTest do
   alias GiTF.Validator
 
   describe "build_validation_prompt/2" do
-    test "builds a prompt with job title and diff" do
-      job = %{
-        id: "job-123",
+    test "builds a prompt with op title and diff" do
+      op = %{
+        id: "op-123",
         title: "Fix the login bug",
         description: "Users can't log in when password has special chars",
         status: "done",
-        quest_id: "qst-1",
-        comb_id: "cmb-1"
+        mission_id: "qst-1",
+        sector_id: "cmb-1"
       }
 
       diff = """
@@ -24,7 +24,7 @@ defmodule GiTF.ValidatorTest do
       +  end
       """
 
-      prompt = Validator.build_validation_prompt(job, diff)
+      prompt = Validator.build_validation_prompt(op, diff)
 
       assert prompt =~ "Fix the login bug"
       assert prompt =~ "special chars"
@@ -33,16 +33,16 @@ defmodule GiTF.ValidatorTest do
     end
 
     test "handles nil description" do
-      job = %{
-        id: "job-456",
+      op = %{
+        id: "op-456",
         title: "Quick fix",
         description: nil,
         status: "done",
-        quest_id: "qst-1",
-        comb_id: "cmb-1"
+        mission_id: "qst-1",
+        sector_id: "cmb-1"
       }
 
-      prompt = Validator.build_validation_prompt(job, "some diff")
+      prompt = Validator.build_validation_prompt(op, "some diff")
       assert prompt =~ "Quick fix"
       assert prompt =~ "some diff"
     end
@@ -56,16 +56,16 @@ defmodule GiTF.ValidatorTest do
       File.mkdir_p!(tmp_dir)
       on_exit(fn -> File.rm_rf(tmp_dir) end)
 
-      cell = %{
+      shell = %{
         id: "cel-test",
         worktree_path: tmp_dir,
         ghost_id: "ghost-1",
-        comb_id: "cmb-1",
+        sector_id: "cmb-1",
         branch: "test",
         status: "active"
       }
 
-      assert :ok = Validator.run_custom_validation(cell, "true")
+      assert :ok = Validator.run_custom_validation(shell, "true")
     end
 
     test "returns error for failing command" do
@@ -75,16 +75,16 @@ defmodule GiTF.ValidatorTest do
       File.mkdir_p!(tmp_dir)
       on_exit(fn -> File.rm_rf(tmp_dir) end)
 
-      cell = %{
+      shell = %{
         id: "cel-test",
         worktree_path: tmp_dir,
         ghost_id: "ghost-1",
-        comb_id: "cmb-1",
+        sector_id: "cmb-1",
         branch: "test",
         status: "active"
       }
 
-      assert {:error, msg} = Validator.run_custom_validation(cell, "false")
+      assert {:error, msg} = Validator.run_custom_validation(shell, "false")
       assert msg =~ "exit 1"
     end
   end

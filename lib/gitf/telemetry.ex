@@ -4,14 +4,14 @@ defmodule GiTF.Telemetry do
 
   Events emitted throughout the system:
 
-    [:gitf, :ghost, :spawned]       - measurements: %{}, metadata: %{ghost_id, job_id, comb_id}
-    [:gitf, :ghost, :completed]     - measurements: %{duration_ms}, metadata: %{ghost_id, job_id}
+    [:gitf, :ghost, :spawned]       - measurements: %{}, metadata: %{ghost_id, op_id, sector_id}
+    [:gitf, :ghost, :completed]     - measurements: %{duration_ms}, metadata: %{ghost_id, op_id}
     [:gitf, :ghost, :failed]        - measurements: %{duration_ms}, metadata: %{ghost_id, error}
-    [:gitf, :job, :started]       - measurements: %{}, metadata: %{job_id, quest_id}
-    [:gitf, :job, :completed]     - measurements: %{}, metadata: %{job_id, quest_id}
-    [:gitf, :quest, :created]     - measurements: %{}, metadata: %{quest_id, name}
-    [:gitf, :quest, :completed]   - measurements: %{}, metadata: %{quest_id, name}
-    [:gitf, :waggle, :sent]       - measurements: %{}, metadata: %{from, to, subject}
+    [:gitf, :op, :started]       - measurements: %{}, metadata: %{op_id, mission_id}
+    [:gitf, :op, :completed]     - measurements: %{}, metadata: %{op_id, mission_id}
+    [:gitf, :mission, :created]     - measurements: %{}, metadata: %{mission_id, name}
+    [:gitf, :mission, :completed]   - measurements: %{}, metadata: %{mission_id, name}
+    [:gitf, :link_msg, :sent]       - measurements: %{}, metadata: %{from, to, subject}
     [:gitf, :token, :consumed]    - measurements: %{input, output, cost}, metadata: %{model, ghost_id}
     [:gitf, :plugin, :loaded]     - measurements: %{}, metadata: %{type, name, module}
     [:gitf, :plugin, :unloaded]   - measurements: %{}, metadata: %{type, name}
@@ -31,11 +31,11 @@ defmodule GiTF.Telemetry do
     [:gitf, :ghost, :completed],
     [:gitf, :ghost, :failed],
     [:gitf, :ghost, :provision_failed],
-    [:gitf, :job, :started],
-    [:gitf, :job, :completed],
-    [:gitf, :quest, :created],
-    [:gitf, :quest, :completed],
-    [:gitf, :waggle, :sent],
+    [:gitf, :op, :started],
+    [:gitf, :op, :completed],
+    [:gitf, :mission, :created],
+    [:gitf, :mission, :completed],
+    [:gitf, :link_msg, :sent],
     [:gitf, :token, :consumed],
     [:gitf, :plugin, :loaded],
     [:gitf, :plugin, :unloaded],
@@ -98,39 +98,39 @@ defmodule GiTF.Telemetry do
 
   defp map_event([:gitf, :ghost, :spawned], measurements, meta) do
     {:bee_spawned, Map.get(meta, :ghost_id, "unknown"), measurements,
-     %{job_id: meta[:job_id], quest_id: meta[:quest_id]}}
+     %{op_id: meta[:op_id], mission_id: meta[:mission_id]}}
   end
 
   defp map_event([:gitf, :ghost, :completed], measurements, meta) do
     {:bee_completed, Map.get(meta, :ghost_id, "unknown"), measurements,
-     %{job_id: meta[:job_id], quest_id: meta[:quest_id]}}
+     %{op_id: meta[:op_id], mission_id: meta[:mission_id]}}
   end
 
   defp map_event([:gitf, :ghost, :failed], measurements, meta) do
     {:bee_failed, Map.get(meta, :ghost_id, "unknown"),
      Map.merge(measurements, %{error: meta[:error]}),
-     %{job_id: meta[:job_id], quest_id: meta[:quest_id]}}
+     %{op_id: meta[:op_id], mission_id: meta[:mission_id]}}
   end
 
-  defp map_event([:gitf, :job, :started], measurements, meta) do
-    {:job_transition, Map.get(meta, :job_id, "unknown"),
+  defp map_event([:gitf, :op, :started], measurements, meta) do
+    {:job_transition, Map.get(meta, :op_id, "unknown"),
      Map.merge(measurements, %{action: :start}),
-     %{quest_id: meta[:quest_id]}}
+     %{mission_id: meta[:mission_id]}}
   end
 
-  defp map_event([:gitf, :job, :completed], measurements, meta) do
-    {:job_transition, Map.get(meta, :job_id, "unknown"),
+  defp map_event([:gitf, :op, :completed], measurements, meta) do
+    {:job_transition, Map.get(meta, :op_id, "unknown"),
      Map.merge(measurements, %{action: :complete}),
-     %{quest_id: meta[:quest_id]}}
+     %{mission_id: meta[:mission_id]}}
   end
 
-  defp map_event([:gitf, :quest, :created], measurements, meta) do
-    {:quest_created, Map.get(meta, :quest_id, "unknown"),
+  defp map_event([:gitf, :mission, :created], measurements, meta) do
+    {:quest_created, Map.get(meta, :mission_id, "unknown"),
      Map.merge(measurements, %{name: meta[:name]}), %{}}
   end
 
-  defp map_event([:gitf, :quest, :completed], measurements, meta) do
-    {:quest_completed, Map.get(meta, :quest_id, "unknown"),
+  defp map_event([:gitf, :mission, :completed], measurements, meta) do
+    {:quest_completed, Map.get(meta, :mission_id, "unknown"),
      Map.merge(measurements, %{name: meta[:name]}), %{}}
   end
 

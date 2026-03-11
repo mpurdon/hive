@@ -3,7 +3,7 @@ defmodule Mix.Tasks.GiTF.Test.E2e do
   Runs GiTF E2E integration tests.
 
       mix gitf.test.e2e                          # run all E2E tests
-      mix gitf.test.e2e test/e2e/quest*.exs      # run specific files
+      mix gitf.test.e2e test/e2e/mission*.exs      # run specific files
       mix gitf.test.e2e --json                   # write JSON report
       mix gitf.test.e2e --timeout 30000          # global scenario timeout
       mix gitf.test.e2e --remote node@host       # connect to running instance

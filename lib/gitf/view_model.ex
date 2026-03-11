@@ -11,7 +11,7 @@ defmodule GiTF.ViewModel do
 
   ## Topics consumed
 
-      "link:major"    — waggle events
+      "link:major"    — link_msg events
       "section:progress"   — ghost progress updates
       "section:system"     — system events
       "section:intent"     — intent events (for tracking)
@@ -75,9 +75,9 @@ defmodule GiTF.ViewModel do
   end
 
   @impl true
-  def handle_info({:waggle_received, waggle}, state) do
-    waggles = [summarize_waggle(waggle) | state.recent_waggles] |> Enum.take(50)
-    state = %{state | recent_waggles: waggles, updated_at: now()}
+  def handle_info({:waggle_received, link_msg}, state) do
+    links = [summarize_waggle(link_msg) | state.recent_waggles] |> Enum.take(50)
+    state = %{state | recent_waggles: links, updated_at: now()}
     publish(state)
     {:noreply, state}
   end
@@ -112,8 +112,8 @@ defmodule GiTF.ViewModel do
   defp empty_snapshot do
     %{
       ghosts: [],
-      quests: [],
-      jobs: [],
+      missions: [],
+      ops: [],
       bee_progress: %{},
       recent_waggles: [],
       recent_intents: [],
@@ -126,8 +126,8 @@ defmodule GiTF.ViewModel do
     %{
       state
       | ghosts: safe_list(:ghosts),
-        quests: safe_list(:quests),
-        jobs: safe_list(:jobs),
+        missions: safe_list(:missions),
+        ops: safe_list(:ops),
         costs: safe_costs(),
         updated_at: now()
     }
@@ -146,12 +146,12 @@ defmodule GiTF.ViewModel do
     _ -> %{total: 0, count: 0}
   end
 
-  defp summarize_waggle(waggle) do
+  defp summarize_waggle(link_msg) do
     %{
-      from: waggle.from,
-      to: waggle.to,
-      subject: waggle.subject,
-      at: waggle[:inserted_at] || now()
+      from: link_msg.from,
+      to: link_msg.to,
+      subject: link_msg.subject,
+      at: link_msg[:inserted_at] || now()
     }
   end
 

@@ -101,7 +101,7 @@ defmodule GiTF.Runtime.ToolBox do
 
   defp queen_tools do
     [
-      build_tool("list_quests", "List all active quests and their statuses", [],
+      build_tool("list_quests", "List all active missions and their statuses", [],
         fn _args -> list_quests() end),
 
       build_tool("list_bees", "List all active ghosts and their statuses", [],
@@ -253,17 +253,17 @@ defmodule GiTF.Runtime.ToolBox do
   # -- Major tool implementations -----------------------------------------------
 
   defp list_quests do
-    quests = GiTF.Store.all(:quests)
+    missions = GiTF.Store.all(:missions)
 
     summary =
-      Enum.map(quests, fn q ->
-        "#{q.id}: #{q.name} (#{q.status}) - #{length(Map.get(q, :jobs, []))} jobs"
+      Enum.map(missions, fn q ->
+        "#{q.id}: #{q.name} (#{q.status}) - #{length(Map.get(q, :ops, []))} ops"
       end)
       |> Enum.join("\n")
 
-    {:ok, if(summary == "", do: "No quests found.", else: summary)}
+    {:ok, if(summary == "", do: "No missions found.", else: summary)}
   rescue
-    _ -> {:ok, "Error listing quests"}
+    _ -> {:ok, "Error listing missions"}
   end
 
   defp list_bees do
@@ -271,7 +271,7 @@ defmodule GiTF.Runtime.ToolBox do
 
     summary =
       Enum.map(ghosts, fn b ->
-        "#{b.id}: #{b.name} (#{b.status}) - job: #{b.job_id || "none"}"
+        "#{b.id}: #{b.name} (#{b.status}) - op: #{b.op_id || "none"}"
       end)
       |> Enum.join("\n")
 

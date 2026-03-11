@@ -5,9 +5,9 @@ defmodule GiTF.Quality.PerformanceTest do
 
   describe "benchmark/2" do
     test "returns score and metrics when no benchmark command" do
-      comb = %{id: "test", path: "/tmp"}
+      sector = %{id: "test", path: "/tmp"}
       
-      {:ok, result} = Performance.benchmark("/tmp", comb)
+      {:ok, result} = Performance.benchmark("/tmp", sector)
       
       assert result.score == 100
       assert result.metrics == []
@@ -16,9 +16,9 @@ defmodule GiTF.Quality.PerformanceTest do
     end
 
     test "runs benchmark command when configured" do
-      comb = %{id: "test", path: "/tmp", benchmark_command: "echo 'test'"}
+      sector = %{id: "test", path: "/tmp", benchmark_command: "echo 'test'"}
       
-      {:ok, result} = Performance.benchmark("/tmp", comb)
+      {:ok, result} = Performance.benchmark("/tmp", sector)
       
       assert result.score == 100
       assert is_list(result.metrics)
@@ -27,9 +27,9 @@ defmodule GiTF.Quality.PerformanceTest do
     end
 
     test "extracts execution time metric" do
-      comb = %{benchmark_command: "sleep 0.1"}
+      sector = %{benchmark_command: "sleep 0.1"}
       
-      {:ok, result} = Performance.benchmark("/tmp", comb)
+      {:ok, result} = Performance.benchmark("/tmp", sector)
       
       time_metric = Enum.find(result.metrics, &(&1.name == "execution_time"))
       assert time_metric

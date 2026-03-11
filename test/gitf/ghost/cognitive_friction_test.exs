@@ -14,7 +14,7 @@ defmodule GiTF.Ghost.CognitiveFrictionTest do
       assert result =~ "explain your reasoning"
     end
 
-    test "high risk requires stating changes and clarification waggle" do
+    test "high risk requires stating changes and clarification link_msg" do
       result = CognitiveFriction.friction_instructions(:high)
       assert result =~ "Before any file write"
       assert result =~ "clarification_needed"

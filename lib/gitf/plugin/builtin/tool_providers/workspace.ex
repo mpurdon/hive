@@ -1,6 +1,6 @@
 defmodule GiTF.Plugin.Builtin.ToolProviders.Workspace do
   @moduledoc """
-  Built-in tool provider that exposes workspace/comb/cell info to agents.
+  Built-in tool provider that exposes workspace/sector/shell info to agents.
 
   Provides: `list_combs`, `comb_info`, `list_cells`.
   """
@@ -27,26 +27,26 @@ defmodule GiTF.Plugin.Builtin.ToolProviders.Workspace do
   defp list_combs_tool do
     ReqLLM.Tool.new!(
       name: "list_combs",
-      description: "List all registered combs (repositories/workspaces) with their IDs and paths.",
+      description: "List all registered sectors (repositories/workspaces) with their IDs and paths.",
       callback: fn _args -> list_combs() end
     )
   end
 
   defp list_combs do
-    combs = GiTF.Comb.list()
+    sectors = GiTF.Sector.list()
 
-    if combs == [] do
-      {:ok, "No combs registered."}
+    if sectors == [] do
+      {:ok, "No sectors registered."}
     else
       lines =
-        Enum.map(combs, fn c ->
+        Enum.map(sectors, fn c ->
           "#{c.id}: #{c.name} (#{c[:path] || "no path"})"
         end)
 
       {:ok, Enum.join(lines, "\n")}
     end
   rescue
-    e -> {:ok, "Error listing combs: #{Exception.message(e)}"}
+    e -> {:ok, "Error listing sectors: #{Exception.message(e)}"}
   end
 
   # -- comb_info ---------------------------------------------------------------
@@ -54,34 +54,34 @@ defmodule GiTF.Plugin.Builtin.ToolProviders.Workspace do
   defp comb_info_tool do
     ReqLLM.Tool.new!(
       name: "comb_info",
-      description: "Get detailed information about a specific comb by ID or name.",
+      description: "Get detailed information about a specific sector by ID or name.",
       parameter_schema: [
-        comb_id: [type: :string, required: true, doc: "Comb ID or name"]
+        sector_id: [type: :string, required: true, doc: "Comb ID or name"]
       ],
       callback: &comb_info/1
     )
   end
 
   defp comb_info(args) do
-    comb_id = args["comb_id"] || args[:comb_id]
+    sector_id = args["sector_id"] || args[:sector_id]
 
-    case GiTF.Comb.get(comb_id) do
-      {:ok, comb} ->
+    case GiTF.Sector.get(sector_id) do
+      {:ok, sector} ->
         info =
           [
-            "ID: #{comb.id}",
-            "Name: #{comb.name}",
-            "Path: #{comb[:path] || "N/A"}",
-            "Repo URL: #{comb[:repo_url] || "N/A"}",
-            "Merge Strategy: #{comb[:merge_strategy] || "N/A"}",
-            "Validation: #{comb[:validation_command] || "N/A"}"
+            "ID: #{sector.id}",
+            "Name: #{sector.name}",
+            "Path: #{sector[:path] || "N/A"}",
+            "Repo URL: #{sector[:repo_url] || "N/A"}",
+            "Merge Strategy: #{sector[:merge_strategy] || "N/A"}",
+            "Validation: #{sector[:validation_command] || "N/A"}"
           ]
           |> Enum.join("\n")
 
         {:ok, info}
 
       {:error, :not_found} ->
-        {:ok, "Comb not found: #{comb_id}"}
+        {:ok, "Comb not found: #{sector_id}"}
     end
   rescue
     e -> {:ok, "Error: #{Exception.message(e)}"}
@@ -92,19 +92,19 @@ defmodule GiTF.Plugin.Builtin.ToolProviders.Workspace do
   defp list_cells_tool do
     ReqLLM.Tool.new!(
       name: "list_cells",
-      description: "List active cells (worktrees) with their ghost assignments.",
+      description: "List active shells (worktrees) with their ghost assignments.",
       callback: fn _args -> list_cells() end
     )
   end
 
   defp list_cells do
-    cells = GiTF.Store.all(:cells)
+    shells = GiTF.Store.all(:shells)
 
-    if cells == [] do
-      {:ok, "No active cells."}
+    if shells == [] do
+      {:ok, "No active shells."}
     else
       lines =
-        Enum.map(cells, fn c ->
+        Enum.map(shells, fn c ->
           ghost = Map.get(c, :ghost_id, "unassigned")
           path = Map.get(c, :path, "unknown")
           "#{c.id}: ghost=#{ghost} path=#{path}"
@@ -113,6 +113,6 @@ defmodule GiTF.Plugin.Builtin.ToolProviders.Workspace do
       {:ok, Enum.join(lines, "\n")}
     end
   rescue
-    e -> {:ok, "Error listing cells: #{Exception.message(e)}"}
+    e -> {:ok, "Error listing shells: #{Exception.message(e)}"}
   end
 end

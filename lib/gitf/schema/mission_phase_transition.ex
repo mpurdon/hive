@@ -1,13 +1,13 @@
-defmodule GiTF.Schema.QuestPhaseTransition do
+defmodule GiTF.Schema.MissionPhaseTransition do
   @moduledoc """
-  Schema for quest phase transitions.
+  Schema for mission phase transitions.
   
-  Tracks when a quest moves between phases (pending → research → planning → implementation).
+  Tracks when a mission moves between phases (pending → research → planning → implementation).
   """
 
   @type t :: %__MODULE__{
           id: String.t(),
-          quest_id: String.t(),
+          mission_id: String.t(),
           from_phase: String.t(),
           to_phase: String.t(),
           reason: String.t() | nil,
@@ -18,7 +18,7 @@ defmodule GiTF.Schema.QuestPhaseTransition do
 
   defstruct [
     :id,
-    :quest_id,
+    :mission_id,
     :from_phase,
     :to_phase,
     :reason,

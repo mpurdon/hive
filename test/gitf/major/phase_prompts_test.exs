@@ -3,23 +3,23 @@ defmodule GiTF.Major.PhasePromptsTest do
 
   alias GiTF.Major.PhasePrompts
 
-  @quest %{id: "q-1", goal: "Add user authentication", comb_id: "cmb-1"}
+  @mission %{id: "q-1", goal: "Add user authentication", sector_id: "cmb-1"}
 
   describe "research_prompt/2" do
-    test "includes quest goal" do
-      prompt = PhasePrompts.research_prompt(@quest, %{path: "/code"})
+    test "includes mission goal" do
+      prompt = PhasePrompts.research_prompt(@mission, %{path: "/code"})
       assert prompt =~ "Add user authentication"
       assert prompt =~ "/code"
     end
 
-    test "handles nil comb" do
-      prompt = PhasePrompts.research_prompt(@quest, nil)
+    test "handles nil sector" do
+      prompt = PhasePrompts.research_prompt(@mission, nil)
       assert prompt =~ "Add user authentication"
       assert prompt =~ "."
     end
 
     test "includes JSON output format instructions" do
-      prompt = PhasePrompts.research_prompt(@quest, nil)
+      prompt = PhasePrompts.research_prompt(@mission, nil)
       assert prompt =~ "```json"
       assert prompt =~ "architecture"
       assert prompt =~ "key_files"
@@ -27,9 +27,9 @@ defmodule GiTF.Major.PhasePromptsTest do
   end
 
   describe "requirements_prompt/2" do
-    test "includes quest goal and research context" do
+    test "includes mission goal and research context" do
       research = %{"architecture" => "MVC", "key_files" => ["app.ex"]}
-      prompt = PhasePrompts.requirements_prompt(@quest, research)
+      prompt = PhasePrompts.requirements_prompt(@mission, research)
 
       assert prompt =~ "Add user authentication"
       assert prompt =~ "MVC"
@@ -41,7 +41,7 @@ defmodule GiTF.Major.PhasePromptsTest do
     test "includes requirements and research" do
       requirements = %{"functional_requirements" => []}
       research = %{"tech_stack" => ["Elixir"]}
-      prompt = PhasePrompts.design_prompt(@quest, requirements, research)
+      prompt = PhasePrompts.design_prompt(@mission, requirements, research)
 
       assert prompt =~ "Add user authentication"
       assert prompt =~ "components"
@@ -55,7 +55,7 @@ defmodule GiTF.Major.PhasePromptsTest do
       research = %{"tech_stack" => []}
       review = %{"approved" => false, "issues" => [%{"description" => "Missing auth flow"}]}
 
-      prompt = PhasePrompts.design_prompt_with_feedback(@quest, requirements, research, review)
+      prompt = PhasePrompts.design_prompt_with_feedback(@mission, requirements, research, review)
       assert prompt =~ "Previous Review Feedback"
       assert prompt =~ "Missing auth flow"
     end
@@ -67,7 +67,7 @@ defmodule GiTF.Major.PhasePromptsTest do
       requirements = %{"functional_requirements" => []}
       research = %{"tech_stack" => []}
 
-      prompt = PhasePrompts.review_prompt(@quest, design, requirements, research)
+      prompt = PhasePrompts.review_prompt(@mission, design, requirements, research)
       assert prompt =~ "Design Review"
       assert prompt =~ "approved"
       assert prompt =~ "coverage"
@@ -75,12 +75,12 @@ defmodule GiTF.Major.PhasePromptsTest do
   end
 
   describe "planning_prompt/4" do
-    test "produces planning instructions with job format" do
+    test "produces planning instructions with op format" do
       design = %{"components" => []}
       requirements = %{"functional_requirements" => []}
       review = %{"approved" => true}
 
-      prompt = PhasePrompts.planning_prompt(@quest, design, requirements, review)
+      prompt = PhasePrompts.planning_prompt(@mission, design, requirements, review)
       assert prompt =~ "Planning Phase"
       assert prompt =~ "depends_on_indices"
       assert prompt =~ "model_recommendation"
@@ -95,7 +95,7 @@ defmodule GiTF.Major.PhasePromptsTest do
         "design" => %{"components" => []}
       }
 
-      prompt = PhasePrompts.validation_prompt(@quest, artifacts)
+      prompt = PhasePrompts.validation_prompt(@mission, artifacts)
       assert prompt =~ "Validation Phase"
       assert prompt =~ "requirements_met"
       assert prompt =~ "overall_verdict"

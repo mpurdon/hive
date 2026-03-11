@@ -2,7 +2,7 @@ defmodule GiTF.AgentProfile.Generation do
   @moduledoc """
   Shared generation helpers for model-based content generation.
 
-  Used by `GiTF.AgentProfile` (comb-level technology agents) to spawn
+  Used by `GiTF.AgentProfile` (sector-level technology agents) to spawn
   headless model sessions and collect their output.
   """
 

@@ -52,19 +52,19 @@ defmodule GiTF.Client do
   # -- Domain helpers (match context module APIs) ------------------------------
 
   # Quests
-  def create_quest(attrs), do: post("/api/v1/quests", attrs) |> unwrap_data()
-  def list_quests(opts \\ []), do: get("/api/v1/quests", params: opts) |> unwrap_data()
-  def get_quest(id), do: get("/api/v1/quests/#{id}") |> unwrap_data()
-  def delete_quest(id), do: delete("/api/v1/quests/#{id}") |> unwrap_ok()
-  def close_quest(id), do: post("/api/v1/quests/#{id}/close") |> unwrap_data()
-  def start_quest(id), do: post("/api/v1/quests/#{id}/start") |> unwrap_data()
-  def quest_status(id), do: get("/api/v1/quests/#{id}/status") |> unwrap_data()
-  def plan_quest(id), do: post("/api/v1/quests/#{id}/plan") |> unwrap_data()
+  def create_quest(attrs), do: post("/api/v1/missions", attrs) |> unwrap_data()
+  def list_quests(opts \\ []), do: get("/api/v1/missions", params: opts) |> unwrap_data()
+  def get_quest(id), do: get("/api/v1/missions/#{id}") |> unwrap_data()
+  def delete_quest(id), do: delete("/api/v1/missions/#{id}") |> unwrap_ok()
+  def close_quest(id), do: post("/api/v1/missions/#{id}/close") |> unwrap_data()
+  def start_quest(id), do: post("/api/v1/missions/#{id}/start") |> unwrap_data()
+  def quest_status(id), do: get("/api/v1/missions/#{id}/status") |> unwrap_data()
+  def plan_quest(id), do: post("/api/v1/missions/#{id}/plan") |> unwrap_data()
 
   # Jobs
-  def list_jobs(opts \\ []), do: get("/api/v1/jobs", params: opts) |> unwrap_data()
-  def get_job(id), do: get("/api/v1/jobs/#{id}") |> unwrap_data()
-  def reset_job(id), do: post("/api/v1/jobs/#{id}/reset") |> unwrap_data()
+  def list_jobs(opts \\ []), do: get("/api/v1/ops", params: opts) |> unwrap_data()
+  def get_job(id), do: get("/api/v1/ops/#{id}") |> unwrap_data()
+  def reset_job(id), do: post("/api/v1/ops/#{id}/reset") |> unwrap_data()
 
   # Bees
   def list_bees, do: get("/api/v1/ghosts") |> unwrap_data()
@@ -74,26 +74,26 @@ defmodule GiTF.Client do
 
   # Combs
   def add_comb(path_or_url, opts \\ []) do
-    post("/api/v1/combs", %{path: path_or_url, opts: Map.new(opts)}) |> unwrap_data()
+    post("/api/v1/sectors", %{path: path_or_url, opts: Map.new(opts)}) |> unwrap_data()
   end
 
-  def list_combs, do: get("/api/v1/combs") |> unwrap_data()
-  def get_comb(id), do: get("/api/v1/combs/#{id}") |> unwrap_data()
-  def remove_comb(id), do: delete("/api/v1/combs/#{id}") |> unwrap_ok()
-  def use_comb(id), do: post("/api/v1/combs/#{id}/use") |> unwrap_data()
+  def list_combs, do: get("/api/v1/sectors") |> unwrap_data()
+  def get_comb(id), do: get("/api/v1/sectors/#{id}") |> unwrap_data()
+  def remove_comb(id), do: delete("/api/v1/sectors/#{id}") |> unwrap_ok()
+  def use_comb(id), do: post("/api/v1/sectors/#{id}/use") |> unwrap_data()
 
   # Quest extras
-  def quest_report(id), do: get("/api/v1/quests/#{id}/report") |> unwrap_data()
-  def quest_merge(id), do: post("/api/v1/quests/#{id}/merge") |> unwrap_data()
-  def quest_spec(id, phase), do: get("/api/v1/quests/#{id}/spec/#{phase}") |> unwrap_data()
-  def quest_spec_write(id, phase, content), do: put("/api/v1/quests/#{id}/spec/#{phase}", %{content: content}) |> unwrap_data()
+  def quest_report(id), do: get("/api/v1/missions/#{id}/report") |> unwrap_data()
+  def quest_merge(id), do: post("/api/v1/missions/#{id}/merge") |> unwrap_data()
+  def quest_spec(id, phase), do: get("/api/v1/missions/#{id}/spec/#{phase}") |> unwrap_data()
+  def quest_spec_write(id, phase, content), do: put("/api/v1/missions/#{id}/spec/#{phase}", %{content: content}) |> unwrap_data()
 
   # Plan confirmation
-  def confirm_plan(quest_id, specs), do: post("/api/v1/quests/#{quest_id}/plan/confirm", %{specs: specs}) |> unwrap_data()
-  def reject_plan(quest_id), do: post("/api/v1/quests/#{quest_id}/plan/reject") |> unwrap_ok()
-  def revise_plan(quest_id, feedback), do: post("/api/v1/quests/#{quest_id}/plan/revise", %{feedback: feedback}) |> unwrap_data()
-  def list_plan_candidates(quest_id), do: get("/api/v1/quests/#{quest_id}/plan/candidates") |> unwrap_data()
-  def select_plan_candidate(quest_id, strategy), do: post("/api/v1/quests/#{quest_id}/plan/select", %{strategy: strategy}) |> unwrap_data()
+  def confirm_plan(mission_id, specs), do: post("/api/v1/missions/#{mission_id}/plan/confirm", %{specs: specs}) |> unwrap_data()
+  def reject_plan(mission_id), do: post("/api/v1/missions/#{mission_id}/plan/reject") |> unwrap_ok()
+  def revise_plan(mission_id, feedback), do: post("/api/v1/missions/#{mission_id}/plan/revise", %{feedback: feedback}) |> unwrap_data()
+  def list_plan_candidates(mission_id), do: get("/api/v1/missions/#{mission_id}/plan/candidates") |> unwrap_data()
+  def select_plan_candidate(mission_id, strategy), do: post("/api/v1/missions/#{mission_id}/plan/select", %{strategy: strategy}) |> unwrap_data()
 
   # Costs
   def costs_summary, do: get("/api/v1/costs/summary") |> unwrap_data()

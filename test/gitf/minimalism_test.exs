@@ -17,32 +17,32 @@ defmodule GiTF.MinimalismTest do
 
   describe "analyze_implementation/1" do
     test "rates simple implementation as excellent" do
-      job = %{
-        id: "job-simple",
+      op = %{
+        id: "op-simple",
         title: "Add function",
         files_changed: 1,
         created_at: DateTime.utc_now(),
         updated_at: DateTime.utc_now()
       }
-      Store.insert(:jobs, job)
+      Store.insert(:ops, op)
       
-      result = Minimalism.analyze_implementation("job-simple")
+      result = Minimalism.analyze_implementation("op-simple")
       
       assert result.overall_rating == :excellent
       assert result.complexity_score <= 30
     end
 
     test "detects over-engineering" do
-      job = %{
-        id: "job-complex",
+      op = %{
+        id: "op-complex",
         title: "Add factory pattern with builder",
         files_changed: 15,
         created_at: DateTime.utc_now(),
         updated_at: DateTime.utc_now()
       }
-      Store.insert(:jobs, job)
+      Store.insert(:ops, op)
       
-      result = Minimalism.analyze_implementation("job-complex")
+      result = Minimalism.analyze_implementation("op-complex")
       
       assert result.overall_rating == :needs_simplification
       assert length(result.violations) > 0
@@ -51,16 +51,16 @@ defmodule GiTF.MinimalismTest do
 
   describe "is_minimal?/1" do
     test "returns true for minimal implementation" do
-      job = %{
-        id: "job-min",
+      op = %{
+        id: "op-min",
         title: "Simple fix",
         files_changed: 2,
         created_at: DateTime.utc_now(),
         updated_at: DateTime.utc_now()
       }
-      Store.insert(:jobs, job)
+      Store.insert(:ops, op)
       
-      assert Minimalism.is_minimal?("job-min") == true
+      assert Minimalism.is_minimal?("op-min") == true
     end
   end
 end

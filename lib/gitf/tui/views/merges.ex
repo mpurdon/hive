@@ -26,14 +26,14 @@ defmodule GiTF.TUI.Views.Merges do
   defp render_active(nil), do: [label(content: "  (idle)", color: :white)]
 
   defp render_active(active) do
-    job_id = short_id(active[:job_id] || active.job_id)
-    cell_id = to_string(active[:cell_id] || active.cell_id)
+    op_id = short_id(active[:op_id] || active.op_id)
+    shell_id = to_string(active[:shell_id] || active.shell_id)
 
     [
       label do
         text(content: "  >> ", color: :blue, attributes: [:bold])
-        text(content: job_id, color: :cyan)
-        text(content: " cell:#{cell_id}", color: :white)
+        text(content: op_id, color: :cyan)
+        text(content: " shell:#{shell_id}", color: :white)
       end
     ]
   end
@@ -43,11 +43,11 @@ defmodule GiTF.TUI.Views.Merges do
   defp render_pending(items) do
     items
     |> Enum.with_index(1)
-    |> Enum.map(fn {{job_id, cell_id}, idx} ->
+    |> Enum.map(fn {{op_id, shell_id}, idx} ->
       label do
         text(content: "  #{idx}. ", color: :white)
-        text(content: short_id(job_id), color: :cyan)
-        text(content: " cell:#{cell_id}", color: :white)
+        text(content: short_id(op_id), color: :cyan)
+        text(content: " shell:#{shell_id}", color: :white)
       end
     end)
   end
@@ -55,7 +55,7 @@ defmodule GiTF.TUI.Views.Merges do
   defp render_completed([]), do: [label(content: "  (none)", color: :white)]
 
   defp render_completed(items) do
-    Enum.map(items, fn {job_id, outcome, timestamp} ->
+    Enum.map(items, fn {op_id, outcome, timestamp} ->
       ts =
         case timestamp do
           %DateTime{} = dt -> Calendar.strftime(dt, "%H:%M:%S")
@@ -63,7 +63,7 @@ defmodule GiTF.TUI.Views.Merges do
         end
 
       label do
-        text(content: "  #{short_id(job_id)} ", color: :cyan)
+        text(content: "  #{short_id(op_id)} ", color: :cyan)
         text(content: String.pad_trailing(format_outcome(outcome), 10), color: outcome_color(outcome))
         text(content: ts, color: :white)
       end

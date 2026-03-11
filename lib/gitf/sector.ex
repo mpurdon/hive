@@ -1,10 +1,10 @@
-defmodule GiTF.Comb do
+defmodule GiTF.Sector do
   @moduledoc """
-  Context module for managing combs -- the git repositories tracked by the section.
+  Context module for managing sectors -- the git repositories tracked by the section.
 
-  A comb can be either a local directory that already exists on disk or a
+  A sector can be either a local directory that already exists on disk or a
   remote URL that gets cloned. This module handles registration, lookup,
-  and removal of comb records in the store.
+  and removal of sector records in the store.
 
   This is a pure context module with no process state. Every function
   transforms input data into a store operation and returns the result.
@@ -13,7 +13,7 @@ defmodule GiTF.Comb do
   alias GiTF.Store
 
   @doc """
-  Registers a comb with the section.
+  Registers a sector with the section.
 
   For a local path, validates that the directory exists. For a remote URL,
   clones the repository into the gitf workspace.
@@ -22,7 +22,7 @@ defmodule GiTF.Comb do
 
     * `:name` - a human-friendly name. Defaults to the basename of the path or repo URL.
 
-  Returns `{:ok, comb}` or `{:error, reason}`.
+  Returns `{:ok, sector}` or `{:error, reason}`.
   """
   @spec add(String.t(), keyword()) :: {:ok, map()} | {:error, term()}
   def add(path_or_url, opts \\ []) do
@@ -34,58 +34,58 @@ defmodule GiTF.Comb do
   end
 
   @doc """
-  Returns all registered combs.
+  Returns all registered sectors.
   """
   @spec list() :: [map()]
   def list do
-    Store.all(:combs)
+    Store.all(:sectors)
   end
 
   @doc """
-  Finds a comb by name or ID.
+  Finds a sector by name or ID.
 
-  Returns `{:ok, comb}` or `{:error, :not_found}`.
+  Returns `{:ok, sector}` or `{:error, :not_found}`.
   """
   @spec get(String.t()) :: {:ok, map()} | {:error, :not_found}
   def get(name_or_id) do
-    case Store.get(:combs, name_or_id) do
+    case Store.get(:sectors, name_or_id) do
       nil ->
-        case Store.find_one(:combs, fn c -> c.name == name_or_id end) do
+        case Store.find_one(:sectors, fn c -> c.name == name_or_id end) do
           nil -> {:error, :not_found}
-          comb -> {:ok, comb}
+          sector -> {:ok, sector}
         end
 
-      comb ->
-        {:ok, comb}
+      sector ->
+        {:ok, sector}
     end
   end
 
   @doc """
-  Removes a comb record from the store.
+  Removes a sector record from the store.
 
   ## Options
 
-    * `:delete_files` - when `true`, also removes the comb directory from disk.
+    * `:delete_files` - when `true`, also removes the sector directory from disk.
       Defaults to `false`.
 
-  Returns `{:ok, comb}` or `{:error, :not_found}`.
+  Returns `{:ok, sector}` or `{:error, :not_found}`.
   """
   @spec remove(String.t(), keyword()) :: {:ok, map()} | {:error, :not_found}
   def remove(name_or_id, opts \\ []) do
-    with {:ok, comb} <- get(name_or_id) do
-      if Keyword.get(opts, :delete_files, false) && comb[:path] do
-        File.rm_rf(comb.path)
+    with {:ok, sector} <- get(name_or_id) do
+      if Keyword.get(opts, :delete_files, false) && sector[:path] do
+        File.rm_rf(sector.path)
       end
 
-      Store.delete(:combs, comb.id)
-      {:ok, comb}
+      Store.delete(:sectors, sector.id)
+      {:ok, sector}
     end
   end
 
   @doc """
-  Returns the current comb from the session config.
+  Returns the current sector from the session config.
 
-  Returns `{:ok, comb}` or `{:error, :no_current_comb}`.
+  Returns `{:ok, sector}` or `{:error, :no_current_comb}`.
   """
   @spec current() :: {:ok, map()} | {:error, :no_current_comb}
   def current do
@@ -93,66 +93,66 @@ defmodule GiTF.Comb do
          config_path = Path.join([gitf_root, ".gitf", "config.toml"]),
          {:ok, config} <- GiTF.Config.read_config(config_path),
          id when is_binary(id) and id != "" <- get_in(config, ["session", "current_comb"]),
-         {:ok, comb} <- get(id) do
-      {:ok, comb}
+         {:ok, sector} <- get(id) do
+      {:ok, sector}
     else
       _ -> {:error, :no_current_comb}
     end
   end
 
   @doc """
-  Sets the current comb in the session config.
+  Sets the current sector in the session config.
 
-  Accepts a comb name or ID. Returns `{:ok, comb}` or `{:error, reason}`.
+  Accepts a sector name or ID. Returns `{:ok, sector}` or `{:error, reason}`.
   """
   @spec set_current(String.t()) :: {:ok, map()} | {:error, term()}
   def set_current(name_or_id) do
-    with {:ok, comb} <- get(name_or_id),
+    with {:ok, sector} <- get(name_or_id),
          {:ok, gitf_root} <- GiTF.gitf_dir(),
          config_path = Path.join([gitf_root, ".gitf", "config.toml"]),
          {:ok, config} <- GiTF.Config.read_config(config_path) do
       updated =
-        Map.update(config, "session", %{"current_comb" => comb.id}, fn session ->
-          Map.put(session, "current_comb", comb.id)
+        Map.update(config, "session", %{"current_comb" => sector.id}, fn session ->
+          Map.put(session, "current_comb", sector.id)
         end)
 
       case GiTF.Config.write_config(config_path, updated) do
-        :ok -> {:ok, comb}
+        :ok -> {:ok, sector}
         {:error, _} = err -> err
       end
     end
   end
 
   @doc """
-  Renames a comb and updates all stored path references.
+  Renames a sector and updates all stored path references.
 
-  If the comb directory exists on disk and its basename matches the old name,
-  the directory is also renamed and all cell/ghost paths are updated.
+  If the sector directory exists on disk and its basename matches the old name,
+  the directory is also renamed and all shell/ghost paths are updated.
 
   Returns `{:ok, updated_comb}` or `{:error, reason}`.
   """
   @spec rename(String.t(), String.t()) :: {:ok, map()} | {:error, term()}
   def rename(name_or_id, new_name) do
-    with {:ok, comb} <- get(name_or_id),
-         :ok <- validate_name_available(new_name, comb.id) do
-      old_name = comb.name
-      updated = %{comb | name: new_name}
+    with {:ok, sector} <- get(name_or_id),
+         :ok <- validate_name_available(new_name, sector.id) do
+      old_name = sector.name
+      updated = %{sector | name: new_name}
 
-      if comb.path && File.dir?(comb.path) && Path.basename(comb.path) == old_name do
-        new_path = Path.join(Path.dirname(comb.path), new_name)
+      if sector.path && File.dir?(sector.path) && Path.basename(sector.path) == old_name do
+        new_path = Path.join(Path.dirname(sector.path), new_name)
 
-        case File.rename(comb.path, new_path) do
+        case File.rename(sector.path, new_path) do
           :ok ->
             updated = %{updated | path: new_path}
-            Store.put(:combs, updated)
-            update_stored_paths(comb.path, new_path)
+            Store.put(:sectors, updated)
+            update_stored_paths(sector.path, new_path)
             {:ok, updated}
 
           {:error, reason} ->
             {:error, {:rename_failed, reason}}
         end
       else
-        Store.put(:combs, updated)
+        Store.put(:sectors, updated)
         {:ok, updated}
       end
     end
@@ -177,9 +177,9 @@ defmodule GiTF.Comb do
         github_repo: Keyword.get(opts, :github_repo)
       }
 
-      with {:ok, comb} <- Store.insert(:combs, record) do
-        set_current(comb.id)
-        {:ok, comb}
+      with {:ok, sector} <- Store.insert(:sectors, record) do
+        set_current(sector.id)
+        {:ok, sector}
       end
     end
   end
@@ -188,7 +188,7 @@ defmodule GiTF.Comb do
     name = Keyword.get(opts, :name, repo_name_from_url(url))
 
     with {:ok, gitf_root} <- GiTF.gitf_dir(),
-         destination = Path.join([gitf_root, ".gitf", "combs", name]),
+         destination = Path.join([gitf_root, ".gitf", "sectors", name]),
          :ok <- File.mkdir_p(Path.dirname(destination)),
          {:ok, cloned_path} <- GiTF.Git.clone(url, destination) do
       record = %{
@@ -201,9 +201,9 @@ defmodule GiTF.Comb do
         github_repo: Keyword.get(opts, :github_repo)
       }
 
-      with {:ok, comb} <- Store.insert(:combs, record) do
-        set_current(comb.id)
-        {:ok, comb}
+      with {:ok, sector} <- Store.insert(:sectors, record) do
+        set_current(sector.id)
+        {:ok, sector}
       end
     end
   end
@@ -215,7 +215,7 @@ defmodule GiTF.Comb do
   defp validate_unique_name(opts, expanded) do
     name = Keyword.get(opts, :name, Path.basename(expanded))
 
-    case Store.find_one(:combs, fn c -> c.name == name end) do
+    case Store.find_one(:sectors, fn c -> c.name == name end) do
       nil -> :ok
       _existing -> {:error, :name_already_taken}
     end
@@ -229,27 +229,27 @@ defmodule GiTF.Comb do
   end
 
   defp validate_name_available(name, excluding_id) do
-    case Store.find_one(:combs, fn c -> c.name == name && c.id != excluding_id end) do
+    case Store.find_one(:sectors, fn c -> c.name == name && c.id != excluding_id end) do
       nil -> :ok
       _existing -> {:error, :name_already_taken}
     end
   end
 
   defp update_stored_paths(old_path, new_path) do
-    Store.filter(:cells, fn c ->
+    Store.filter(:shells, fn c ->
       is_binary(c[:worktree_path]) && String.starts_with?(c.worktree_path, old_path)
     end)
-    |> Enum.each(fn cell ->
-      updated_path = String.replace_prefix(cell.worktree_path, old_path, new_path)
-      Store.put(:cells, %{cell | worktree_path: updated_path})
+    |> Enum.each(fn shell ->
+      updated_path = String.replace_prefix(shell.worktree_path, old_path, new_path)
+      Store.put(:shells, %{shell | worktree_path: updated_path})
     end)
 
     Store.filter(:ghosts, fn b ->
-      is_binary(b[:cell_path]) && String.starts_with?(b.cell_path, old_path)
+      is_binary(b[:shell_path]) && String.starts_with?(b.shell_path, old_path)
     end)
     |> Enum.each(fn ghost ->
-      updated_path = String.replace_prefix(ghost.cell_path, old_path, new_path)
-      Store.put(:ghosts, %{ghost | cell_path: updated_path})
+      updated_path = String.replace_prefix(ghost.shell_path, old_path, new_path)
+      Store.put(:ghosts, %{ghost | shell_path: updated_path})
     end)
   end
 end

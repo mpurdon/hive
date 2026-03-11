@@ -1,22 +1,22 @@
 defmodule GiTF.Plugin.Builtin.Commands.Quest do
-  @moduledoc "Built-in /quest command. Create, list, and show quests."
+  @moduledoc "Built-in /mission command. Create, list, and show missions."
 
   use GiTF.Plugin, type: :command
 
   @impl true
-  def name, do: "quest"
+  def name, do: "mission"
 
   @impl true
-  def description, do: "Manage quests (new, list, show)"
+  def description, do: "Manage missions (new, list, show)"
 
   @impl true
   def execute(args, ctx) do
     case String.trim(args) |> String.split(" ", parts: 2) do
       ["new", goal] -> do_new(goal, ctx)
-      ["new" | _] -> send_output(ctx, "Usage: /quest new <goal>")
+      ["new" | _] -> send_output(ctx, "Usage: /mission new <goal>")
       ["list" | _] -> do_list(ctx)
       ["show", id] -> do_show(id, ctx)
-      ["show" | _] -> send_output(ctx, "Usage: /quest show <id>")
+      ["show" | _] -> send_output(ctx, "Usage: /mission show <id>")
       [other | _] -> send_output(ctx, "Unknown subcommand: #{other}. Try: new, list, show")
       _ -> do_list(ctx)
     end
@@ -31,9 +31,9 @@ defmodule GiTF.Plugin.Builtin.Commands.Quest do
   end
 
   defp do_new(goal, ctx) do
-    case GiTF.Quests.create(%{goal: goal}) do
-      {:ok, quest} ->
-        send_output(ctx, "Quest \"#{quest.name}\" created (#{quest.id})")
+    case GiTF.Missions.create(%{goal: goal}) do
+      {:ok, mission} ->
+        send_output(ctx, "Quest \"#{mission.name}\" created (#{mission.id})")
 
       {:error, reason} ->
         send_output(ctx, "Failed: #{inspect(reason)}")
@@ -41,13 +41,13 @@ defmodule GiTF.Plugin.Builtin.Commands.Quest do
   end
 
   defp do_list(ctx) do
-    case GiTF.Quests.list() do
+    case GiTF.Missions.list() do
       [] ->
-        send_output(ctx, "No quests. Use /quest new <goal> to create one.")
+        send_output(ctx, "No missions. Use /mission new <goal> to create one.")
 
-      quests ->
+      missions ->
         lines =
-          Enum.map(quests, fn q ->
+          Enum.map(missions, fn q ->
             "  #{q.id}  #{q.name}  [#{q.status}]"
           end)
 
@@ -56,23 +56,23 @@ defmodule GiTF.Plugin.Builtin.Commands.Quest do
   end
 
   defp do_show(id, ctx) do
-    case GiTF.Quests.get(id) do
-      {:ok, quest} ->
+    case GiTF.Missions.get(id) do
+      {:ok, mission} ->
         lines =
           [
-            "Quest: #{quest.name} (#{quest.id})",
-            "Status: #{quest.status}",
-            "Goal: #{quest[:goal] || "-"}"
+            "Quest: #{mission.name} (#{mission.id})",
+            "Status: #{mission.status}",
+            "Goal: #{mission[:goal] || "-"}"
           ]
 
         jobs_lines =
-          case quest.jobs do
+          case mission.ops do
             [] ->
-              ["", "No jobs."]
+              ["", "No ops."]
 
-            jobs ->
+            ops ->
               ["", "Jobs:"] ++
-                Enum.map(jobs, fn j ->
+                Enum.map(ops, fn j ->
                   "  #{j.id}  #{j.title}  [#{j.status}]  #{j.ghost_id || "-"}"
                 end)
           end

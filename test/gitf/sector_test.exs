@@ -1,7 +1,7 @@
 defmodule GiTF.CombTest do
   use ExUnit.Case, async: false
 
-  alias GiTF.Comb
+  alias GiTF.Sector
   alias GiTF.Store
 
   setup do
@@ -19,18 +19,18 @@ defmodule GiTF.CombTest do
   end
 
   describe "add/2 with a local path" do
-    test "registers a comb from an existing directory", %{tmp: tmp} do
-      assert {:ok, comb} = Comb.add(tmp)
+    test "registers a sector from an existing directory", %{tmp: tmp} do
+      assert {:ok, sector} = Comb.add(tmp)
 
-      assert comb.name == Path.basename(tmp)
-      assert comb.path == tmp
-      assert String.starts_with?(comb.id, "cmb-")
+      assert sector.name == Path.basename(tmp)
+      assert sector.path == tmp
+      assert String.starts_with?(sector.id, "cmb-")
     end
 
     test "uses a custom name when provided", %{tmp: tmp} do
-      assert {:ok, comb} = Comb.add(tmp, name: "my-project")
+      assert {:ok, sector} = Comb.add(tmp, name: "my-project")
 
-      assert comb.name == "my-project"
+      assert sector.name == "my-project"
     end
 
     test "returns error for non-existent path" do
@@ -39,11 +39,11 @@ defmodule GiTF.CombTest do
   end
 
   describe "list/0" do
-    test "returns empty list when no combs exist" do
+    test "returns empty list when no sectors exist" do
       assert Comb.list() == []
     end
 
-    test "returns all registered combs", %{tmp: tmp} do
+    test "returns all registered sectors", %{tmp: tmp} do
       sub1 = Path.join(tmp, "project-a")
       sub2 = Path.join(tmp, "project-b")
       File.mkdir_p!(sub1)
@@ -52,22 +52,22 @@ defmodule GiTF.CombTest do
       {:ok, _} = Comb.add(sub1, name: "project-a")
       {:ok, _} = Comb.add(sub2, name: "project-b")
 
-      combs = Comb.list()
-      names = Enum.map(combs, & &1.name) |> Enum.sort()
+      sectors = Comb.list()
+      names = Enum.map(sectors, & &1.name) |> Enum.sort()
 
       assert names == ["project-a", "project-b"]
     end
   end
 
   describe "get/1" do
-    test "finds a comb by name", %{tmp: tmp} do
+    test "finds a sector by name", %{tmp: tmp} do
       {:ok, created} = Comb.add(tmp, name: "findme")
 
       assert {:ok, found} = Comb.get("findme")
       assert found.id == created.id
     end
 
-    test "finds a comb by ID", %{tmp: tmp} do
+    test "finds a sector by ID", %{tmp: tmp} do
       {:ok, created} = Comb.add(tmp, name: "byid")
 
       assert {:ok, found} = Comb.get(created.id)
@@ -80,7 +80,7 @@ defmodule GiTF.CombTest do
   end
 
   describe "remove/2" do
-    test "removes a comb record by name", %{tmp: tmp} do
+    test "removes a sector record by name", %{tmp: tmp} do
       {:ok, _} = Comb.add(tmp, name: "removeme")
 
       assert {:ok, removed} = Comb.remove("removeme")
@@ -89,24 +89,24 @@ defmodule GiTF.CombTest do
       assert {:error, :not_found} = Comb.get("removeme")
     end
 
-    test "returns error for unknown comb" do
+    test "returns error for unknown sector" do
       assert {:error, :not_found} = Comb.remove("ghost")
     end
   end
 
   describe "rename/2" do
-    test "updates comb name in store", %{tmp: tmp} do
+    test "updates sector name in store", %{tmp: tmp} do
       dir = Path.join(tmp, "original")
       File.mkdir_p!(dir)
-      {:ok, comb} = Comb.add(dir, name: "original")
+      {:ok, sector} = Comb.add(dir, name: "original")
 
       assert {:ok, renamed} = Comb.rename("original", "new-name")
       assert renamed.name == "new-name"
-      assert renamed.id == comb.id
+      assert renamed.id == sector.id
 
       # Verify lookup by new name works
       assert {:ok, found} = Comb.get("new-name")
-      assert found.id == comb.id
+      assert found.id == sector.id
 
       # Old name no longer resolves
       assert {:error, :not_found} = Comb.get("original")
@@ -138,70 +138,70 @@ defmodule GiTF.CombTest do
       refute File.dir?(dir)
     end
 
-    test "updates cell worktree_path and ghost cell_path when path changes", %{tmp: tmp} do
+    test "updates shell worktree_path and ghost shell_path when path changes", %{tmp: tmp} do
       dir = Path.join(tmp, "repo")
       File.mkdir_p!(dir)
-      {:ok, comb} = Comb.add(dir, name: "repo")
+      {:ok, sector} = Comb.add(dir, name: "repo")
 
-      # Create a cell with a worktree_path under the comb
-      {:ok, cell} =
-        Store.insert(:cells, %{
-          comb_id: comb.id,
+      # Create a shell with a worktree_path under the sector
+      {:ok, shell} =
+        Store.insert(:shells, %{
+          sector_id: sector.id,
           ghost_id: "ghost-1",
           branch: "feat",
           worktree_path: Path.join(dir, "worktrees/ghost-1"),
           status: "active"
         })
 
-      # Create a ghost with a cell_path under the comb
+      # Create a ghost with a shell_path under the sector
       {:ok, ghost} =
         Store.insert(:ghosts, %{
           name: "worker",
           status: "running",
-          cell_path: Path.join(dir, "worktrees/ghost-1"),
-          job_id: nil
+          shell_path: Path.join(dir, "worktrees/ghost-1"),
+          op_id: nil
         })
 
       assert {:ok, _} = Comb.rename("repo", "renamed-repo")
 
       new_dir = Path.join(tmp, "renamed-repo")
-      updated_cell = Store.get(:cells, cell.id)
+      updated_cell = Store.get(:shells, shell.id)
       assert updated_cell.worktree_path == Path.join(new_dir, "worktrees/ghost-1")
 
       updated_bee = Store.get(:ghosts, ghost.id)
-      assert updated_bee.cell_path == Path.join(new_dir, "worktrees/ghost-1")
+      assert updated_bee.shell_path == Path.join(new_dir, "worktrees/ghost-1")
     end
 
     test "does NOT move directory when basename doesn't match old name", %{tmp: tmp} do
-      # Add a comb with a custom name different from the directory basename
+      # Add a sector with a custom name different from the directory basename
       dir = Path.join(tmp, "actual-dir")
       File.mkdir_p!(dir)
-      {:ok, comb} = Comb.add(dir, name: "custom-name")
+      {:ok, sector} = Comb.add(dir, name: "custom-name")
 
       assert {:ok, renamed} = Comb.rename("custom-name", "new-custom")
       assert renamed.name == "new-custom"
       # Path stays the same since basename("actual-dir") != "custom-name"
-      assert renamed.path == comb.path
+      assert renamed.path == sector.path
       assert File.dir?(dir)
     end
   end
 
   describe "merge_strategy field" do
     test "defaults to manual when not specified", %{tmp: tmp} do
-      assert {:ok, comb} = Comb.add(tmp, name: "default-strategy")
+      assert {:ok, sector} = Comb.add(tmp, name: "default-strategy")
 
-      assert comb.merge_strategy == "manual"
+      assert sector.merge_strategy == "manual"
     end
 
-    test "can create comb with specific merge_strategy" do
+    test "can create sector with specific merge_strategy" do
       # Test that valid merge strategies are accepted as plain map fields
       {:ok, pr_comb} =
-        Store.insert(:combs, %{name: "pr-comb", merge_strategy: "pr_branch"})
+        Store.insert(:sectors, %{name: "pr-sector", merge_strategy: "pr_branch"})
 
       assert pr_comb.merge_strategy == "pr_branch"
 
       {:ok, auto_comb} =
-        Store.insert(:combs, %{name: "auto-comb", merge_strategy: "auto_merge"})
+        Store.insert(:sectors, %{name: "auto-sector", merge_strategy: "auto_merge"})
 
       assert auto_comb.merge_strategy == "auto_merge"
     end

@@ -14,14 +14,14 @@ defmodule GiTF.Authority do
   """
 
   @doc """
-  Determines the verification level for a job based on model reputation.
+  Determines the verification level for a op based on model reputation.
   """
   @spec verification_level(map()) :: :strict | :standard | :relaxed | :auto_approve
-  def verification_level(job) do
-    model = normalize_model(job[:assigned_model])
-    job_type = job[:job_type]
+  def verification_level(op) do
+    model = normalize_model(op[:assigned_model])
+    op_type = op[:op_type]
 
-    rep = GiTF.Reputation.model_reputation(model, job_type)
+    rep = GiTF.Reputation.model_reputation(model, op_type)
     compute_level(rep)
   end
 
@@ -48,14 +48,14 @@ defmodule GiTF.Authority do
   end
 
   @doc """
-  Returns true if a job should be auto-merged (skip verification entirely).
+  Returns true if a op should be auto-merged (skip verification entirely).
 
-  Only for `:auto_approve` authority AND `:low` risk jobs.
+  Only for `:auto_approve` authority AND `:low` risk ops.
   """
   @spec should_auto_merge?(map()) :: boolean()
-  def should_auto_merge?(job) do
-    verification_level(job) == :auto_approve and
-      Map.get(job, :risk_level, :low) == :low
+  def should_auto_merge?(op) do
+    verification_level(op) == :auto_approve and
+      Map.get(op, :risk_level, :low) == :low
   end
 
   # -- Private ---------------------------------------------------------------

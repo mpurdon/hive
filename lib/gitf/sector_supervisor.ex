@@ -1,4 +1,4 @@
-defmodule GiTF.CombSupervisor do
+defmodule GiTF.SectorSupervisor do
   @moduledoc """
   DynamicSupervisor for ghost processes.
 
@@ -13,9 +13,9 @@ defmodule GiTF.CombSupervisor do
 
   use DynamicSupervisor
 
-  @name GiTF.CombSupervisor
+  @name GiTF.SectorSupervisor
 
-  @doc "Starts the CombSupervisor."
+  @doc "Starts the SectorSupervisor."
   @spec start_link(keyword()) :: Supervisor.on_start()
   def start_link(opts \\ []) do
     DynamicSupervisor.start_link(__MODULE__, opts, name: @name)

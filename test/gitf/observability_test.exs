@@ -21,7 +21,7 @@ defmodule GiTF.ObservabilityTest do
       metrics = Metrics.collect_metrics()
       
       assert Map.has_key?(metrics, :system)
-      assert Map.has_key?(metrics, :quests)
+      assert Map.has_key?(metrics, :missions)
       assert Map.has_key?(metrics, :ghosts)
       assert Map.has_key?(metrics, :quality)
       assert Map.has_key?(metrics, :costs)
@@ -43,15 +43,15 @@ defmodule GiTF.ObservabilityTest do
       assert is_list(alerts)
     end
 
-    test "detects stuck quests" do
-      # Create old quest
-      quest = %{
+    test "detects stuck missions" do
+      # Create old mission
+      mission = %{
         id: "qst-stuck",
         status: "active",
         created_at: DateTime.add(DateTime.utc_now(), -3600),
         updated_at: DateTime.add(DateTime.utc_now(), -3600)
       }
-      Store.insert(:quests, quest)
+      Store.insert(:missions, mission)
       
       alerts = Alerts.check_alerts()
       

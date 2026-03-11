@@ -2,9 +2,9 @@ defmodule GiTF.Dashboard.OverviewLive do
   @moduledoc """
   Main dashboard overview showing key metrics at a glance.
 
-  Displays active ghost count, quest count, total cost, and recent
-  waggle messages. Subscribes to PubSub for live updates when new
-  waggles arrive.
+  Displays active ghost count, mission count, total cost, and recent
+  link_msg messages. Subscribes to PubSub for live updates when new
+  links arrive.
   """
 
   use Phoenix.LiveView
@@ -14,7 +14,7 @@ defmodule GiTF.Dashboard.OverviewLive do
   @impl true
   def mount(_params, _session, socket) do
     if connected?(socket) do
-      # Subscribe to all waggle traffic for live updates
+      # Subscribe to all link_msg traffic for live updates
       Phoenix.PubSub.subscribe(GiTF.PubSub, "link:major")
       Process.send_after(self(), :refresh, @refresh_interval)
     end
@@ -34,12 +34,12 @@ defmodule GiTF.Dashboard.OverviewLive do
 
   defp assign_data(socket) do
     ghosts = GiTF.Ghosts.list()
-    quests = GiTF.Quests.list()
+    missions = GiTF.Missions.list()
     cost_summary = GiTF.Costs.summary()
-    recent_waggles = GiTF.Waggle.list(limit: 5)
+    recent_waggles = GiTF.Link.list(limit: 5)
 
     active_ghosts = Enum.count(ghosts, &(Map.get(&1, :status) in ["working", "starting"]))
-    active_quests = Enum.count(quests, &(Map.get(&1, :status) == "active"))
+    active_quests = Enum.count(missions, &(Map.get(&1, :status) == "active"))
     
     # Context monitoring
     bees_with_context = Enum.filter(ghosts, &Map.has_key?(&1, :context_percentage))
@@ -51,22 +51,22 @@ defmodule GiTF.Dashboard.OverviewLive do
     high_context_bees = Enum.count(bees_with_context, &((&1.context_percentage || 0) > 40))
     
     # Verification stats
-    jobs = GiTF.Jobs.list()
-    verified_jobs = Enum.count(jobs, &(Map.get(&1, :verification_status) == "passed"))
-    failed_verification = Enum.count(jobs, &(Map.get(&1, :verification_status) == "failed"))
-    pending_verification = Enum.count(jobs, &(Map.get(&1, :verification_status) == "pending" and Map.get(&1, :status) == "done"))
+    ops = GiTF.Ops.list()
+    verified_jobs = Enum.count(ops, &(Map.get(&1, :verification_status) == "passed"))
+    failed_verification = Enum.count(ops, &(Map.get(&1, :verification_status) == "failed"))
+    pending_verification = Enum.count(ops, &(Map.get(&1, :verification_status) == "pending" and Map.get(&1, :status) == "done"))
 
     # Quest phases
-    research_quests = Enum.count(quests, &(Map.get(&1, :current_phase) == "research"))
-    planning_quests = Enum.count(quests, &(Map.get(&1, :current_phase) == "planning"))
-    implementation_quests = Enum.count(quests, &(Map.get(&1, :current_phase) == "implementation"))
+    research_quests = Enum.count(missions, &(Map.get(&1, :current_phase) == "research"))
+    planning_quests = Enum.count(missions, &(Map.get(&1, :current_phase) == "planning"))
+    implementation_quests = Enum.count(missions, &(Map.get(&1, :current_phase) == "implementation"))
 
     socket
     |> assign(:page_title, "Overview")
     |> assign(:current_path, "/")
     |> assign(:ghost_count, length(ghosts))
     |> assign(:active_ghosts, active_ghosts)
-    |> assign(:quest_count, length(quests))
+    |> assign(:quest_count, length(missions))
     |> assign(:active_quests, active_quests)
     |> assign(:total_cost, cost_summary.total_cost)
     |> assign(:total_input_tokens, cost_summary.total_input_tokens)
@@ -84,7 +84,7 @@ defmodule GiTF.Dashboard.OverviewLive do
   end
 
   defp safe_active_count do
-    GiTF.CombSupervisor.active_count()
+    GiTF.SectorSupervisor.active_count()
   rescue
     _ -> 0
   end
@@ -114,7 +114,7 @@ defmodule GiTF.Dashboard.OverviewLive do
         <div class="card">
           <div class="card-label">Live Processes</div>
           <div class="card-value">{@active_processes}</div>
-          <div class="card-label" style="margin-top:0.25rem">under CombSupervisor</div>
+          <div class="card-label" style="margin-top:0.25rem">under SectorSupervisor</div>
         </div>
       </div>
 
@@ -147,20 +147,20 @@ defmodule GiTF.Dashboard.OverviewLive do
       </div>
 
       <div class="panel">
-        <div class="panel-title">Recent Waggles</div>
+        <div class="panel-title">Recent Links</div>
         <%= if @recent_waggles == [] do %>
-          <div class="empty">No waggle messages yet.</div>
+          <div class="empty">No link_msg messages yet.</div>
         <% else %>
-          <%= for waggle <- @recent_waggles do %>
-            <div class={"waggle-item #{unless waggle.read, do: "waggle-unread"}"}>
-              <div class="waggle-subject">{waggle.subject || "(no subject)"}</div>
-              <div class="waggle-meta">
-                {waggle.from} &rarr; {waggle.to}
+          <%= for link_msg <- @recent_waggles do %>
+            <div class={"link_msg-item #{unless link_msg.read, do: "link_msg-unread"}"}>
+              <div class="link_msg-subject">{link_msg.subject || "(no subject)"}</div>
+              <div class="link_msg-meta">
+                {link_msg.from} &rarr; {link_msg.to}
                 &middot;
-                {format_timestamp(waggle.inserted_at)}
+                {format_timestamp(link_msg.inserted_at)}
                 &middot;
-                <span class={"badge #{if waggle.read, do: "badge-grey", else: "badge-blue"}"}>
-                  {if waggle.read, do: "read", else: "unread"}
+                <span class={"badge #{if link_msg.read, do: "badge-grey", else: "badge-blue"}"}>
+                  {if link_msg.read, do: "read", else: "unread"}
                 </span>
               </div>
             </div>

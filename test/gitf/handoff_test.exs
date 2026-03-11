@@ -11,77 +11,77 @@ defmodule GiTF.HandoffTest do
     {:ok, _} = GiTF.Store.start_link(data_dir: tmp_dir)
     on_exit(fn -> File.rm_rf!(tmp_dir) end)
 
-    # Set up a full ghost with job, cell, and waggles
-    {:ok, comb} =
-      Store.insert(:combs, %{name: "handoff-comb-#{:erlang.unique_integer([:positive])}"})
+    # Set up a full ghost with op, shell, and links
+    {:ok, sector} =
+      Store.insert(:sectors, %{name: "handoff-sector-#{:erlang.unique_integer([:positive])}"})
 
-    {:ok, quest} =
-      Store.insert(:quests, %{
-        name: "handoff-quest-#{:erlang.unique_integer([:positive])}",
+    {:ok, mission} =
+      Store.insert(:missions, %{
+        name: "handoff-mission-#{:erlang.unique_integer([:positive])}",
         status: "pending"
       })
 
-    {:ok, job} =
-      GiTF.Jobs.create(%{
+    {:ok, op} =
+      GiTF.Ops.create(%{
         title: "Implement feature X",
         description: "Build the X feature with proper tests",
-        quest_id: quest.id,
-        comb_id: comb.id
+        mission_id: mission.id,
+        sector_id: sector.id
       })
 
     {:ok, ghost} =
-      Store.insert(:ghosts, %{name: "handoff-ghost", status: "working", job_id: job.id})
+      Store.insert(:ghosts, %{name: "handoff-ghost", status: "working", op_id: op.id})
 
-    {:ok, cell} =
-      Store.insert(:cells, %{
+    {:ok, shell} =
+      Store.insert(:shells, %{
         ghost_id: ghost.id,
-        comb_id: comb.id,
+        sector_id: sector.id,
         worktree_path: "/tmp/handoff-worktree",
         branch: "ghost/#{ghost.id}",
         status: "active"
       })
 
-    # Create some waggles to/from this ghost
+    # Create some links to/from this ghost
     {:ok, _sent} =
-      GiTF.Waggle.send(ghost.id, "major", "progress", "50% done with feature X")
+      GiTF.Link.send(ghost.id, "major", "progress", "50% done with feature X")
 
     {:ok, _received} =
-      GiTF.Waggle.send("major", ghost.id, "guidance", "Focus on the API first")
+      GiTF.Link.send("major", ghost.id, "guidance", "Focus on the API first")
 
-    %{ghost: ghost, job: job, cell: cell, comb: comb, quest: quest}
+    %{ghost: ghost, op: op, shell: shell, sector: sector, mission: mission}
   end
 
   describe "create/2" do
-    test "creates a handoff waggle for a ghost", ctx do
-      assert {:ok, waggle} = Handoff.create(ctx.ghost.id)
+    test "creates a handoff link_msg for a ghost", ctx do
+      assert {:ok, link_msg} = Handoff.create(ctx.ghost.id)
 
-      assert waggle.from == ctx.ghost.id
-      assert waggle.to == ctx.ghost.id
-      assert waggle.subject == "handoff"
-      assert waggle.read == false
+      assert link_msg.from == ctx.ghost.id
+      assert link_msg.to == ctx.ghost.id
+      assert link_msg.subject == "handoff"
+      assert link_msg.read == false
 
       # The body should contain handoff context
-      assert waggle.body =~ "Handoff Context"
-      assert waggle.body =~ ctx.ghost.name
-      assert waggle.body =~ ctx.job.title
-      assert waggle.body =~ ctx.cell.worktree_path
-      assert waggle.body =~ ctx.cell.branch
+      assert link_msg.body =~ "Handoff Context"
+      assert link_msg.body =~ ctx.ghost.name
+      assert link_msg.body =~ ctx.op.title
+      assert link_msg.body =~ ctx.shell.worktree_path
+      assert link_msg.body =~ ctx.shell.branch
     end
 
-    test "captures job description in handoff", ctx do
-      assert {:ok, waggle} = Handoff.create(ctx.ghost.id)
+    test "captures op description in handoff", ctx do
+      assert {:ok, link_msg} = Handoff.create(ctx.ghost.id)
 
-      assert waggle.body =~ "Implement feature X"
-      assert waggle.body =~ "Build the X feature"
+      assert link_msg.body =~ "Implement feature X"
+      assert link_msg.body =~ "Build the X feature"
     end
 
-    test "captures recent waggles in handoff", ctx do
-      assert {:ok, waggle} = Handoff.create(ctx.ghost.id)
+    test "captures recent links in handoff", ctx do
+      assert {:ok, link_msg} = Handoff.create(ctx.ghost.id)
 
       # Should include mention of sent messages
-      assert waggle.body =~ "progress"
+      assert link_msg.body =~ "progress"
       # Should include mention of received messages
-      assert waggle.body =~ "guidance"
+      assert link_msg.body =~ "guidance"
     end
 
     test "returns error for non-existent ghost" do
@@ -90,7 +90,7 @@ defmodule GiTF.HandoffTest do
   end
 
   describe "detect_handoff/1" do
-    test "detects an unread handoff waggle", ctx do
+    test "detects an unread handoff link_msg", ctx do
       {:ok, _waggle} = Handoff.create(ctx.ghost.id)
 
       assert {:ok, detected} = Handoff.detect_handoff(ctx.ghost.id)
@@ -103,8 +103,8 @@ defmodule GiTF.HandoffTest do
     end
 
     test "does not detect read handoffs", ctx do
-      {:ok, waggle} = Handoff.create(ctx.ghost.id)
-      GiTF.Waggle.mark_read(waggle.id)
+      {:ok, link_msg} = Handoff.create(ctx.ghost.id)
+      GiTF.Link.mark_read(link_msg.id)
 
       assert {:error, :no_handoff} = Handoff.detect_handoff(ctx.ghost.id)
     end
@@ -112,42 +112,42 @@ defmodule GiTF.HandoffTest do
 
   describe "resume/2" do
     test "reads handoff and returns a briefing", ctx do
-      {:ok, waggle} = Handoff.create(ctx.ghost.id)
+      {:ok, link_msg} = Handoff.create(ctx.ghost.id)
 
-      assert {:ok, briefing} = Handoff.resume(ctx.ghost.id, waggle.id)
+      assert {:ok, briefing} = Handoff.resume(ctx.ghost.id, link_msg.id)
 
       assert briefing =~ "Handoff Briefing"
       assert briefing =~ "continuing work"
       assert briefing =~ "Handoff Context"
     end
 
-    test "marks the handoff waggle as read", ctx do
-      {:ok, waggle} = Handoff.create(ctx.ghost.id)
-      assert waggle.read == false
+    test "marks the handoff link_msg as read", ctx do
+      {:ok, link_msg} = Handoff.create(ctx.ghost.id)
+      assert link_msg.read == false
 
-      {:ok, _briefing} = Handoff.resume(ctx.ghost.id, waggle.id)
+      {:ok, _briefing} = Handoff.resume(ctx.ghost.id, link_msg.id)
 
-      updated = Store.get(:waggles, waggle.id)
+      updated = Store.get(:links, link_msg.id)
       assert updated.read == true
     end
 
-    test "returns error for non-existent waggle" do
+    test "returns error for non-existent link_msg" do
       assert {:error, :handoff_not_found} = Handoff.resume("ghost-123", "wag-nonexistent")
     end
   end
 
   describe "create/2 with session_id" do
     test "includes session_id section in handoff body", ctx do
-      assert {:ok, waggle} = Handoff.create(ctx.ghost.id, session_id: "sess-abc123")
+      assert {:ok, link_msg} = Handoff.create(ctx.ghost.id, session_id: "sess-abc123")
 
-      assert waggle.body =~ "## Session ID"
-      assert waggle.body =~ "sess-abc123"
+      assert link_msg.body =~ "## Session ID"
+      assert link_msg.body =~ "sess-abc123"
     end
 
     test "omits session_id section when not provided", ctx do
-      assert {:ok, waggle} = Handoff.create(ctx.ghost.id)
+      assert {:ok, link_msg} = Handoff.create(ctx.ghost.id)
 
-      refute waggle.body =~ "## Session ID"
+      refute link_msg.body =~ "## Session ID"
     end
   end
 
@@ -199,14 +199,14 @@ defmodule GiTF.HandoffTest do
       assert markdown =~ "## Instructions for Continuation"
     end
 
-    test "handles ghost with no job" do
+    test "handles ghost with no op" do
       {:ok, ghost} = Store.insert(:ghosts, %{name: "jobless-ghost", status: "idle"})
 
       assert {:ok, markdown} = Handoff.build_handoff_context(ghost.id)
-      assert markdown =~ "No job assigned"
+      assert markdown =~ "No op assigned"
     end
 
-    test "handles ghost with no cell" do
+    test "handles ghost with no shell" do
       {:ok, ghost} = Store.insert(:ghosts, %{name: "cellless-ghost", status: "idle"})
 
       assert {:ok, markdown} = Handoff.build_handoff_context(ghost.id)

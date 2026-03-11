@@ -11,12 +11,12 @@ defmodule GiTF.Ingestion.WatchdogTest do
     root = Path.join(System.tmp_dir!(), "gitf_ingest_test_#{:erlang.unique_integer([:positive])}")
     File.mkdir_p!(root)
 
-    # Initialize Store (needed for combs/quests)
+    # Initialize Store (needed for sectors/missions)
     GiTF.Test.StoreHelper.stop_store()
     {:ok, _} = GiTF.Store.start_link(data_dir: Path.join(root, ".gitf/store"))
 
-    # Create a dummy comb so ingestion works
-    GiTF.Comb.add(root, name: "test-comb")
+    # Create a dummy sector so ingestion works
+    GiTF.Sector.add(root, name: "test-sector")
 
     # Terminate Ingestion.Watchdog from supervisor to prevent auto-restart conflicts
     try do
@@ -37,7 +37,7 @@ defmodule GiTF.Ingestion.WatchdogTest do
     {:ok, %{inbox: inbox, archive: archive}}
   end
 
-  test "ingests markdown file as quest", %{inbox: inbox, archive: archive} do
+  test "ingests markdown file as mission", %{inbox: inbox, archive: archive} do
     # 1. Create a work order
     file_path = Path.join(inbox, "fix_login_bug.md")
     content = "The login button is broken on mobile."
@@ -51,13 +51,13 @@ defmodule GiTF.Ingestion.WatchdogTest do
     Process.sleep(100)
     
     # 4. Verify Quest created
-    quests = Store.all(:quests)
-    assert length(quests) == 1
-    quest = hd(quests)
-    assert quest.name == "Fix login bug" # Title derived from filename
-    assert quest.goal == content
+    missions = Store.all(:missions)
+    assert length(missions) == 1
+    mission = hd(missions)
+    assert mission.name == "Fix login bug" # Title derived from filename
+    assert mission.goal == content
     # source field may or may not be present depending on the ingestion implementation
-    assert Map.get(quest, :source, nil) in [nil, "inbox:fix_login_bug.md"]
+    assert Map.get(mission, :source, nil) in [nil, "inbox:fix_login_bug.md"]
     
     # 5. Verify file archived
     assert File.ls!(inbox) == []

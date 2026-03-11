@@ -11,14 +11,14 @@ defmodule GiTF.TestDriver.Scenario do
       defmodule MyE2ETest do
         use GiTF.TestDriver.Scenario
 
-        scenario "quest completes with two jobs" do
-          {:ok, env, comb} = Harness.add_comb(env)
-          {:ok, quest, [job1, job2]} = Harness.create_quest(env,
-            jobs: [%{title: "Job 1"}, %{title: "Job 2"}]
+        scenario "mission completes with two ops" do
+          {:ok, env, sector} = Harness.add_comb(env)
+          {:ok, mission, [job1, job2]} = Harness.create_quest(env,
+            ops: [%{title: "Job 1"}, %{title: "Job 2"}]
           )
 
-          {:ok, _bee1} = Harness.spawn_mock_bee(env, job1.id, comb.id)
-          {:ok, _bee2} = Harness.spawn_mock_bee(env, job2.id, comb.id)
+          {:ok, _bee1} = Harness.spawn_mock_bee(env, job1.id, sector.id)
+          {:ok, _bee2} = Harness.spawn_mock_bee(env, job2.id, sector.id)
 
           await {:job_done, job1.id}
           await {:job_done, job2.id}
@@ -44,9 +44,9 @@ defmodule GiTF.TestDriver.Scenario do
       setup do
         GiTF.Test.StoreHelper.ensure_infrastructure()
 
-        # Ensure CombSupervisor is running (needed for ghost spawning)
-        unless Process.whereis(GiTF.CombSupervisor) do
-          DynamicSupervisor.start_link(strategy: :one_for_one, name: GiTF.CombSupervisor)
+        # Ensure SectorSupervisor is running (needed for ghost spawning)
+        unless Process.whereis(GiTF.SectorSupervisor) do
+          DynamicSupervisor.start_link(strategy: :one_for_one, name: GiTF.SectorSupervisor)
         end
 
         # E2E mock scripts emit Claude Code stream-json format.

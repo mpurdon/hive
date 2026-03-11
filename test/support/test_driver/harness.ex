@@ -16,7 +16,7 @@ defmodule GiTF.TestDriver.Harness do
           store_dir: String.t(),
           gitf_root: String.t(),
           repos: %{String.t() => String.t()},
-          combs: %{String.t() => map()},
+          sectors: %{String.t() => map()},
           mock_dir: String.t(),
           queen_pid: pid() | nil
         }
@@ -50,7 +50,7 @@ defmodule GiTF.TestDriver.Harness do
       store_dir: store_dir,
       gitf_root: gitf_root,
       repos: %{},
-      combs: %{},
+      sectors: %{},
       mock_dir: mock_dir,
       queen_pid: nil
     }
@@ -83,72 +83,72 @@ defmodule GiTF.TestDriver.Harness do
   end
 
   @doc """
-  Creates a test git repo and registers it as a comb.
+  Creates a test git repo and registers it as a sector.
 
-  Returns the updated env with the comb entry.
+  Returns the updated env with the sector entry.
   """
   @spec add_comb(env(), keyword()) :: {:ok, env(), map()}
   def add_comb(env, opts \\ []) do
-    name = Keyword.get(opts, :name, "test-comb-#{:erlang.unique_integer([:positive])}")
+    name = Keyword.get(opts, :name, "test-sector-#{:erlang.unique_integer([:positive])}")
     repo_path = create_temp_git_repo(name)
 
-    {:ok, comb} = GiTF.Comb.add(repo_path, name: name)
+    {:ok, sector} = GiTF.Sector.add(repo_path, name: name)
 
     env = %{
       env
       | repos: Map.put(env.repos, name, repo_path),
-        combs: Map.put(env.combs, name, comb)
+        sectors: Map.put(env.sectors, name, sector)
     }
 
-    {:ok, env, comb}
+    {:ok, env, sector}
   end
 
   @doc """
-  Creates a quest with jobs and returns them.
+  Creates a mission with ops and returns them.
 
   ## Options
 
-    * `:name` - quest name
-    * `:goal` - quest goal
-    * `:jobs` - list of job attr maps (each needs `:title`, gets `:comb_id` from opts or first comb)
-    * `:comb_id` - default comb_id for jobs
+    * `:name` - mission name
+    * `:goal` - mission goal
+    * `:ops` - list of op attr maps (each needs `:title`, gets `:sector_id` from opts or first sector)
+    * `:sector_id` - default sector_id for ops
     * `:dependencies` - list of `{job_index, depends_on_index}` tuples
 
   """
   @spec create_quest(env(), keyword()) :: {:ok, map(), [map()]}
   def create_quest(env, opts \\ []) do
-    goal = Keyword.get(opts, :goal, "Test quest #{:erlang.unique_integer([:positive])}")
+    goal = Keyword.get(opts, :goal, "Test mission #{:erlang.unique_integer([:positive])}")
     name = Keyword.get(opts, :name, nil)
-    comb_id = Keyword.get(opts, :comb_id) || first_comb_id(env)
+    sector_id = Keyword.get(opts, :sector_id) || first_comb_id(env)
 
     quest_attrs = %{goal: goal}
     quest_attrs = if name, do: Map.put(quest_attrs, :name, name), else: quest_attrs
 
-    {:ok, quest} = GiTF.Quests.create(quest_attrs)
+    {:ok, mission} = GiTF.Missions.create(quest_attrs)
 
-    job_specs = Keyword.get(opts, :jobs, [%{title: "Default test job"}])
+    job_specs = Keyword.get(opts, :ops, [%{title: "Default test op"}])
 
-    jobs =
+    ops =
       Enum.map(job_specs, fn job_attrs ->
-        attrs = Map.merge(job_attrs, %{quest_id: quest.id, comb_id: comb_id})
-        {:ok, job} = GiTF.Jobs.create(attrs)
-        job
+        attrs = Map.merge(job_attrs, %{mission_id: mission.id, sector_id: sector_id})
+        {:ok, op} = GiTF.Ops.create(attrs)
+        op
       end)
 
     # Set up dependencies
     deps = Keyword.get(opts, :dependencies, [])
 
-    Enum.each(deps, fn {job_idx, dep_idx} ->
-      job = Enum.at(jobs, job_idx)
-      dep = Enum.at(jobs, dep_idx)
-      {:ok, _} = GiTF.Jobs.add_dependency(job.id, dep.id)
+    Enum.each(deps, fn {op_idx, dep_idx} ->
+      op = Enum.at(ops, op_idx)
+      dep = Enum.at(ops, dep_idx)
+      {:ok, _} = GiTF.Ops.add_dependency(op.id, dep.id)
     end)
 
-    {:ok, quest, jobs}
+    {:ok, mission, ops}
   end
 
   @doc """
-  Spawns a ghost with a mock Claude executable for a given job.
+  Spawns a ghost with a mock Claude executable for a given op.
 
   ## Options
 
@@ -159,7 +159,7 @@ defmodule GiTF.TestDriver.Harness do
 
   """
   @spec spawn_mock_bee(env(), String.t(), String.t(), keyword()) :: {:ok, map()}
-  def spawn_mock_bee(env, job_id, comb_id, opts \\ []) do
+  def spawn_mock_bee(env, op_id, sector_id, opts \\ []) do
     exit_code = Keyword.get(opts, :exit_code, 0)
     delay_ms = Keyword.get(opts, :delay_ms, 100)
     mock_opts = Keyword.get(opts, :mock_opts, [])
@@ -173,7 +173,7 @@ defmodule GiTF.TestDriver.Harness do
       [claude_executable: script_path, prompt: "test prompt"] ++
         Keyword.take(opts, [:name])
 
-    GiTF.Ghosts.spawn(job_id, comb_id, env.gitf_root, spawn_opts)
+    GiTF.Ghosts.spawn(op_id, sector_id, env.gitf_root, spawn_opts)
   end
 
   @doc """
@@ -199,13 +199,13 @@ defmodule GiTF.TestDriver.Harness do
   end
 
   @doc """
-  Sends a waggle message directly to the Major process.
+  Sends a link_msg message directly to the Major process.
   """
   @spec send_waggle_to_major(map()) :: :ok
-  def send_waggle_to_major(waggle) do
+  def send_waggle_to_major(link_msg) do
     case Process.whereis(GiTF.Major) do
       nil -> :ok
-      pid -> send(pid, {:waggle_received, waggle})
+      pid -> send(pid, {:waggle_received, link_msg})
     end
 
     :ok
@@ -236,9 +236,9 @@ defmodule GiTF.TestDriver.Harness do
   end
 
   defp first_comb_id(env) do
-    case Map.values(env.combs) do
-      [comb | _] -> comb.id
-      [] -> raise "No combs added to harness. Call add_comb/2 first."
+    case Map.values(env.sectors) do
+      [sector | _] -> sector.id
+      [] -> raise "No sectors added to harness. Call add_comb/2 first."
     end
   end
 

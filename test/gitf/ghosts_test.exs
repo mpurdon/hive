@@ -9,9 +9,9 @@ defmodule GiTF.GhostsTest do
   setup do
     GiTF.Test.StoreHelper.ensure_infrastructure()
 
-    # Ensure CombSupervisor is running (may have been killed by prior tests)
-    unless Process.whereis(GiTF.CombSupervisor) do
-      DynamicSupervisor.start_link(strategy: :one_for_one, name: GiTF.CombSupervisor)
+    # Ensure SectorSupervisor is running (may have been killed by prior tests)
+    unless Process.whereis(GiTF.SectorSupervisor) do
+      DynamicSupervisor.start_link(strategy: :one_for_one, name: GiTF.SectorSupervisor)
     end
 
     store_dir = Path.join(@tmp_dir, "gitf_store_#{:erlang.unique_integer([:positive])}")
@@ -23,29 +23,29 @@ defmodule GiTF.GhostsTest do
     repo_path = create_temp_git_repo()
     gitf_root = create_gitf_workspace()
 
-    {:ok, comb} =
-      GiTF.Comb.add(repo_path, name: "ghosts-test-comb-#{:erlang.unique_integer([:positive])}")
+    {:ok, sector} =
+      GiTF.Sector.add(repo_path, name: "ghosts-test-sector-#{:erlang.unique_integer([:positive])}")
 
-    {:ok, quest} =
-      Store.insert(:quests, %{
-        name: "ghosts-test-quest-#{:erlang.unique_integer([:positive])}",
+    {:ok, mission} =
+      Store.insert(:missions, %{
+        name: "ghosts-test-mission-#{:erlang.unique_integer([:positive])}",
         status: "pending"
       })
 
-    {:ok, job} =
-      GiTF.Jobs.create(%{
+    {:ok, op} =
+      GiTF.Ops.create(%{
         title: "Bees test task",
-        quest_id: quest.id,
-        comb_id: comb.id
+        mission_id: mission.id,
+        sector_id: sector.id
       })
 
-    %{comb: comb, quest: quest, job: job, gitf_root: gitf_root}
+    %{sector: sector, mission: mission, op: op, gitf_root: gitf_root}
   end
 
   describe "spawn/4" do
-    test "creates a ghost record, assigns the job, and starts a worker", ctx do
+    test "creates a ghost record, assigns the op, and starts a worker", ctx do
       assert {:ok, ghost} =
-               Ghosts.spawn(ctx.job.id, ctx.comb.id, ctx.gitf_root,
+               Ghosts.spawn(ctx.op.id, ctx.sector.id, ctx.gitf_root,
                  name: "spawned-ghost",
                  claude_executable: "/bin/echo",
                  prompt: "hello"
@@ -55,9 +55,9 @@ defmodule GiTF.GhostsTest do
       assert String.starts_with?(ghost.id, "ghost-")
 
       # Job should be assigned to this ghost
-      {:ok, job} = GiTF.Jobs.get(ctx.job.id)
-      assert job.ghost_id == ghost.id
-      assert job.status == "assigned"
+      {:ok, op} = GiTF.Ops.get(ctx.op.id)
+      assert op.ghost_id == ghost.id
+      assert op.status == "assigned"
 
       # Worker should have started (wait for it to finish since echo exits fast)
       Process.sleep(1_000)
@@ -69,7 +69,7 @@ defmodule GiTF.GhostsTest do
 
     test "auto-generates a name if not provided", ctx do
       assert {:ok, ghost} =
-               Ghosts.spawn(ctx.job.id, ctx.comb.id, ctx.gitf_root,
+               Ghosts.spawn(ctx.op.id, ctx.sector.id, ctx.gitf_root,
                  claude_executable: "/bin/echo",
                  prompt: "auto-name"
                )
@@ -118,7 +118,7 @@ defmodule GiTF.GhostsTest do
   describe "stop/1" do
     test "stops a running worker", ctx do
       {:ok, ghost} =
-        Ghosts.spawn(ctx.job.id, ctx.comb.id, ctx.gitf_root,
+        Ghosts.spawn(ctx.op.id, ctx.sector.id, ctx.gitf_root,
           name: "stoppable-ghost",
           claude_executable: "/bin/sleep",
           prompt: "30"
@@ -142,7 +142,7 @@ defmodule GiTF.GhostsTest do
     test "creates new ghost in dead ghost's worktree", ctx do
       # Spawn a ghost and let it finish (echo exits immediately)
       {:ok, ghost} =
-        Ghosts.spawn(ctx.job.id, ctx.comb.id, ctx.gitf_root,
+        Ghosts.spawn(ctx.op.id, ctx.sector.id, ctx.gitf_root,
           name: "doomed-ghost",
           claude_executable: "/bin/echo",
           prompt: "hello"
@@ -154,42 +154,42 @@ defmodule GiTF.GhostsTest do
       {:ok, stopped_bee} = Ghosts.get(ghost.id)
       Store.put(:ghosts, %{stopped_bee | status: "crashed"})
 
-      # The job was completed by the worker — mark it failed so revive transition works
-      {:ok, job} = GiTF.Jobs.get(ctx.job.id)
-      Store.put(:jobs, %{job | status: "failed"})
+      # The op was completed by the worker — mark it failed so revive transition works
+      {:ok, op} = GiTF.Ops.get(ctx.op.id)
+      Store.put(:ops, %{op | status: "failed"})
 
       # Revive
       {:ok, new_bee} = Ghosts.revive(ghost.id, ctx.gitf_root, claude_executable: "/bin/echo")
 
       assert new_ghost.id != ghost.id
-      assert new_bee.job_id == ghost.job_id
+      assert new_bee.op_id == ghost.op_id
 
       # Cell should be reassigned to new ghost
-      cell = Store.find_one(:cells, fn c -> c.ghost_id == new_ghost.id and c.status == "active" end)
-      assert cell != nil
+      shell = Store.find_one(:shells, fn c -> c.ghost_id == new_ghost.id and c.status == "active" end)
+      assert shell != nil
 
       Process.sleep(1_000)
     end
 
     test "fails for active ghost", ctx do
       {:ok, ghost} =
-        Store.insert(:ghosts, %{name: "active-ghost", status: "working", job_id: ctx.job.id})
+        Store.insert(:ghosts, %{name: "active-ghost", status: "working", op_id: ctx.op.id})
 
       assert {:error, :bee_still_active} = Ghosts.revive(ghost.id, ctx.gitf_root)
     end
 
-    test "fails with no cell", ctx do
+    test "fails with no shell", ctx do
       {:ok, ghost} =
-        Store.insert(:ghosts, %{name: "no-cell-ghost", status: "crashed", job_id: ctx.job.id})
+        Store.insert(:ghosts, %{name: "no-shell-ghost", status: "crashed", op_id: ctx.op.id})
 
       assert {:error, :no_active_cell} = Ghosts.revive(ghost.id, ctx.gitf_root)
     end
 
-    test "revive transitions failed job to running", ctx do
+    test "revive transitions failed op to running", ctx do
       # Spawn and let it finish
       {:ok, ghost} =
-        Ghosts.spawn(ctx.job.id, ctx.comb.id, ctx.gitf_root,
-          name: "revive-job-test",
+        Ghosts.spawn(ctx.op.id, ctx.sector.id, ctx.gitf_root,
+          name: "revive-op-test",
           claude_executable: "/bin/echo",
           prompt: "hello"
         )
@@ -199,23 +199,23 @@ defmodule GiTF.GhostsTest do
       {:ok, stopped_bee} = Ghosts.get(ghost.id)
       Store.put(:ghosts, %{stopped_bee | status: "crashed"})
 
-      {:ok, job} = GiTF.Jobs.get(ctx.job.id)
-      Store.put(:jobs, %{job | status: "failed"})
+      {:ok, op} = GiTF.Ops.get(ctx.op.id)
+      Store.put(:ops, %{op | status: "failed"})
 
       {:ok, new_bee} = Ghosts.revive(ghost.id, ctx.gitf_root, claude_executable: "/bin/echo")
 
-      {:ok, updated_job} = GiTF.Jobs.get(ctx.job.id)
+      {:ok, updated_job} = GiTF.Ops.get(ctx.op.id)
       assert updated_job.status == "running"
       assert updated_job.ghost_id == new_ghost.id
 
       Process.sleep(1_000)
     end
 
-    test "revive leaves done job alone", ctx do
+    test "revive leaves done op alone", ctx do
       # Spawn and let it complete
       {:ok, ghost} =
-        Ghosts.spawn(ctx.job.id, ctx.comb.id, ctx.gitf_root,
-          name: "done-job-test",
+        Ghosts.spawn(ctx.op.id, ctx.sector.id, ctx.gitf_root,
+          name: "done-op-test",
           claude_executable: "/bin/echo",
           prompt: "hello"
         )
@@ -226,12 +226,12 @@ defmodule GiTF.GhostsTest do
       Store.put(:ghosts, %{stopped_bee | status: "crashed"})
 
       # Job is "done" from the worker completing — leave it done
-      {:ok, job} = GiTF.Jobs.get(ctx.job.id)
-      assert job.status == "done"
+      {:ok, op} = GiTF.Ops.get(ctx.op.id)
+      assert op.status == "done"
 
       {:ok, _new_bee} = Ghosts.revive(ghost.id, ctx.gitf_root, claude_executable: "/bin/echo")
 
-      {:ok, still_done_job} = GiTF.Jobs.get(ctx.job.id)
+      {:ok, still_done_job} = GiTF.Ops.get(ctx.op.id)
       assert still_done_job.status == "done"
 
       Process.sleep(1_000)

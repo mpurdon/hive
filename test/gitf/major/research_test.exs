@@ -28,13 +28,13 @@ defmodule GiTF.Major.ResearchTest do
     System.cmd("git", ["add", "."], cd: test_path)
     System.cmd("git", ["commit", "-m", "Initial commit"], cd: test_path)
     
-    # Create test comb
-    {:ok, comb} = Store.insert(:combs, %{
-      name: "test-comb",
+    # Create test sector
+    {:ok, sector} = Store.insert(:sectors, %{
+      name: "test-sector",
       path: test_path
     })
     
-    {:ok, comb: comb, test_path: test_path}
+    {:ok, sector: sector, test_path: test_path}
   end
 
   test "analyze_structure returns correct file analysis", %{test_path: test_path} do
@@ -49,8 +49,8 @@ defmodule GiTF.Major.ResearchTest do
     assert "test" in structure.directories
   end
 
-  test "perform_fresh_research stores cache", %{comb: comb} do
-    {:ok, cache} = Research.perform_fresh_research(comb.id)
+  test "perform_fresh_research stores cache", %{sector: sector} do
+    {:ok, cache} = Research.perform_fresh_research(sector.id)
     
     assert cache.research.analysis_type == "basic_structure"
     assert cache.research.structure.total_files == 4
@@ -58,27 +58,27 @@ defmodule GiTF.Major.ResearchTest do
     assert is_struct(cache.research.analyzed_at, DateTime)
   end
 
-  test "research_comb uses cache when valid", %{comb: comb} do
+  test "research_comb uses cache when valid", %{sector: sector} do
     # First call should create cache
-    {:ok, result1} = Research.research_comb(comb.id)
+    {:ok, result1} = Research.research_comb(sector.id)
     
     # Second call should use cache (same analyzed_at timestamp)
-    {:ok, result2} = Research.research_comb(comb.id)
+    {:ok, result2} = Research.research_comb(sector.id)
     
     assert result1.research.analyzed_at == result2.research.analyzed_at
   end
 
-  test "research_comb refreshes cache when invalid", %{comb: comb} do
+  test "research_comb refreshes cache when invalid", %{sector: sector} do
     # First call creates cache
-    {:ok, result1} = Research.research_comb(comb.id)
+    {:ok, result1} = Research.research_comb(sector.id)
     
     # Make git change to invalidate cache
-    File.write!(Path.join(comb.path, "new_file.ex"), "defmodule New do\nend")
-    System.cmd("git", ["add", "."], cd: comb.path)
-    System.cmd("git", ["commit", "-m", "Add new file"], cd: comb.path)
+    File.write!(Path.join(sector.path, "new_file.ex"), "defmodule New do\nend")
+    System.cmd("git", ["add", "."], cd: sector.path)
+    System.cmd("git", ["commit", "-m", "Add new file"], cd: sector.path)
     
     # Second call should refresh cache
-    {:ok, result2} = Research.research_comb(comb.id)
+    {:ok, result2} = Research.research_comb(sector.id)
     
     assert result1.research.analyzed_at != result2.research.analyzed_at
     assert result2.research.structure.total_files == 5

@@ -11,23 +11,23 @@ defmodule GiTF.GitHub do
   @api_base "https://api.github.com"
 
   @doc """
-  Creates a GitHub PR for a cell's branch.
+  Creates a GitHub PR for a shell's branch.
 
   Returns `{:ok, pr_url}` or `{:error, reason}`.
   """
   @spec create_pr(GiTF.Schema.Comb.t(), GiTF.Schema.Cell.t(), GiTF.Schema.Job.t()) ::
           {:ok, String.t()} | {:error, term()}
-  def create_pr(comb, cell, job) do
-    with {:ok, client} <- client(comb) do
+  def create_pr(sector, shell, op) do
+    with {:ok, client} <- client(sector) do
       body = %{
-        title: job.title,
-        head: cell.branch,
-        base: detect_default_branch(comb),
-        body: "Automated PR from GiTF ghost.\n\nJob: #{job.id}\n#{job.description || ""}"
+        title: op.title,
+        head: shell.branch,
+        base: detect_default_branch(sector),
+        body: "Automated PR from GiTF ghost.\n\nJob: #{op.id}\n#{op.description || ""}"
       }
 
       case Req.post(client,
-             url: "/repos/#{comb.github_owner}/#{comb.github_repo}/pulls",
+             url: "/repos/#{sector.github_owner}/#{sector.github_repo}/pulls",
              json: body
            ) do
         {:ok, %{status: status, body: resp}} when status in [201, 200] ->
@@ -47,10 +47,10 @@ defmodule GiTF.GitHub do
 
   @doc "Closes a GitHub issue by number."
   @spec close_issue(GiTF.Schema.Comb.t(), integer()) :: :ok | {:error, term()}
-  def close_issue(comb, issue_number) do
-    with {:ok, client} <- client(comb) do
+  def close_issue(sector, issue_number) do
+    with {:ok, client} <- client(sector) do
       case Req.patch(client,
-             url: "/repos/#{comb.github_owner}/#{comb.github_repo}/issues/#{issue_number}",
+             url: "/repos/#{sector.github_owner}/#{sector.github_repo}/issues/#{issue_number}",
              json: %{state: "closed"}
            ) do
         {:ok, %{status: 200}} ->
@@ -68,10 +68,10 @@ defmodule GiTF.GitHub do
   @doc "Creates a GitHub issue."
   @spec create_issue(GiTF.Schema.Comb.t(), String.t(), String.t()) ::
           {:ok, map()} | {:error, term()}
-  def create_issue(comb, title, body) do
-    with {:ok, client} <- client(comb) do
+  def create_issue(sector, title, body) do
+    with {:ok, client} <- client(sector) do
       case Req.post(client,
-             url: "/repos/#{comb.github_owner}/#{comb.github_repo}/issues",
+             url: "/repos/#{sector.github_owner}/#{sector.github_repo}/issues",
              json: %{title: title, body: body}
            ) do
         {:ok, %{status: 201, body: resp}} ->
@@ -86,14 +86,14 @@ defmodule GiTF.GitHub do
     end
   end
 
-  @doc "Lists open issues for a comb."
+  @doc "Lists open issues for a sector."
   @spec list_issues(GiTF.Schema.Comb.t(), keyword()) :: {:ok, [map()]} | {:error, term()}
-  def list_issues(comb, opts \\ []) do
-    with {:ok, client} <- client(comb) do
+  def list_issues(sector, opts \\ []) do
+    with {:ok, client} <- client(sector) do
       state = Keyword.get(opts, :state, "open")
 
       case Req.get(client,
-             url: "/repos/#{comb.github_owner}/#{comb.github_repo}/issues",
+             url: "/repos/#{sector.github_owner}/#{sector.github_repo}/issues",
              params: [state: state, per_page: 30]
            ) do
         {:ok, %{status: 200, body: issues}} ->
@@ -110,11 +110,11 @@ defmodule GiTF.GitHub do
 
   @doc "Adds a comment to an issue or PR."
   @spec add_comment(GiTF.Schema.Comb.t(), integer(), String.t()) :: :ok | {:error, term()}
-  def add_comment(comb, issue_number, body) do
-    with {:ok, client} <- client(comb) do
+  def add_comment(sector, issue_number, body) do
+    with {:ok, client} <- client(sector) do
       case Req.post(client,
              url:
-               "/repos/#{comb.github_owner}/#{comb.github_repo}/issues/#{issue_number}/comments",
+               "/repos/#{sector.github_owner}/#{sector.github_repo}/issues/#{issue_number}/comments",
              json: %{body: body}
            ) do
         {:ok, %{status: 201}} ->
@@ -131,8 +131,8 @@ defmodule GiTF.GitHub do
 
   @doc "Builds a Req client with GitHub auth."
   @spec client(GiTF.Schema.Comb.t()) :: {:ok, Req.Request.t()} | {:error, :no_github_config}
-  def client(comb) do
-    if Map.get(comb, :github_owner) && Map.get(comb, :github_repo) do
+  def client(sector) do
+    if Map.get(sector, :github_owner) && Map.get(sector, :github_repo) do
       token = github_token()
 
       headers =
@@ -178,8 +178,8 @@ defmodule GiTF.GitHub do
   defp maybe_add_auth(headers, nil), do: headers
   defp maybe_add_auth(headers, token), do: [{"authorization", "Bearer #{token}"} | headers]
 
-  defp detect_default_branch(comb) do
-    path = Map.get(comb, :path)
+  defp detect_default_branch(sector) do
+    path = Map.get(sector, :path)
 
     if path && File.dir?(path) do
       case GiTF.Git.safe_cmd( ["symbolic-ref", "refs/remotes/origin/HEAD", "--short"],

@@ -2,7 +2,7 @@ defmodule GiTF.Reputation do
   @moduledoc """
   Reputation system for models.
 
-  Computes reputation scores from historical job/quest data and caches
+  Computes reputation scores from historical op/mission data and caches
   them in the Store. Scores go stale after 30 minutes and are lazily
   recomputed on next access.
   """
@@ -14,43 +14,43 @@ defmodule GiTF.Reputation do
   # -- Model Reputation ------------------------------------------------------
 
   @doc """
-  Returns reputation data for a model on a given job type.
+  Returns reputation data for a model on a given op type.
 
   Computed from historical Jobs/Costs/Quality data:
-  - success_rate: fraction of jobs completed successfully
+  - success_rate: fraction of ops completed successfully
   - avg_quality: average verification score (0-100)
-  - cost_efficiency: average cost per successful job
+  - cost_efficiency: average cost per successful op
   - total_jobs: sample size
 
   Returns a map or `nil` if no data.
   """
   @spec model_reputation(String.t(), atom()) :: map() | nil
-  def model_reputation(model, job_type) do
-    key = "model:#{model}:#{job_type}"
+  def model_reputation(model, op_type) do
+    key = "model:#{model}:#{op_type}"
 
     case get_cached(:model_reputation, key) do
       {:ok, rep} -> rep
-      :stale -> compute_and_cache_model_rep(model, job_type, key)
+      :stale -> compute_and_cache_model_rep(model, op_type, key)
     end
   end
 
-  defp compute_and_cache_model_rep(model, job_type, key) do
-    jobs =
-      Store.filter(:jobs, fn j ->
+  defp compute_and_cache_model_rep(model, op_type, key) do
+    ops =
+      Store.filter(:ops, fn j ->
         normalize_model(j[:assigned_model]) == normalize_model(model) and
-          j[:job_type] == job_type
+          j[:op_type] == op_type
       end)
 
-    if jobs == [] do
+    if ops == [] do
       nil
     else
-      done = Enum.count(jobs, &(&1.status == "done"))
-      regression_count = Enum.count(jobs, &(Map.get(&1, :regression_detected, false) == true))
+      done = Enum.count(ops, &(&1.status == "done"))
+      regression_count = Enum.count(ops, &(Map.get(&1, :regression_detected, false) == true))
       adjusted_done = max(done - regression_count * 0.5, 0)
-      total = length(jobs)
+      total = length(ops)
 
       quality_scores =
-        jobs
+        ops
         |> Enum.filter(&(&1.status == "done" and is_number(Map.get(&1, :quality_score))))
         |> Enum.map(& &1.quality_score)
 
@@ -61,7 +61,7 @@ defmodule GiTF.Reputation do
 
       rep = %{
         model: model,
-        job_type: job_type,
+        op_type: op_type,
         success_rate: if(total > 0, do: adjusted_done / total, else: 0.0),
         avg_quality: avg_quality,
         total_jobs: total,
@@ -76,18 +76,18 @@ defmodule GiTF.Reputation do
   # -- Recommendations -------------------------------------------------------
 
   @doc """
-  Recommends the best model for a job type and complexity based on reputation.
+  Recommends the best model for a op type and complexity based on reputation.
 
   Falls back to ModelSelector if no reputation data exists.
   """
   @spec recommend_model(atom(), atom()) :: String.t()
-  def recommend_model(job_type, complexity) do
+  def recommend_model(op_type, complexity) do
     models = ["opus", "sonnet", "haiku"]
 
     scored =
       models
       |> Enum.map(fn model ->
-        rep = model_reputation(model, job_type)
+        rep = model_reputation(model, op_type)
         score = if rep, do: rep.success_rate * (rep.total_jobs |> min(20)) / 20, else: 0.0
         {model, score}
       end)
@@ -96,24 +96,24 @@ defmodule GiTF.Reputation do
 
     case scored do
       [{model, _} | _] -> model
-      [] -> GiTF.Runtime.ModelSelector.select_model_for_job(job_type, complexity)
+      [] -> GiTF.Runtime.ModelSelector.select_model_for_job(op_type, complexity)
     end
   end
 
   @doc """
-  Recomputes reputations relevant to a completed/failed job.
+  Recomputes reputations relevant to a completed/failed op.
 
   Called by Major after verification pass/fail.
   """
   @spec update_after_job(String.t()) :: :ok
-  def update_after_job(job_id) do
-    case GiTF.Jobs.get(job_id) do
-      {:ok, job} ->
-        model = normalize_model(job[:assigned_model])
-        job_type = job[:job_type]
+  def update_after_job(op_id) do
+    case GiTF.Ops.get(op_id) do
+      {:ok, op} ->
+        model = normalize_model(op[:assigned_model])
+        op_type = op[:op_type]
 
-        if not is_nil(model) and not is_nil(job_type) do
-          key = "model:#{model}:#{job_type}"
+        if not is_nil(model) and not is_nil(op_type) do
+          key = "model:#{model}:#{op_type}"
           invalidate(:model_reputation, key)
         end
 
@@ -127,27 +127,27 @@ defmodule GiTF.Reputation do
   # -- Regression Penalty ----------------------------------------------------
 
   @doc """
-  Applies a regression penalty to all non-phase jobs of a quest.
+  Applies a regression penalty to all non-phase ops of a mission.
 
-  Marks jobs with `regression_detected: true` and invalidates their
+  Marks ops with `regression_detected: true` and invalidates their
   reputation cache so the penalty is reflected in future computations.
   """
   @spec apply_regression_penalty(String.t()) :: :ok
-  def apply_regression_penalty(quest_id) do
-    jobs = GiTF.Jobs.list(quest_id: quest_id)
+  def apply_regression_penalty(mission_id) do
+    ops = GiTF.Ops.list(mission_id: mission_id)
 
-    jobs
+    ops
     |> Enum.reject(& &1[:phase_job])
-    |> Enum.each(fn job ->
-      updated = Map.put(job, :regression_detected, true)
-      Store.put(:jobs, updated)
+    |> Enum.each(fn op ->
+      updated = Map.put(op, :regression_detected, true)
+      Store.put(:ops, updated)
 
-      # Invalidate reputation cache for this job's model
-      model = normalize_model(job[:assigned_model])
-      job_type = job[:job_type]
+      # Invalidate reputation cache for this op's model
+      model = normalize_model(op[:assigned_model])
+      op_type = op[:op_type]
 
-      if not is_nil(model) and not is_nil(job_type) do
-        invalidate(:model_reputation, "model:#{model}:#{job_type}")
+      if not is_nil(model) and not is_nil(op_type) do
+        invalidate(:model_reputation, "model:#{model}:#{op_type}")
       end
     end)
 

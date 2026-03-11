@@ -3,12 +3,12 @@ defmodule GiTF.EventStore do
   Persistent event log with replay support.
 
   A context module (no GenServer) backed by `GiTF.Store`. Every significant
-  action in the system — ghost lifecycle, job transitions, quest milestones —
+  action in the system — ghost lifecycle, op transitions, mission milestones —
   is recorded as an immutable event. This provides:
 
   - **Audit trail**: what happened, when, and to whom.
   - **Replay**: reconstruct entity history from its event stream.
-  - **Timeline**: see all activity for a quest across jobs, ghosts, and merges.
+  - **Timeline**: see all activity for a mission across ops, ghosts, and merges.
 
   All event data passes through `GiTF.Redaction.redact_map/1` before
   persistence to ensure secrets never reach the event log.
@@ -65,7 +65,7 @@ defmodule GiTF.EventStore do
   @doc """
   Records an event with metadata for cross-referencing.
 
-  Metadata may include `:quest_id`, `:job_id`, `:ghost_id` to link
+  Metadata may include `:mission_id`, `:op_id`, `:ghost_id` to link
   events across entity boundaries.
   """
   @spec record(atom(), String.t(), map(), map()) :: {:ok, map()} | {:error, :invalid_event_type}
@@ -94,8 +94,8 @@ defmodule GiTF.EventStore do
     * `:entity_id` - filter by entity ID string
     * `:since` - `DateTime`, only events after this time
     * `:limit` - max results (default 100)
-    * `:quest_id` - filter by metadata quest_id
-    * `:job_id` - filter by metadata job_id
+    * `:mission_id` - filter by metadata mission_id
+    * `:op_id` - filter by metadata op_id
     * `:ghost_id` - filter by metadata ghost_id
 
   Results are sorted by timestamp descending (newest first).
@@ -131,17 +131,17 @@ defmodule GiTF.EventStore do
   end
 
   @doc """
-  Returns a full chronological timeline for a quest.
+  Returns a full chronological timeline for a mission.
 
-  Gathers all events across every entity (jobs, ghosts, merges) whose
-  metadata `:quest_id` matches the given quest ID.
+  Gathers all events across every entity (ops, ghosts, merges) whose
+  metadata `:mission_id` matches the given mission ID.
   """
   @spec timeline(String.t()) :: [map()]
-  def timeline(quest_id) do
+  def timeline(mission_id) do
     Store.all(@collection)
     |> Enum.filter(fn event ->
-      get_in(event, [:metadata, :quest_id]) == quest_id or
-        event.entity_id == quest_id
+      get_in(event, [:metadata, :mission_id]) == mission_id or
+        event.entity_id == mission_id
     end)
     |> Enum.sort_by(& &1.timestamp, {:asc, DateTime})
   end
@@ -188,8 +188,8 @@ defmodule GiTF.EventStore do
     |> maybe_filter_type(Keyword.get(opts, :type))
     |> maybe_filter_entity(Keyword.get(opts, :entity_id))
     |> maybe_filter_since(Keyword.get(opts, :since))
-    |> maybe_filter_metadata(:quest_id, Keyword.get(opts, :quest_id))
-    |> maybe_filter_metadata(:job_id, Keyword.get(opts, :job_id))
+    |> maybe_filter_metadata(:mission_id, Keyword.get(opts, :mission_id))
+    |> maybe_filter_metadata(:op_id, Keyword.get(opts, :op_id))
     |> maybe_filter_metadata(:ghost_id, Keyword.get(opts, :ghost_id))
   end
 

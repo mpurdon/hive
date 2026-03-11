@@ -17,17 +17,17 @@ defmodule GiTF.IntelligenceTest do
 
   describe "analyze_and_suggest/1" do
     test "provides analysis and suggestions" do
-      job = %{
-        id: "job-analyze",
-        comb_id: "comb-test",
+      op = %{
+        id: "op-analyze",
+        sector_id: "sector-test",
         status: "failed",
         error_message: "test failed",
         created_at: DateTime.utc_now(),
         updated_at: DateTime.utc_now()
       }
-      Store.insert(:jobs, job)
+      Store.insert(:ops, op)
       
-      {:ok, result} = Intelligence.analyze_and_suggest(job.id)
+      {:ok, result} = Intelligence.analyze_and_suggest(op.id)
       
       assert result.analysis
       assert result.recommended_strategy
@@ -36,26 +36,26 @@ defmodule GiTF.IntelligenceTest do
   end
 
   describe "get_insights/1" do
-    test "provides intelligence insights for comb" do
-      comb_id = "comb-insights"
+    test "provides intelligence insights for sector" do
+      sector_id = "sector-insights"
       
-      # Create some jobs
+      # Create some ops
       for i <- 1..5 do
         status = if rem(i, 2) == 0, do: "done", else: "failed"
-        job = %{
-          id: "job-#{i}",
-          comb_id: comb_id,
+        op = %{
+          id: "op-#{i}",
+          sector_id: sector_id,
           status: status,
           error_message: if(status == "failed", do: "timeout", else: ""),
           created_at: DateTime.utc_now(),
           updated_at: DateTime.utc_now()
         }
-        Store.insert(:jobs, job)
+        Store.insert(:ops, op)
       end
       
-      insights = Intelligence.get_insights(comb_id)
+      insights = Intelligence.get_insights(sector_id)
       
-      assert insights.comb_id == comb_id
+      assert insights.sector_id == sector_id
       assert insights.total_jobs == 5
       assert insights.failed_jobs == 3
       assert insights.success_rate == 40.0

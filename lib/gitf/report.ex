@@ -1,9 +1,9 @@
 defmodule GiTF.Report do
   @moduledoc """
-  Generates quest performance reports from store data and ghost log files.
+  Generates mission performance reports from store data and ghost log files.
 
   Parses stream-json logs to extract token usage and cost, combines with
-  job/ghost timing data from the store, and produces a formatted summary.
+  op/ghost timing data from the store, and produces a formatted summary.
   """
 
   alias GiTF.Runtime.StreamParser
@@ -12,11 +12,11 @@ defmodule GiTF.Report do
   # -- Public API ------------------------------------------------------------
 
   @doc """
-  Generates a full report for a quest.
+  Generates a full report for a mission.
 
   Returns `{:ok, report}` where report is a map with:
-  - `:quest` - the quest record
-  - `:jobs` - list of job details with timing and ghost info
+  - `:mission` - the mission record
+  - `:ops` - list of op details with timing and ghost info
   - `:tokens` - aggregate token usage
   - `:cost` - aggregate cost
   - `:timing` - wall clock start/end/duration
@@ -25,16 +25,16 @@ defmodule GiTF.Report do
   Or `{:error, reason}`.
   """
   @spec generate(String.t()) :: {:ok, map()} | {:error, term()}
-  def generate(quest_id) do
-    with {:ok, quest} <- GiTF.Quests.get(quest_id) do
+  def generate(mission_id) do
+    with {:ok, mission} <- GiTF.Missions.get(mission_id) do
       gitf_root = gitf_root()
-      jobs = enrich_jobs(quest.jobs, gitf_root)
-      tokens = aggregate_tokens(jobs)
-      timing = compute_timing(jobs)
+      ops = enrich_jobs(mission.ops, gitf_root)
+      tokens = aggregate_tokens(ops)
+      timing = compute_timing(ops)
 
       report = %{
-        quest: quest,
-        jobs: jobs,
+        mission: mission,
+        ops: ops,
         tokens: tokens,
         timing: timing
       }
@@ -59,17 +59,17 @@ defmodule GiTF.Report do
 
   # -- Private: data enrichment ------------------------------------------------
 
-  defp enrich_jobs(jobs, gitf_root) do
-    Enum.map(jobs, fn job ->
-      ghost = if job.ghost_id, do: Store.get(:ghosts, job.ghost_id)
-      log_tokens = parse_bee_log(job.ghost_id, gitf_root)
+  defp enrich_jobs(ops, gitf_root) do
+    Enum.map(ops, fn op ->
+      ghost = if op.ghost_id, do: Store.get(:ghosts, op.ghost_id)
+      log_tokens = parse_bee_log(op.ghost_id, gitf_root)
 
       %{
-        job_id: job.id,
-        title: job.title,
-        status: job.status,
-        ghost_id: job.ghost_id,
-        ghost_name: ghost && (ghost[:name] || job.ghost_id),
+        op_id: op.id,
+        title: op.title,
+        status: op.status,
+        ghost_id: op.ghost_id,
+        ghost_name: ghost && (ghost[:name] || op.ghost_id),
         started_at: ghost && ghost[:inserted_at],
         completed_at: ghost && ghost[:updated_at],
         duration: compute_duration(ghost),
@@ -119,9 +119,9 @@ defmodule GiTF.Report do
     end
   end
 
-  defp aggregate_tokens(jobs) do
-    Enum.reduce(jobs, empty_tokens(), fn job, acc ->
-      t = job.tokens
+  defp aggregate_tokens(ops) do
+    Enum.reduce(ops, empty_tokens(), fn op, acc ->
+      t = op.tokens
 
       %{
         input: acc.input + t.input,
@@ -133,14 +133,14 @@ defmodule GiTF.Report do
     end)
   end
 
-  defp compute_timing(jobs) do
+  defp compute_timing(ops) do
     starts =
-      jobs
+      ops
       |> Enum.map(& &1.started_at)
       |> Enum.reject(&is_nil/1)
 
     ends =
-      jobs
+      ops
       |> Enum.map(& &1.completed_at)
       |> Enum.reject(&is_nil/1)
 
@@ -160,7 +160,7 @@ defmodule GiTF.Report do
   # -- Private: formatting ---------------------------------------------------
 
   defp format_header(report) do
-    q = report.quest
+    q = report.mission
     status = String.upcase(q.status)
 
     lines = ["Quest Report: #{q.name} [#{status}]"]
@@ -170,15 +170,15 @@ defmodule GiTF.Report do
   end
 
   defp format_timing_table(report) do
-    jobs = report.jobs
+    ops = report.ops
 
-    if jobs == [] do
-      "No jobs.\n"
+    if ops == [] do
+      "No ops.\n"
     else
-      # Detect parallelism: jobs overlapping in time
+      # Detect parallelism: ops overlapping in time
       job_data =
-        Enum.map(jobs, fn j ->
-          parallel = find_parallel_jobs(j, jobs)
+        Enum.map(ops, fn j ->
+          parallel = find_parallel_jobs(j, ops)
           duration_str = format_duration(j.duration)
 
           %{
@@ -235,16 +235,16 @@ defmodule GiTF.Report do
   end
 
   defp format_summary(report) do
-    jobs = report.jobs
-    total = length(jobs)
-    done = Enum.count(jobs, &(&1.status == "done"))
-    failed = Enum.count(jobs, &(&1.status == "failed"))
+    ops = report.ops
+    total = length(ops)
+    done = Enum.count(ops, &(&1.status == "done"))
+    failed = Enum.count(ops, &(&1.status == "failed"))
 
-    ghost_ids = jobs |> Enum.map(& &1.ghost_id) |> Enum.reject(&is_nil/1) |> Enum.uniq()
+    ghost_ids = ops |> Enum.map(& &1.ghost_id) |> Enum.reject(&is_nil/1) |> Enum.uniq()
 
     lines = [
       "Summary",
-      "  #{total} jobs, #{done} completed, #{failed} failed",
+      "  #{total} ops, #{done} completed, #{failed} failed",
       "  #{length(ghost_ids)} ghosts spawned"
     ]
 
@@ -279,12 +279,12 @@ defmodule GiTF.Report do
       |> then(fn cols -> "└" <> Enum.join(cols, "┴") <> "┘" end)
 
     format_row = fn row ->
-      cells =
+      shells =
         row
         |> Enum.zip(widths)
         |> Enum.map(fn {val, w} -> " " <> String.pad_trailing(val, w) <> " " end)
 
-      "│" <> Enum.join(cells, "│") <> "│"
+      "│" <> Enum.join(shells, "│") <> "│"
     end
 
     header_line = format_row.(headers)
@@ -299,11 +299,11 @@ defmodule GiTF.Report do
 
   # -- Private: helpers -------------------------------------------------------
 
-  defp find_parallel_jobs(job, all_jobs) do
-    case {job.started_at, job.completed_at} do
+  defp find_parallel_jobs(op, all_jobs) do
+    case {op.started_at, op.completed_at} do
       {%DateTime{} = s1, %DateTime{} = e1} ->
         all_jobs
-        |> Enum.reject(&(&1.job_id == job.job_id))
+        |> Enum.reject(&(&1.op_id == op.op_id))
         |> Enum.filter(fn other ->
           case {other.started_at, other.completed_at} do
             {%DateTime{} = s2, %DateTime{} = e2} ->

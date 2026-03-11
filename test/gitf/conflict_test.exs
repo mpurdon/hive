@@ -24,9 +24,9 @@ defmodule GiTF.ConflictTest do
     System.cmd("git", ["add", "."], cd: tmp_dir)
     System.cmd("git", ["commit", "-m", "initial"], cd: tmp_dir)
 
-    {:ok, comb} =
-      Store.insert(:combs, %{
-        name: "conflict-comb-#{:erlang.unique_integer([:positive])}",
+    {:ok, sector} =
+      Store.insert(:sectors, %{
+        name: "conflict-sector-#{:erlang.unique_integer([:positive])}",
         path: tmp_dir
       })
 
@@ -38,11 +38,11 @@ defmodule GiTF.ConflictTest do
 
     on_exit(fn -> File.rm_rf(tmp_dir) end)
 
-    %{comb: comb, ghost: ghost, tmp_dir: tmp_dir}
+    %{sector: sector, ghost: ghost, tmp_dir: tmp_dir}
   end
 
   describe "check/1" do
-    test "returns clean when no conflicts exist", %{comb: comb, ghost: ghost, tmp_dir: tmp_dir} do
+    test "returns clean when no conflicts exist", %{sector: sector, ghost: ghost, tmp_dir: tmp_dir} do
       # Create a branch with non-conflicting changes
       System.cmd("git", ["checkout", "-b", "test-branch"], cd: tmp_dir)
       File.write!(Path.join(tmp_dir, "new_file.txt"), "new content")
@@ -50,73 +50,73 @@ defmodule GiTF.ConflictTest do
       System.cmd("git", ["commit", "-m", "add new file"], cd: tmp_dir)
       System.cmd("git", ["checkout", "main"], cd: tmp_dir)
 
-      {:ok, cell} =
-        Store.insert(:cells, %{
-          comb_id: comb.id,
+      {:ok, shell} =
+        Store.insert(:shells, %{
+          sector_id: sector.id,
           ghost_id: ghost.id,
           branch: "test-branch",
           worktree_path: tmp_dir,
           status: "active"
         })
 
-      assert {:ok, :clean} = Conflict.check(cell.id)
+      assert {:ok, :clean} = Conflict.check(shell.id)
     end
 
-    test "returns error for non-existent cell" do
+    test "returns error for non-existent shell" do
       assert {:error, :cell_not_found} = Conflict.check("cel-nonexistent")
     end
   end
 
   describe "check_all_active/0" do
-    test "returns empty list when no active cells" do
+    test "returns empty list when no active shells" do
       assert Conflict.check_all_active() == []
     end
   end
 
   describe "resolve/2" do
-    test "returns error for non-existent cell" do
+    test "returns error for non-existent shell" do
       assert {:error, :cell_not_found} = Conflict.resolve("cel-nonexistent", :rebase)
     end
 
-    test "defer strategy marks cell for manual merge", %{comb: comb, ghost: ghost, tmp_dir: tmp_dir} do
-      {:ok, cell} =
-        Store.insert(:cells, %{
-          comb_id: comb.id,
+    test "defer strategy marks shell for manual merge", %{sector: sector, ghost: ghost, tmp_dir: tmp_dir} do
+      {:ok, shell} =
+        Store.insert(:shells, %{
+          sector_id: sector.id,
           ghost_id: ghost.id,
           branch: "test-branch",
           worktree_path: tmp_dir,
           status: "active"
         })
 
-      assert {:ok, :resolved} = Conflict.resolve(cell.id, :defer)
+      assert {:ok, :resolved} = Conflict.resolve(shell.id, :defer)
 
-      # Verify cell was marked for manual merge
-      updated_cell = Store.get(:cells, cell.id)
+      # Verify shell was marked for manual merge
+      updated_cell = Store.get(:shells, shell.id)
       assert updated_cell.needs_manual_merge == true
     end
 
-    test "rebase strategy on clean branch succeeds", %{comb: comb, ghost: ghost, tmp_dir: tmp_dir} do
+    test "rebase strategy on clean branch succeeds", %{sector: sector, ghost: ghost, tmp_dir: tmp_dir} do
       # Create a feature branch
       System.cmd("git", ["checkout", "-b", "feature-branch"], cd: tmp_dir)
       File.write!(Path.join(tmp_dir, "feature.txt"), "feature content")
       System.cmd("git", ["add", "."], cd: tmp_dir)
       System.cmd("git", ["commit", "-m", "add feature"], cd: tmp_dir)
 
-      {:ok, cell} =
-        Store.insert(:cells, %{
-          comb_id: comb.id,
+      {:ok, shell} =
+        Store.insert(:shells, %{
+          sector_id: sector.id,
           ghost_id: ghost.id,
           branch: "feature-branch",
           worktree_path: tmp_dir,
           status: "active"
         })
 
-      assert {:ok, :resolved} = Conflict.resolve(cell.id, :rebase)
+      assert {:ok, :resolved} = Conflict.resolve(shell.id, :rebase)
     end
   end
 
   describe "check_between_cells/2" do
-    test "returns clean when cells touch different files", %{comb: comb, tmp_dir: tmp_dir} do
+    test "returns clean when shells touch different files", %{sector: sector, tmp_dir: tmp_dir} do
       # Create two branches with different files
       System.cmd("git", ["checkout", "-b", "branch-a"], cd: tmp_dir)
       File.write!(Path.join(tmp_dir, "file_a.txt"), "content a")
@@ -134,8 +134,8 @@ defmodule GiTF.ConflictTest do
       {:ok, bee_b} = Store.insert(:ghosts, %{name: "ghost-b", status: "working"})
 
       {:ok, cell_a} =
-        Store.insert(:cells, %{
-          comb_id: comb.id,
+        Store.insert(:shells, %{
+          sector_id: sector.id,
           ghost_id: bee_a.id,
           branch: "branch-a",
           worktree_path: tmp_dir,
@@ -143,8 +143,8 @@ defmodule GiTF.ConflictTest do
         })
 
       {:ok, cell_b} =
-        Store.insert(:cells, %{
-          comb_id: comb.id,
+        Store.insert(:shells, %{
+          sector_id: sector.id,
           ghost_id: bee_b.id,
           branch: "branch-b",
           worktree_path: tmp_dir,
@@ -154,7 +154,7 @@ defmodule GiTF.ConflictTest do
       assert {:ok, :clean} = Conflict.check_between_cells(cell_a.id, cell_b.id)
     end
 
-    test "returns conflicts when cells touch same files", %{comb: comb, tmp_dir: tmp_dir} do
+    test "returns conflicts when shells touch same files", %{sector: sector, tmp_dir: tmp_dir} do
       # Create two branches modifying the same file
       System.cmd("git", ["checkout", "-b", "branch-c"], cd: tmp_dir)
       File.write!(Path.join(tmp_dir, "README.md"), "# Modified by branch C")
@@ -172,8 +172,8 @@ defmodule GiTF.ConflictTest do
       {:ok, bee_d} = Store.insert(:ghosts, %{name: "ghost-d", status: "working"})
 
       {:ok, cell_c} =
-        Store.insert(:cells, %{
-          comb_id: comb.id,
+        Store.insert(:shells, %{
+          sector_id: sector.id,
           ghost_id: bee_c.id,
           branch: "branch-c",
           worktree_path: tmp_dir,
@@ -181,8 +181,8 @@ defmodule GiTF.ConflictTest do
         })
 
       {:ok, cell_d} =
-        Store.insert(:cells, %{
-          comb_id: comb.id,
+        Store.insert(:shells, %{
+          sector_id: sector.id,
           ghost_id: bee_d.id,
           branch: "branch-d",
           worktree_path: tmp_dir,
@@ -193,7 +193,7 @@ defmodule GiTF.ConflictTest do
       assert "README.md" in files
     end
 
-    test "returns error for non-existent cell" do
+    test "returns error for non-existent shell" do
       assert {:error, :cell_not_found} = Conflict.check_between_cells("cel-nonexistent", "cel-other")
     end
   end

@@ -12,21 +12,21 @@ defmodule GiTF.ReputationTest do
 
     on_exit(fn -> File.rm_rf!(tmp_dir) end)
 
-    # Create test comb and quest
-    {:ok, comb} = Store.insert(:combs, %{name: "test-comb", path: "/tmp/test"})
+    # Create test sector and mission
+    {:ok, sector} = Store.insert(:sectors, %{name: "test-sector", path: "/tmp/test"})
 
-    {:ok, quest} =
-      Store.insert(:quests, %{
-        name: "test-quest",
+    {:ok, mission} =
+      Store.insert(:missions, %{
+        name: "test-mission",
         goal: "Test reputation",
-        comb_id: comb.id,
+        sector_id: sector.id,
         status: "completed",
         current_phase: "completed",
         artifacts: %{},
         phase_jobs: %{}
       })
 
-    %{comb: comb, quest: quest}
+    %{sector: sector, mission: mission}
   end
 
   describe "model_reputation/2" do
@@ -34,28 +34,28 @@ defmodule GiTF.ReputationTest do
       assert Reputation.model_reputation("sonnet", :implementation) == nil
     end
 
-    test "computes success rate from job history", %{quest: quest, comb: comb} do
-      # Create some completed jobs
+    test "computes success rate from op history", %{mission: mission, sector: sector} do
+      # Create some completed ops
       for _ <- 1..3 do
         {:ok, _} =
-          GiTF.Jobs.create(%{
+          GiTF.Ops.create(%{
             title: "Impl task",
-            quest_id: quest.id,
-            comb_id: comb.id,
-            job_type: :implementation,
+            mission_id: mission.id,
+            sector_id: sector.id,
+            op_type: :implementation,
             recommended_model: "sonnet",
             assigned_model: "sonnet",
             status: "done"
           })
       end
 
-      # Create one failed job
+      # Create one failed op
       {:ok, _} =
-        GiTF.Jobs.create(%{
+        GiTF.Ops.create(%{
           title: "Failed task",
-          quest_id: quest.id,
-          comb_id: comb.id,
-          job_type: :implementation,
+          mission_id: mission.id,
+          sector_id: sector.id,
+          op_type: :implementation,
           recommended_model: "sonnet",
           assigned_model: "sonnet",
           status: "failed"
@@ -67,13 +67,13 @@ defmodule GiTF.ReputationTest do
       assert rep.total_jobs == 4
     end
 
-    test "caches results and returns from cache", %{quest: quest, comb: comb} do
+    test "caches results and returns from cache", %{mission: mission, sector: sector} do
       {:ok, _} =
-        GiTF.Jobs.create(%{
+        GiTF.Ops.create(%{
           title: "Cached task",
-          quest_id: quest.id,
-          comb_id: comb.id,
-          job_type: :research,
+          mission_id: mission.id,
+          sector_id: sector.id,
+          op_type: :research,
           recommended_model: "haiku",
           assigned_model: "haiku",
           status: "done"
@@ -96,15 +96,15 @@ defmodule GiTF.ReputationTest do
       assert model in ["opus", "sonnet", "haiku"]
     end
 
-    test "uses reputation data when available", %{quest: quest, comb: comb} do
-      # Create many successful haiku jobs for research
+    test "uses reputation data when available", %{mission: mission, sector: sector} do
+      # Create many successful haiku ops for research
       for _ <- 1..10 do
         {:ok, _} =
-          GiTF.Jobs.create(%{
+          GiTF.Ops.create(%{
             title: "Research task",
-            quest_id: quest.id,
-            comb_id: comb.id,
-            job_type: :research,
+            mission_id: mission.id,
+            sector_id: sector.id,
+            op_type: :research,
             recommended_model: "haiku",
             assigned_model: "haiku",
             status: "done"
@@ -117,13 +117,13 @@ defmodule GiTF.ReputationTest do
   end
 
   describe "update_after_job/1" do
-    test "invalidates cached reputation", %{quest: quest, comb: comb} do
-      {:ok, job} =
-        GiTF.Jobs.create(%{
+    test "invalidates cached reputation", %{mission: mission, sector: sector} do
+      {:ok, op} =
+        GiTF.Ops.create(%{
           title: "Update test",
-          quest_id: quest.id,
-          comb_id: comb.id,
-          job_type: :implementation,
+          mission_id: mission.id,
+          sector_id: sector.id,
+          op_type: :implementation,
           recommended_model: "sonnet",
           assigned_model: "sonnet",
           status: "done"
@@ -133,14 +133,14 @@ defmodule GiTF.ReputationTest do
       _rep = Reputation.model_reputation("sonnet", :implementation)
 
       # Invalidate
-      assert :ok == Reputation.update_after_job(job.id)
+      assert :ok == Reputation.update_after_job(op.id)
 
       # Next call should recompute (may return same data but with fresh timestamp)
       rep2 = Reputation.model_reputation("sonnet", :implementation)
       assert rep2 != nil
     end
 
-    test "handles non-existent job gracefully" do
+    test "handles non-existent op gracefully" do
       assert :ok == Reputation.update_after_job("non-existent")
     end
   end

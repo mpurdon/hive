@@ -1,7 +1,7 @@
-defmodule GiTF.Jobs.ClassifierRiskTest do
+defmodule GiTF.Ops.ClassifierRiskTest do
   use ExUnit.Case, async: true
 
-  alias GiTF.Jobs.Classifier
+  alias GiTF.Ops.Classifier
 
   describe "classify_risk/3" do
     test "returns :low for simple tasks" do

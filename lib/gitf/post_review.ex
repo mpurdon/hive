@@ -2,9 +2,9 @@ defmodule GiTF.PostReview do
   @moduledoc """
   Post-completion review window.
 
-  After a quest is merged, monitors for regressions by periodically running
-  the comb's validation command. If regressions are detected, creates
-  follow-up quests and penalizes model reputation.
+  After a mission is merged, monitors for regressions by periodically running
+  the sector's validation command. If regressions are detected, creates
+  follow-up missions and penalizes model reputation.
   """
 
   require Logger
@@ -13,17 +13,17 @@ defmodule GiTF.PostReview do
   @review_duration_seconds 3600
 
   @doc """
-  Starts a post-merge review window for a completed quest.
+  Starts a post-merge review window for a completed mission.
 
   Inserts a review record that will be checked periodically by the Major.
   """
   @spec start_review(String.t()) :: {:ok, map()} | {:error, term()}
-  def start_review(quest_id) do
-    with {:ok, quest} <- GiTF.Quests.get(quest_id) do
+  def start_review(mission_id) do
+    with {:ok, mission} <- GiTF.Missions.get(mission_id) do
       review = %{
-        quest_id: quest_id,
-        quest_name: quest.name,
-        comb_id: quest.comb_id,
+        mission_id: mission_id,
+        quest_name: mission.name,
+        sector_id: mission.sector_id,
         status: "active",
         started_at: DateTime.utc_now(),
         expires_at: DateTime.add(DateTime.utc_now(), @review_duration_seconds, :second),
@@ -37,36 +37,36 @@ defmodule GiTF.PostReview do
         Phoenix.PubSub.broadcast(
           GiTF.PubSub,
           "section:alerts",
-          {:post_review_started, quest_id, quest.name}
+          {:post_review_started, mission_id, mission.name}
         )
       rescue
         _ -> :ok
       end
 
-      Logger.info("Post-review started for quest #{quest_id}, expires in #{@review_duration_seconds}s")
+      Logger.info("Post-review started for mission #{mission_id}, expires in #{@review_duration_seconds}s")
 
       {:ok, stored}
     end
   end
 
   @doc """
-  Checks for regressions by running the comb's validation command.
+  Checks for regressions by running the sector's validation command.
 
   Returns `{:ok, :clean}` or `{:ok, :regression, findings}`.
   """
   @spec check_regressions(String.t()) :: {:ok, :clean} | {:ok, :regression, String.t()} | {:error, term()}
-  def check_regressions(quest_id) do
-    with {:ok, review} <- get_review(quest_id),
-         {:ok, comb} <- Store.fetch(:combs, review.comb_id) do
+  def check_regressions(mission_id) do
+    with {:ok, review} <- get_review(mission_id),
+         {:ok, sector} <- Store.fetch(:sectors, review.sector_id) do
 
-      validation_command = Map.get(comb, :validation_command)
+      validation_command = Map.get(sector, :validation_command)
 
       if is_nil(validation_command) do
         {:ok, :clean}
       else
         task = Task.async(fn ->
           System.cmd("sh", ["-c", validation_command],
-            cd: comb.path, stderr_to_stdout: true)
+            cd: sector.path, stderr_to_stdout: true)
         end)
 
         case Task.yield(task, 120_000) || Task.shutdown(task, 5_000) do
@@ -83,33 +83,33 @@ defmodule GiTF.PostReview do
     end
   rescue
     e ->
-      Logger.warning("Regression check failed for quest #{quest_id}: #{Exception.message(e)}")
+      Logger.warning("Regression check failed for mission #{mission_id}: #{Exception.message(e)}")
       {:error, {:check_failed, Exception.message(e)}}
   end
 
   @doc """
   Handles a detected regression.
 
-  Creates a follow-up quest, applies reputation penalties, and broadcasts an alert.
+  Creates a follow-up mission, applies reputation penalties, and broadcasts an alert.
   """
   @spec handle_regression(String.t(), String.t()) :: {:ok, map()} | {:error, term()}
-  def handle_regression(quest_id, findings) do
-    with {:ok, quest} <- GiTF.Quests.get(quest_id) do
-      # Create follow-up quest
-      {:ok, followup} = GiTF.Quests.create(%{
-        goal: "Fix regression from quest \"#{quest.name}\"",
-        comb_id: quest.comb_id
+  def handle_regression(mission_id, findings) do
+    with {:ok, mission} <- GiTF.Missions.get(mission_id) do
+      # Create follow-up mission
+      {:ok, followup} = GiTF.Missions.create(%{
+        goal: "Fix regression from mission \"#{mission.name}\"",
+        sector_id: mission.sector_id
       })
 
       # Apply reputation penalty
-      GiTF.Reputation.apply_regression_penalty(quest_id)
+      GiTF.Reputation.apply_regression_penalty(mission_id)
 
       # Update review record
-      update_review(quest_id, %{
+      update_review(mission_id, %{
         status: "regression_detected",
         outcome: %{
           findings: String.slice(findings, 0, 5000),
-          followup_quest_id: followup.id,
+          followup_mission_id: followup.id,
           detected_at: DateTime.utc_now()
         }
       })
@@ -119,13 +119,13 @@ defmodule GiTF.PostReview do
         Phoenix.PubSub.broadcast(
           GiTF.PubSub,
           "section:alerts",
-          {:regression_detected, quest_id, followup.id}
+          {:regression_detected, mission_id, followup.id}
         )
       rescue
         _ -> :ok
       end
 
-      Logger.warning("Regression detected for quest #{quest_id}, follow-up quest #{followup.id} created")
+      Logger.warning("Regression detected for mission #{mission_id}, follow-up mission #{followup.id} created")
 
       {:ok, followup}
     end
@@ -135,24 +135,24 @@ defmodule GiTF.PostReview do
   Closes a review window, recording the outcome.
   """
   @spec close_review(String.t()) :: :ok | {:error, term()}
-  def close_review(quest_id) do
-    update_review(quest_id, %{
+  def close_review(mission_id) do
+    update_review(mission_id, %{
       status: "completed",
-      outcome: Map.get(get_review_raw(quest_id) || %{}, :outcome) || %{result: "clean"}
+      outcome: Map.get(get_review_raw(mission_id) || %{}, :outcome) || %{result: "clean"}
     })
 
-    Logger.info("Post-review closed for quest #{quest_id}")
+    Logger.info("Post-review closed for mission #{mission_id}")
     :ok
   end
 
   @doc """
-  Returns whether post-review is enabled for a comb.
+  Returns whether post-review is enabled for a sector.
   """
   @spec enabled?(String.t()) :: boolean()
-  def enabled?(comb_id) do
-    case Store.get(:combs, comb_id) do
+  def enabled?(sector_id) do
+    case Store.get(:sectors, sector_id) do
       nil -> false
-      comb -> Map.get(comb, :post_review, false) == true
+      sector -> Map.get(sector, :post_review, false) == true
     end
   end
 
@@ -174,19 +174,19 @@ defmodule GiTF.PostReview do
 
   # -- Private ---------------------------------------------------------------
 
-  defp get_review(quest_id) do
-    case get_review_raw(quest_id) do
+  defp get_review(mission_id) do
+    case get_review_raw(mission_id) do
       nil -> {:error, :not_found}
       review -> {:ok, review}
     end
   end
 
-  defp get_review_raw(quest_id) do
-    Store.find_one(:post_reviews, fn r -> r.quest_id == quest_id end)
+  defp get_review_raw(mission_id) do
+    Store.find_one(:post_reviews, fn r -> r.mission_id == mission_id end)
   end
 
-  defp update_review(quest_id, updates) do
-    case get_review_raw(quest_id) do
+  defp update_review(mission_id, updates) do
+    case get_review_raw(mission_id) do
       nil -> :ok
       review ->
         updated = Map.merge(review, updates)

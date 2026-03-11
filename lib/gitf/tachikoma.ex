@@ -1,8 +1,8 @@
-defmodule GiTF.Drone do
+defmodule GiTF.Tachikoma do
   @moduledoc """
   GenServer that periodically runs health checks (patrols) on the section.
 
-  The Drone is a background watchdog that polls `GiTF.Doctor.run_all/1`
+  The Tachikoma is a background watchdog that polls `GiTF.Doctor.run_all/1`
   on a fixed interval and notifies the Major when issues are found.
   It follows the same polling pattern as `GiTF.TranscriptWatcher`.
 
@@ -17,7 +17,7 @@ defmodule GiTF.Drone do
   ## Lifecycle
 
   Started on-demand via `gitf tachikoma` or auto-started by the Major.
-  Registered in `GiTF.Registry` so there is at most one Drone process.
+  Registered in `GiTF.Registry` so there is at most one Tachikoma process.
   """
 
   use GenServer
@@ -25,7 +25,7 @@ defmodule GiTF.Drone do
 
   @default_poll_interval :timer.seconds(30)
   @registry_name GiTF.Registry
-  @registry_key :drone
+  @registry_key :tachikoma
 
   def child_spec(opts) do
     %{
@@ -39,7 +39,7 @@ defmodule GiTF.Drone do
   # -- Client API --------------------------------------------------------------
 
   @doc """
-  Starts the Drone GenServer.
+  Starts the Tachikoma GenServer.
 
   ## Options
 
@@ -70,7 +70,7 @@ defmodule GiTF.Drone do
     end
   end
 
-  @doc "Looks up the Drone process via the Registry."
+  @doc "Looks up the Tachikoma process via the Registry."
   @spec lookup() :: {:ok, pid()} | :error
   def lookup do
     case Registry.lookup(@registry_name, @registry_key) do
@@ -96,10 +96,10 @@ defmodule GiTF.Drone do
     }
 
     # Subscribe to PubSub for event-driven verification
-    Phoenix.PubSub.subscribe(GiTF.PubSub, "drone:review")
+    Phoenix.PubSub.subscribe(GiTF.PubSub, "tachikoma:review")
 
     schedule_patrol(interval)
-    Logger.info("Drone started (interval: #{interval}ms, auto_fix: #{auto_fix}, verify: #{verify})")
+    Logger.info("Tachikoma started (interval: #{interval}ms, auto_fix: #{auto_fix}, verify: #{verify})")
     {:ok, state}
   end
 
@@ -136,12 +136,12 @@ defmodule GiTF.Drone do
 
   # -- PubSub-driven verification (event-driven, no polling delay) ------------
 
-  def handle_info({:review_job, job_id, ghost_id, cell_id}, state) do
-    Logger.info("Drone received review request for job #{job_id} (ghost #{ghost_id})")
+  def handle_info({:review_job, op_id, ghost_id, shell_id}, state) do
+    Logger.info("Tachikoma received review request for op #{op_id} (ghost #{ghost_id})")
 
     # Run verification in a fire-and-forget Task to avoid blocking patrols
     Task.start(fn ->
-      do_review_job(job_id, ghost_id, cell_id)
+      do_review_job(op_id, ghost_id, shell_id)
     end)
 
     {:noreply, state}
@@ -176,23 +176,23 @@ defmodule GiTF.Drone do
     all_results
   rescue
     e ->
-      Logger.warning("Drone patrol failed: #{Exception.message(e)}")
+      Logger.warning("Tachikoma patrol failed: #{Exception.message(e)}")
 
       # Alert on patrol failure so it's not silent
       GiTF.Telemetry.emit([:gitf, :alert, :raised], %{}, %{
         type: :drone_patrol_failed,
-        message: "Drone patrol crashed: #{Exception.message(e)}"
+        message: "Tachikoma patrol crashed: #{Exception.message(e)}"
       })
 
       state.last_results
   end
 
   defp check_budgets do
-    GiTF.Quests.list()
+    GiTF.Missions.list()
     |> Enum.filter(&(&1.status == "active"))
-    |> Enum.flat_map(fn quest ->
-      remaining = GiTF.Budget.remaining(quest.id)
-      budget = GiTF.Budget.budget_for(quest.id)
+    |> Enum.flat_map(fn mission ->
+      remaining = GiTF.Budget.remaining(mission.id)
+      budget = GiTF.Budget.budget_for(mission.id)
       pct_used = if budget > 0, do: (1.0 - remaining / budget) * 100, else: 0
 
       cond do
@@ -201,7 +201,7 @@ defmodule GiTF.Drone do
             %{
               name: "budget_check",
               status: :error,
-              message: "Quest #{quest.id} exceeded budget ($#{Float.round(-remaining, 2)} over)"
+              message: "Quest #{mission.id} exceeded budget ($#{Float.round(-remaining, 2)} over)"
             }
           ]
 
@@ -210,7 +210,7 @@ defmodule GiTF.Drone do
             %{
               name: "budget_check",
               status: :warn,
-              message: "Quest #{quest.id} at #{Float.round(pct_used, 0)}% of budget"
+              message: "Quest #{mission.id} at #{Float.round(pct_used, 0)}% of budget"
             }
           ]
 
@@ -228,12 +228,12 @@ defmodule GiTF.Drone do
       {:ok, _cell_id, :clean} ->
         []
 
-      {:error, cell_id, :conflicts, files} ->
+      {:error, shell_id, :conflicts, files} ->
         [
           %{
             name: "merge_conflicts",
             status: :warn,
-            message: "Cell #{cell_id} has conflicts in: #{Enum.join(files, ", ")}"
+            message: "Cell #{shell_id} has conflicts in: #{Enum.join(files, ", ")}"
           }
         ]
 
@@ -250,20 +250,20 @@ defmodule GiTF.Drone do
     unverified_jobs = GiTF.Verification.jobs_needing_verification()
     now = DateTime.utc_now()
 
-    # Run verification for unverified jobs
-    Enum.flat_map(unverified_jobs, fn job ->
-      age = DateTime.diff(now, job.updated_at || job.inserted_at, :second)
+    # Run verification for unverified ops
+    Enum.flat_map(unverified_jobs, fn op ->
+      age = DateTime.diff(now, op.updated_at || op.inserted_at, :second)
 
       if age > @verification_max_age_seconds do
         # Job stuck in verification queue too long — skip verification, let it merge
-        Logger.warning("Drone: job #{job.id} stuck in verification for #{age}s, auto-passing")
-        case GiTF.Jobs.get(job.id) do
-          {:ok, j} -> GiTF.Store.put(:jobs, Map.put(j, :verification_status, "passed"))
+        Logger.warning("Tachikoma: op #{op.id} stuck in verification for #{age}s, auto-passing")
+        case GiTF.Ops.get(op.id) do
+          {:ok, j} -> GiTF.Store.put(:ops, Map.put(j, :verification_status, "passed"))
           _ -> :ok
         end
         []
       else
-        case GiTF.Verification.verify_job(job.id) do
+        case GiTF.Verification.verify_job(op.id) do
           {:ok, :pass, _result} ->
             []
           {:ok, :fail, result} ->
@@ -271,7 +271,7 @@ defmodule GiTF.Drone do
               %{
                 name: "verification_failed",
                 status: :error,
-                message: "Job #{job.id} verification failed: #{format_verification_result(result)}"
+                message: "Job #{op.id} verification failed: #{format_verification_result(result)}"
               }
             ]
           {:error, reason} ->
@@ -279,7 +279,7 @@ defmodule GiTF.Drone do
               %{
                 name: "verification_error",
                 status: :warn,
-                message: "Job #{job.id} verification error: #{inspect(reason)}"
+                message: "Job #{op.id} verification error: #{inspect(reason)}"
               }
             ]
         end
@@ -290,8 +290,8 @@ defmodule GiTF.Drone do
   end
 
   defp check_major_heartbeat do
-    # Only check if there are active quests that need the Major
-    active_quests = GiTF.Quests.list() |> Enum.filter(&(&1.status == "active"))
+    # Only check if there are active missions that need the Major
+    active_quests = GiTF.Missions.list() |> Enum.filter(&(&1.status == "active"))
 
     if active_quests != [] do
       case GenServer.whereis(GiTF.Major) do
@@ -300,7 +300,7 @@ defmodule GiTF.Drone do
             %{
               name: "queen_heartbeat",
               status: :error,
-              message: "Major is not running but #{length(active_quests)} quest(s) are active"
+              message: "Major is not running but #{length(active_quests)} mission(s) are active"
             }
           ]
 
@@ -336,13 +336,13 @@ defmodule GiTF.Drone do
   end
 
   defp check_deadlocks do
-    GiTF.Quests.list()
+    GiTF.Missions.list()
     |> Enum.filter(&(&1.status in ["active", "pending", "implementation"]))
-    |> Enum.each(fn quest ->
-      case GiTF.Resilience.detect_deadlock(quest.id) do
+    |> Enum.each(fn mission ->
+      case GiTF.Resilience.detect_deadlock(mission.id) do
         {:error, {:deadlock, cycles}} ->
-          Logger.warning("Deadlock detected in quest #{quest.id}: #{inspect(cycles)}")
-          GiTF.Resilience.resolve_deadlock(quest.id, cycles)
+          Logger.warning("Deadlock detected in mission #{mission.id}: #{inspect(cycles)}")
+          GiTF.Resilience.resolve_deadlock(mission.id, cycles)
 
         _ ->
           :ok
@@ -353,10 +353,10 @@ defmodule GiTF.Drone do
   end
 
   defp prune_worktrees do
-    GiTF.Store.all(:combs)
-    |> Enum.each(fn comb ->
-      if comb.path && File.dir?(comb.path) do
-        GiTF.Git.worktree_prune(comb.path)
+    GiTF.Store.all(:sectors)
+    |> Enum.each(fn sector ->
+      if sector.path && File.dir?(sector.path) do
+        GiTF.Git.worktree_prune(sector.path)
       end
     end)
   rescue
@@ -389,14 +389,14 @@ defmodule GiTF.Drone do
             if available_mb && available_mb < @low_disk_threshold_mb do
               Logger.warning("Low disk space (#{available_mb}MB), triggering cleanup")
 
-              # 1. Remove completed/stopped cells' worktrees
-              GiTF.Store.filter(:cells, fn c ->
+              # 1. Remove completed/stopped shells' worktrees
+              GiTF.Store.filter(:shells, fn c ->
                 c.status in ["completed", "stopped", "removed"]
               end)
-              |> Enum.each(fn cell ->
-                if cell.worktree_path && File.dir?(cell.worktree_path) do
-                  File.rm_rf(cell.worktree_path)
-                  Logger.info("Disk cleanup: removed worktree #{cell.worktree_path}")
+              |> Enum.each(fn shell ->
+                if shell.worktree_path && File.dir?(shell.worktree_path) do
+                  File.rm_rf(shell.worktree_path)
+                  Logger.info("Disk cleanup: removed worktree #{shell.worktree_path}")
                 end
               end)
 
@@ -430,9 +430,9 @@ defmodule GiTF.Drone do
   end
 
   defp cleanup_orphan_cells do
-    case GiTF.Cell.cleanup_orphans() do
+    case GiTF.Shell.cleanup_orphans() do
       {:ok, 0} -> :ok
-      {:ok, count} -> Logger.info("Drone: cleaned up #{count} orphan cells")
+      {:ok, count} -> Logger.info("Tachikoma: cleaned up #{count} orphan shells")
     end
   rescue
     _ -> :ok
@@ -443,17 +443,17 @@ defmodule GiTF.Drone do
   defp prune_old_store_data do
     cutoff = DateTime.add(DateTime.utc_now(), -@prune_age_hours * 3600, :second)
 
-    # Prune old read waggles (48h) and very old unread waggles (7d) to prevent unbounded growth
+    # Prune old read links (48h) and very old unread links (7d) to prevent unbounded growth
     unread_cutoff = DateTime.add(DateTime.utc_now(), -7 * 24 * 3600, :second)
 
     pruned_waggles =
-      GiTF.Store.filter(:waggles, fn w ->
+      GiTF.Store.filter(:links, fn w ->
         (w.read == true and DateTime.compare(w.inserted_at, cutoff) == :lt) or
           (w.read != true and DateTime.compare(w.inserted_at, unread_cutoff) == :lt)
       end)
 
     Enum.each(pruned_waggles, fn w ->
-      GiTF.Store.delete(:waggles, w.id)
+      GiTF.Store.delete(:links, w.id)
     end)
 
     # Prune old completed runs
@@ -468,7 +468,7 @@ defmodule GiTF.Drone do
       GiTF.Store.delete(:runs, r.id)
     end)
 
-    # Prune old drone scores (keep last 50 per model)
+    # Prune old tachikoma scores (keep last 50 per model)
     prune_old_scores()
 
     # Prune old events (keep 30 days)
@@ -476,21 +476,21 @@ defmodule GiTF.Drone do
 
     total = length(pruned_waggles) + length(pruned_runs)
     if total > 0 do
-      Logger.info("Store pruned: #{length(pruned_waggles)} waggles, #{length(pruned_runs)} runs")
+      Logger.info("Store pruned: #{length(pruned_waggles)} links, #{length(pruned_runs)} runs")
     end
   rescue
     _ -> :ok
   end
 
   defp prune_old_scores do
-    GiTF.Store.all(:drone_scores)
+    GiTF.Store.all(:tachikoma_scores)
     |> Enum.group_by(& &1.model)
     |> Enum.each(fn {_model, scores} ->
       if length(scores) > 50 do
         scores
         |> Enum.sort_by(& &1.inserted_at, {:asc, DateTime})
         |> Enum.drop(-50)
-        |> Enum.each(fn s -> GiTF.Store.delete(:drone_scores, s.id) end)
+        |> Enum.each(fn s -> GiTF.Store.delete(:tachikoma_scores, s.id) end)
       end
     end)
   rescue
@@ -506,10 +506,10 @@ defmodule GiTF.Drone do
   end
 
   defp check_stuck_jobs do
-    GiTF.Store.filter(:jobs, fn j -> j.status == "running" end)
-    |> Enum.each(fn job ->
+    GiTF.Store.filter(:ops, fn j -> j.status == "running" end)
+    |> Enum.each(fn op ->
       worker_alive? =
-        case job.ghost_id do
+        case op.ghost_id do
           nil -> false
           ghost_id ->
             case GiTF.Ghost.Worker.lookup(ghost_id) do
@@ -519,8 +519,8 @@ defmodule GiTF.Drone do
         end
 
       unless worker_alive? do
-        Logger.warning("Drone: recovering stuck job #{job.id} (worker dead)")
-        GiTF.Jobs.fail(job.id)
+        Logger.warning("Tachikoma: recovering stuck op #{op.id} (worker dead)")
+        GiTF.Ops.fail(op.id)
       end
     end)
   rescue
@@ -533,7 +533,7 @@ defmodule GiTF.Drone do
       |> Enum.map(fn i -> "#{i.name}: #{i.message}" end)
       |> Enum.join("; ")
 
-    GiTF.Waggle.send("drone", "major", "health_alert", summary)
+    GiTF.Link.send("tachikoma", "major", "health_alert", summary)
   rescue
     _ -> :ok
   end
@@ -554,75 +554,75 @@ defmodule GiTF.Drone do
 
   @verification_max_attempts 3
 
-  defp do_review_job(job_id, _ghost_id, cell_id) do
-    do_review_job_attempt(job_id, cell_id, 1)
+  defp do_review_job(op_id, _ghost_id, shell_id) do
+    do_review_job_attempt(op_id, shell_id, 1)
   rescue
     e ->
-      Logger.error("Drone: review crashed for job #{job_id}: #{Exception.message(e)}")
+      Logger.error("Tachikoma: review crashed for op #{op_id}: #{Exception.message(e)}")
   end
 
-  defp do_review_job_attempt(job_id, cell_id, attempt) do
-    case GiTF.Verification.verify_job(job_id) do
+  defp do_review_job_attempt(op_id, shell_id, attempt) do
+    case GiTF.Verification.verify_job(op_id) do
       {:ok, :pass, result} ->
-        Logger.info("Drone: job #{job_id} passed verification (attempt #{attempt})")
-        update_reputation(job_id)
-        score_model(job_id, result)
+        Logger.info("Tachikoma: op #{op_id} passed verification (attempt #{attempt})")
+        update_reputation(op_id)
+        score_model(op_id, result)
 
         # Forward to merge queue
         Phoenix.PubSub.broadcast(
           GiTF.PubSub,
           "merge:queue",
-          {:merge_ready, job_id, cell_id}
+          {:merge_ready, op_id, shell_id}
         )
 
       {:ok, :fail, result} ->
         if attempt < @verification_max_attempts do
-          Logger.info("Drone: job #{job_id} failed verification (attempt #{attempt}/#{@verification_max_attempts}), retrying")
+          Logger.info("Tachikoma: op #{op_id} failed verification (attempt #{attempt}/#{@verification_max_attempts}), retrying")
           Process.sleep(attempt * 2_000)
-          do_review_job_attempt(job_id, cell_id, attempt + 1)
+          do_review_job_attempt(op_id, shell_id, attempt + 1)
         else
-          Logger.warning("Drone: job #{job_id} failed verification after #{attempt} attempts")
-          update_reputation(job_id)
-          score_model(job_id, result)
-          reject_and_improve(job_id, cell_id, result)
+          Logger.warning("Tachikoma: op #{op_id} failed verification after #{attempt} attempts")
+          update_reputation(op_id)
+          score_model(op_id, result)
+          reject_and_improve(op_id, shell_id, result)
         end
 
       {:error, reason} ->
         if attempt < @verification_max_attempts do
-          Logger.info("Drone: verification error for job #{job_id} (attempt #{attempt}/#{@verification_max_attempts}): #{inspect(reason)}, retrying")
+          Logger.info("Tachikoma: verification error for op #{op_id} (attempt #{attempt}/#{@verification_max_attempts}): #{inspect(reason)}, retrying")
           Process.sleep(attempt * 3_000)
-          do_review_job_attempt(job_id, cell_id, attempt + 1)
+          do_review_job_attempt(op_id, shell_id, attempt + 1)
         else
-          Logger.error("Drone: verification error for job #{job_id} after #{attempt} attempts: #{inspect(reason)}")
-          reject_and_improve(job_id, cell_id, %{output: "Verification error: #{inspect(reason)}"})
+          Logger.error("Tachikoma: verification error for op #{op_id} after #{attempt} attempts: #{inspect(reason)}")
+          reject_and_improve(op_id, shell_id, %{output: "Verification error: #{inspect(reason)}"})
         end
     end
   end
 
-  defp reject_and_improve(job_id, cell_id, verification_result) do
-    # 1. Reject the job
-    GiTF.Jobs.reject(job_id)
+  defp reject_and_improve(op_id, shell_id, verification_result) do
+    # 1. Reject the op
+    GiTF.Ops.reject(op_id)
 
     # 2. Clean up the worktree
-    cleanup_cell(cell_id)
+    cleanup_cell(shell_id)
 
     # 3. Analyze the failure
     feedback = extract_feedback(verification_result)
-    analysis = analyze_failure(job_id, feedback)
+    analysis = analyze_failure(op_id, feedback)
 
     # 4. Improve agent profile
-    improve_from_failure(job_id, analysis)
+    improve_from_failure(op_id, analysis)
 
-    # 5. Create retry job if under max retries
-    create_retry_if_allowed(job_id, feedback)
+    # 5. Create retry op if under max retries
+    create_retry_if_allowed(op_id, feedback)
   rescue
     e ->
-      Logger.error("Drone: reject_and_improve failed for job #{job_id}: #{Exception.message(e)}")
+      Logger.error("Tachikoma: reject_and_improve failed for op #{op_id}: #{Exception.message(e)}")
   end
 
   defp cleanup_cell(nil), do: :ok
-  defp cleanup_cell(cell_id) do
-    GiTF.Cell.remove(cell_id, force: true)
+  defp cleanup_cell(shell_id) do
+    GiTF.Shell.remove(shell_id, force: true)
   rescue
     _ -> :ok
   end
@@ -633,8 +633,8 @@ defmodule GiTF.Drone do
       inspect(result) |> String.slice(0, 500)
   end
 
-  defp analyze_failure(job_id, feedback) do
-    case GiTF.Intelligence.FailureAnalysis.analyze_failure(job_id, feedback) do
+  defp analyze_failure(op_id, feedback) do
+    case GiTF.Intelligence.FailureAnalysis.analyze_failure(op_id, feedback) do
       {:ok, analysis} -> analysis
       _ -> nil
     end
@@ -642,11 +642,11 @@ defmodule GiTF.Drone do
     _ -> nil
   end
 
-  defp improve_from_failure(job_id, analysis) do
-    with {:ok, job} <- GiTF.Jobs.get(job_id) do
-      case GiTF.Store.get(:combs, job.comb_id) do
+  defp improve_from_failure(op_id, analysis) do
+    with {:ok, op} <- GiTF.Ops.get(op_id) do
+      case GiTF.Store.get(:sectors, op.sector_id) do
         nil -> :ok
-        comb when is_binary(comb.path) -> improve_agent_profile(comb.path, analysis, job)
+        sector when is_binary(sector.path) -> improve_agent_profile(sector.path, analysis, op)
         _ -> :ok
       end
     end
@@ -654,10 +654,10 @@ defmodule GiTF.Drone do
     _ -> :ok
   end
 
-  defp improve_agent_profile(comb_path, analysis, job) do
+  defp improve_agent_profile(sector_path, analysis, op) do
     alias GiTF.AgentProfile.FailureModes
 
-    agents_dir = Path.join(comb_path, ".claude/agents")
+    agents_dir = Path.join(sector_path, ".claude/agents")
 
     if File.dir?(agents_dir) do
       agents_dir
@@ -668,20 +668,20 @@ defmodule GiTF.Drone do
         content = File.read!(path)
         existing_modes = parse_existing_learned_modes(content)
 
-        failure_analysis = build_failure_analysis(analysis, job)
+        failure_analysis = build_failure_analysis(analysis, op)
         append_learned_mode(path, content, failure_analysis, existing_modes)
       end)
 
-      Logger.info("Drone: improved agent profile at #{comb_path} with failure lesson")
+      Logger.info("Tachikoma: improved agent profile at #{sector_path} with failure lesson")
     end
   rescue
     e -> Logger.debug("Agent profile improvement failed: #{Exception.message(e)}")
   end
 
-  defp build_failure_analysis(nil, job) do
+  defp build_failure_analysis(nil, op) do
     %{
       type: :unknown,
-      root_cause: "Verification failed for: #{job.title}",
+      root_cause: "Verification failed for: #{op.title}",
       suggestions: ["Ensure changes pass all quality gates before completion"]
     }
   end
@@ -710,7 +710,7 @@ defmodule GiTF.Drone do
         File.write!(path, content <> section_header <> learned_text)
 
       :skip ->
-        Logger.debug("Drone: skipping duplicate failure mode for #{Path.basename(path)}")
+        Logger.debug("Tachikoma: skipping duplicate failure mode for #{Path.basename(path)}")
     end
   end
 
@@ -724,30 +724,30 @@ defmodule GiTF.Drone do
     end)
   end
 
-  defp create_retry_if_allowed(job_id, feedback) do
-    case GiTF.Jobs.get(job_id) do
-      {:ok, job} ->
-        retry_count = Map.get(job, :retry_count, 0)
+  defp create_retry_if_allowed(op_id, feedback) do
+    case GiTF.Ops.get(op_id) do
+      {:ok, op} ->
+        retry_count = Map.get(op, :retry_count, 0)
 
         if retry_count < 3 do
-          case GiTF.Jobs.create_retry(job_id, feedback: feedback) do
+          case GiTF.Ops.create_retry(op_id, feedback: feedback) do
             {:ok, retry_job} ->
-              Logger.info("Drone: created retry job #{retry_job.id} for #{job_id} (attempt #{retry_count + 1})")
-              GiTF.Waggle.send("drone", "major", "job_retry_created",
-                "Retry #{retry_job.id} for failed job #{job_id} (attempt #{retry_count + 1})")
+              Logger.info("Tachikoma: created retry op #{retry_job.id} for #{op_id} (attempt #{retry_count + 1})")
+              GiTF.Link.send("tachikoma", "major", "job_retry_created",
+                "Retry #{retry_job.id} for failed op #{op_id} (attempt #{retry_count + 1})")
 
             {:error, :max_retries_exceeded} ->
-              Logger.warning("Drone: job #{job_id} exhausted retries")
-              GiTF.Waggle.send("drone", "major", "job_exhausted_retries",
-                "Job #{job_id} exhausted all retries")
+              Logger.warning("Tachikoma: op #{op_id} exhausted retries")
+              GiTF.Link.send("tachikoma", "major", "job_exhausted_retries",
+                "Job #{op_id} exhausted all retries")
 
             {:error, reason} ->
-              Logger.warning("Drone: retry creation failed for #{job_id}: #{inspect(reason)}")
+              Logger.warning("Tachikoma: retry creation failed for #{op_id}: #{inspect(reason)}")
           end
         else
-          Logger.warning("Drone: job #{job_id} already at #{retry_count} retries, no more attempts")
-          GiTF.Waggle.send("drone", "major", "job_exhausted_retries",
-            "Job #{job_id} exhausted #{retry_count} retries")
+          Logger.warning("Tachikoma: op #{op_id} already at #{retry_count} retries, no more attempts")
+          GiTF.Link.send("tachikoma", "major", "job_exhausted_retries",
+            "Job #{op_id} exhausted #{retry_count} retries")
         end
 
       _ ->
@@ -757,26 +757,26 @@ defmodule GiTF.Drone do
     _ -> :ok
   end
 
-  defp score_model(job_id, verification_result) do
-    with {:ok, job} <- GiTF.Jobs.get(job_id) do
-      score = GiTF.Drone.Scoring.score(job, verification_result)
-      GiTF.Drone.Scoring.record(score)
-      Logger.debug("Drone: recorded score for model #{score.model} on job #{job_id}")
+  defp score_model(op_id, verification_result) do
+    with {:ok, op} <- GiTF.Ops.get(op_id) do
+      score = GiTF.Tachikoma.Scoring.score(op, verification_result)
+      GiTF.Tachikoma.Scoring.record(score)
+      Logger.debug("Tachikoma: recorded score for model #{score.model} on op #{op_id}")
 
       try do
         GiTF.AgentIdentity.update_from_score(score.model, score)
       rescue
-        e -> Logger.debug("Drone: agent identity update failed: #{Exception.message(e)}")
+        e -> Logger.debug("Tachikoma: agent identity update failed: #{Exception.message(e)}")
       end
     end
   rescue
     e ->
-      Logger.debug("Drone: scoring failed for job #{job_id}: #{Exception.message(e)}")
+      Logger.debug("Tachikoma: scoring failed for op #{op_id}: #{Exception.message(e)}")
       :ok
   end
 
-  defp update_reputation(job_id) do
-    GiTF.Reputation.update_after_job(job_id)
+  defp update_reputation(op_id) do
+    GiTF.Reputation.update_after_job(op_id)
   rescue
     _ -> :ok
   end

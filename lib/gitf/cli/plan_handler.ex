@@ -1,9 +1,9 @@
 defmodule GiTF.CLI.PlanHandler do
   @moduledoc """
-  Interactive planning sessions for quests.
+  Interactive planning sessions for missions.
 
-  Public API used by CLI and QuestHandler to launch Claude-assisted planning
-  before auto-starting quest execution.
+  Public API used by CLI and MissionHandler to launch Claude-assisted planning
+  before auto-starting mission execution.
 
   Supports three execution modes:
   - `:api` / `:ollama` — multi-turn chat via ReqLLM with tool calling
@@ -13,50 +13,50 @@ defmodule GiTF.CLI.PlanHandler do
   alias GiTF.CLI.Format
 
   @doc """
-  Launch an interactive planning session for a quest, then auto-start execution.
+  Launch an interactive planning session for a mission, then auto-start execution.
   """
-  def start_interactive_planning(quest, _opts \\ []) do
-    Format.info("Planning session for: #{quest.name}")
+  def start_interactive_planning(mission, _opts \\ []) do
+    Format.info("Planning session for: #{mission.name}")
 
     mode = GiTF.Runtime.ModelResolver.execution_mode()
 
     plan_result =
       if mode in [:api, :ollama, :bedrock] do
-        GiTF.CLI.Chat.start(quest)
+        GiTF.CLI.Chat.start(mission)
       else
-        run_cli_planning(quest)
+        run_cli_planning(mission)
       end
 
     case plan_result do
       {:ok, plan} ->
-        create_jobs_from_plan(quest, plan)
+        create_jobs_from_plan(mission, plan)
 
       {:error, reason} ->
         Format.warn("Planning ended: #{inspect(reason)}")
 
       :no_plan ->
-        start_quest_execution(quest)
+        start_quest_execution(mission)
     end
   end
 
   # -- CLI mode planning -----------------------------------------------------
 
-  defp run_cli_planning(quest) do
+  defp run_cli_planning(mission) do
     {:ok, root} = GiTF.gitf_dir()
-    plan_dir = Path.join([root, ".gitf", "planning", quest.id])
+    plan_dir = Path.join([root, ".gitf", "planning", mission.id])
     File.mkdir_p!(plan_dir)
 
     plan_file = Path.join(plan_dir, "plan.json")
     # Remove stale plan file from previous attempts
     File.rm(plan_file)
 
-    workspace = case quest.comb_id && GiTF.Store.get(:combs, quest.comb_id) do
+    workspace = case mission.sector_id && GiTF.Store.get(:sectors, mission.sector_id) do
       nil -> root
-      comb -> comb.path
+      sector -> sector.path
     end
 
-    system_prompt = build_cli_system_prompt(quest, plan_file)
-    initial_prompt = build_cli_initial_prompt(quest)
+    system_prompt = build_cli_system_prompt(mission, plan_file)
+    initial_prompt = build_cli_initial_prompt(mission)
 
     Format.info("Launching Claude Code for planning (uses your Claude subscription)")
     IO.puts("")
@@ -92,19 +92,19 @@ defmodule GiTF.CLI.PlanHandler do
             plan = %{
               name: plan_data["name"] || "",
               summary: plan_data["summary"] || "",
-              jobs: plan_data["jobs"] || []
+              ops: plan_data["ops"] || []
             }
             {:ok, plan}
 
           {:error, _} ->
             Format.warn("Plan file exists but couldn't be parsed as JSON.")
-            Format.info("You can create jobs manually with `gitf op add`.")
+            Format.info("You can create ops manually with `gitf op add`.")
             :no_plan
         end
 
       {:error, :enoent} ->
         Format.warn("No plan file was written by Claude.")
-        Format.info("Tip: ask Claude to finalize the plan before exiting, or create jobs manually.")
+        Format.info("Tip: ask Claude to finalize the plan before exiting, or create ops manually.")
         :no_plan
 
       {:error, reason} ->
@@ -113,20 +113,20 @@ defmodule GiTF.CLI.PlanHandler do
     end
   end
 
-  defp build_cli_initial_prompt(quest) do
-    codebase_hint = case quest.comb_id && GiTF.Store.get(:combs, quest.comb_id) do
+  defp build_cli_initial_prompt(mission) do
+    codebase_hint = case mission.sector_id && GiTF.Store.get(:sectors, mission.sector_id) do
       nil -> ""
-      comb -> " The codebase is at #{comb.path}."
+      sector -> " The codebase is at #{sector.path}."
     end
 
-    "I want to plan: \"#{quest.goal}\"#{codebase_hint} " <>
+    "I want to plan: \"#{mission.goal}\"#{codebase_hint} " <>
       "Start by exploring the codebase to understand the current state, " <>
       "then ask me clarifying questions about what I need."
   end
 
-  defp build_cli_system_prompt(quest, plan_file) do
+  defp build_cli_system_prompt(mission, plan_file) do
     """
-    You are an expert software architect helping plan the implementation of: "#{quest.goal}"
+    You are an expert software architect helping plan the implementation of: "#{mission.goal}"
 
     ## Your Role
     Have an interactive conversation with the user to understand what they want, \
@@ -145,13 +145,13 @@ defmodule GiTF.CLI.PlanHandler do
     The JSON must have this exact structure:
     ```json
     {
-      "name": "Short quest name",
+      "name": "Short mission name",
       "summary": "1-2 sentence summary of what we're building",
-      "jobs": [
+      "ops": [
         {
           "title": "Job title",
           "description": "Detailed description with enough context for an AI agent to execute independently",
-          "job_type": "implementation",
+          "op_type": "implementation",
           "depends_on": []
         }
       ]
@@ -159,10 +159,10 @@ defmodule GiTF.CLI.PlanHandler do
     ```
 
     Job types: "research" (exploration/unknowns), "implementation" (coding), "verification" (testing)
-    The `depends_on` array contains 0-based indices of prerequisite jobs.
+    The `depends_on` array contains 0-based indices of prerequisite ops.
 
-    Keep jobs small and focused (1-3 hours of work each for an AI coding agent). \
-    Each job description must be self-contained enough for an AI agent to execute without further context.
+    Keep ops small and focused (1-3 hours of work each for an AI coding agent). \
+    Each op description must be self-contained enough for an AI agent to execute without further context.
 
     Write the plan file as soon as the user confirms they're happy with it, then let them know it's saved.
     """
@@ -170,87 +170,87 @@ defmodule GiTF.CLI.PlanHandler do
 
   # -- Job creation ----------------------------------------------------------
 
-  defp create_jobs_from_plan(quest, plan) do
-    comb_id = quest.comb_id || first_comb_id()
+  defp create_jobs_from_plan(mission, plan) do
+    sector_id = mission.sector_id || first_comb_id()
 
-    unless comb_id do
-      Format.error("No comb available. Add a comb first with `gitf sector add <repo>`.")
+    unless sector_id do
+      Format.error("No sector available. Add a sector first with `gitf sector add <repo>`.")
       return_early()
     end
 
-    # Update quest name if the plan provided one
+    # Update mission name if the plan provided one
     if plan[:name] && plan[:name] != "" do
-      case GiTF.Store.get(:quests, quest.id) do
+      case GiTF.Store.get(:missions, mission.id) do
         nil -> :ok
-        q -> GiTF.Store.put(:quests, %{q | name: plan[:name]})
+        q -> GiTF.Store.put(:missions, %{q | name: plan[:name]})
       end
     end
 
-    # Create jobs from plan
-    jobs = plan[:jobs] || []
+    # Create ops from plan
+    ops = plan[:ops] || []
 
     created =
-      Enum.map(jobs, fn job_spec ->
+      Enum.map(ops, fn job_spec ->
         attrs = %{
           title: job_spec["title"],
           description: job_spec["description"],
-          job_type: job_spec["job_type"] || "implementation",
-          quest_id: quest.id,
-          comb_id: comb_id
+          op_type: job_spec["op_type"] || "implementation",
+          mission_id: mission.id,
+          sector_id: sector_id
         }
 
-        case GiTF.Jobs.create(attrs) do
-          {:ok, job} ->
-            Format.success("  Job: #{job.title} (#{job.id})")
-            job
+        case GiTF.Ops.create(attrs) do
+          {:ok, op} ->
+            Format.success("  Job: #{op.title} (#{op.id})")
+            op
 
           {:error, reason} ->
-            Format.error("  Failed to create job: #{inspect(reason)}")
+            Format.error("  Failed to create op: #{inspect(reason)}")
             nil
         end
       end)
       |> Enum.reject(&is_nil/1)
 
     # Wire up dependencies
-    Enum.each(Enum.with_index(jobs), fn {job_spec, idx} ->
+    Enum.each(Enum.with_index(ops), fn {job_spec, idx} ->
       deps = job_spec["depends_on"] || []
 
       Enum.each(deps, fn dep_idx ->
-        job = Enum.at(created, idx)
+        op = Enum.at(created, idx)
         dep = Enum.at(created, dep_idx)
 
-        if job && dep do
-          GiTF.Jobs.add_dependency(job.id, dep.id)
+        if op && dep do
+          GiTF.Ops.add_dependency(op.id, dep.id)
         end
       end)
     end)
 
-    Format.success("Created #{length(created)} job(s) for quest #{quest.id}.")
-    start_quest_execution(quest)
+    Format.success("Created #{length(created)} op(s) for mission #{mission.id}.")
+    start_quest_execution(mission)
   end
 
-  defp start_quest_execution(quest) do
+  defp start_quest_execution(mission) do
     answer = IO.gets("Start execution now? [y/n] ") |> String.trim() |> String.downcase()
 
     if answer in ["y", "yes", ""] do
-      Format.info("Starting quest execution...")
+      Format.info("Starting mission execution...")
 
-      case GiTF.Major.Orchestrator.start_quest(quest.id) do
+      case GiTF.Major.Orchestrator.start_quest(mission.id) do
         {:ok, phase} ->
-          Format.success("Quest #{quest.id} is now in #{phase} phase.")
+          Format.success("Quest #{mission.id} is now in #{phase} phase.")
           Format.info("Run `gitf server` to monitor progress.")
 
         {:error, reason} ->
           Format.warn("Could not auto-start: #{inspect(reason)}")
       end
     else
-      Format.info("Quest ready. Run `gitf mission start #{quest.id}` when ready.")
+      Format.info("Quest ready. Run `gitf mission start #{mission.id}` when ready.")
     end
   end
 
   defp first_comb_id do
-    case GiTF.Store.all(:combs) do
-      [comb | _] -> comb.id
+    case GiTF.Store.all(:sectors) do
+      [sector | _] -> sector.id
       _ -> nil
     end
   rescue
@@ -260,10 +260,10 @@ defmodule GiTF.CLI.PlanHandler do
   defp return_early, do: :ok
 
   @doc false
-  def build_planning_prompt(quest) do
+  def build_planning_prompt(mission) do
     """
     You are an expert software architect and planner.
-    Your goal is to help the user plan the implementation of: "#{quest.goal}"
+    Your goal is to help the user plan the implementation of: "#{mission.goal}"
 
     Collaborate with the user to define:
     1. Research needs
@@ -277,12 +277,12 @@ defmodule GiTF.CLI.PlanHandler do
   end
 
   @doc false
-  def build_discovery_prompt(quest) do
+  def build_discovery_prompt(mission) do
     """
     You are an expert software architect helping a user discover and define their project goal.
 
-    The user started a new quest but hasn't specified a concrete goal yet.
-    Quest: #{quest.name} (#{quest.id})
+    The user started a new mission but hasn't specified a concrete goal yet.
+    Quest: #{mission.name} (#{mission.id})
 
     Help the user by:
     1. Asking what they want to build or change

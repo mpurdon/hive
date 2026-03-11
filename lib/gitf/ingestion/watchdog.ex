@@ -57,10 +57,10 @@ defmodule GiTF.Ingestion.Watchdog do
     archive_path = Path.join(archive, "#{DateTime.utc_now() |> DateTime.to_unix()}_#{filename}")
     
     with {:ok, content} <- File.read(inbox_path),
-         {:ok, quest} <- create_quest_from_file(filename, content),
+         {:ok, mission} <- create_quest_from_file(filename, content),
          :ok <- File.rename(inbox_path, archive_path) do
       
-      Logger.info("Ingested work order: #{filename} -> Quest #{quest.id}")
+      Logger.info("Ingested work order: #{filename} -> Quest #{mission.id}")
     else
       {:error, reason} ->
         Logger.error("Failed to ingest #{filename}: #{inspect(reason)}")
@@ -71,21 +71,21 @@ defmodule GiTF.Ingestion.Watchdog do
     # Simple heuristic: Use filename as title, content as goal/description
     title = Path.rootname(filename) |> String.replace("_", " ") |> String.capitalize()
     
-    # We need a comb. For now, assume the current working directory's main comb.
+    # We need a sector. For now, assume the current working directory's main sector.
     # A robust implementation might parse "Comb: xxx" from the file.
-    # We'll use the default/first comb found.
+    # We'll use the default/first sector found.
     
-    case GiTF.Comb.list() do
-      [comb | _] ->
-        GiTF.Quests.create(%{
+    case GiTF.Sector.list() do
+      [sector | _] ->
+        GiTF.Missions.create(%{
           name: title,
           goal: content,
-          comb_id: comb.id,
+          sector_id: sector.id,
           source: "inbox:#{filename}"
         })
       
       [] ->
-        {:error, "No combs available to assign quest"}
+        {:error, "No sectors available to assign mission"}
     end
   end
 end

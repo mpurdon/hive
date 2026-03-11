@@ -13,61 +13,61 @@ defmodule GiTF.MergeTest do
     {:ok, _} = GiTF.Store.start_link(data_dir: tmp_dir)
     on_exit(fn -> File.rm_rf!(tmp_dir) end)
 
-    {:ok, comb} =
-      Store.insert(:combs, %{
-        name: "merge-comb-#{:erlang.unique_integer([:positive])}",
+    {:ok, sector} =
+      Store.insert(:sectors, %{
+        name: "merge-sector-#{:erlang.unique_integer([:positive])}",
         merge_strategy: "manual"
       })
 
-    {:ok, quest} =
-      Store.insert(:quests, %{
-        name: "merge-quest-#{:erlang.unique_integer([:positive])}",
+    {:ok, mission} =
+      Store.insert(:missions, %{
+        name: "merge-mission-#{:erlang.unique_integer([:positive])}",
         status: "pending"
       })
 
-    {:ok, job} =
-      GiTF.Jobs.create(%{
+    {:ok, op} =
+      GiTF.Ops.create(%{
         title: "Merge test task",
         description: "Test the merge strategies",
-        quest_id: quest.id,
-        comb_id: comb.id
+        mission_id: mission.id,
+        sector_id: sector.id
       })
 
     {:ok, ghost} =
-      Store.insert(:ghosts, %{name: "merge-ghost", status: "working", job_id: job.id})
+      Store.insert(:ghosts, %{name: "merge-ghost", status: "working", op_id: op.id})
 
-    {:ok, cell} =
-      Store.insert(:cells, %{
+    {:ok, shell} =
+      Store.insert(:shells, %{
         ghost_id: ghost.id,
-        comb_id: comb.id,
+        sector_id: sector.id,
         worktree_path: "/tmp/merge-worktree",
         branch: "ghost/#{ghost.id}",
         status: "active"
       })
 
-    %{comb: comb, quest: quest, job: job, ghost: ghost, cell: cell}
+    %{sector: sector, mission: mission, op: op, ghost: ghost, shell: shell}
   end
 
   describe "merge_back/1 with manual strategy" do
-    test "returns {:ok, \"manual\"} for a comb with manual merge_strategy", ctx do
-      assert {:ok, "manual"} = Merge.merge_back(ctx.cell.id)
+    test "returns {:ok, \"manual\"} for a sector with manual merge_strategy", ctx do
+      assert {:ok, "manual"} = Merge.merge_back(ctx.shell.id)
     end
   end
 
   describe "merge_back/1 with pr_branch strategy" do
-    test "returns {:ok, \"pr_branch\"} for a comb with pr_branch merge_strategy", ctx do
-      # Create a comb with pr_branch strategy
+    test "returns {:ok, \"pr_branch\"} for a sector with pr_branch merge_strategy", ctx do
+      # Create a sector with pr_branch strategy
       {:ok, pr_comb} =
-        Store.insert(:combs, %{
-          name: "pr-comb-#{:erlang.unique_integer([:positive])}",
+        Store.insert(:sectors, %{
+          name: "pr-sector-#{:erlang.unique_integer([:positive])}",
           merge_strategy: "pr_branch"
         })
 
-      # Create a cell pointing to this comb
+      # Create a shell pointing to this sector
       {:ok, pr_cell} =
-        Store.insert(:cells, %{
+        Store.insert(:shells, %{
           ghost_id: ctx.ghost.id,
-          comb_id: pr_comb.id,
+          sector_id: pr_comb.id,
           worktree_path: "/tmp/pr-worktree",
           branch: "ghost/pr-test",
           status: "active"
@@ -77,36 +77,36 @@ defmodule GiTF.MergeTest do
     end
   end
 
-  describe "merge_back/1 with unknown cell_id" do
-    test "returns {:error, :cell_not_found} for a non-existent cell" do
+  describe "merge_back/1 with unknown shell_id" do
+    test "returns {:error, :cell_not_found} for a non-existent shell" do
       assert {:error, :cell_not_found} = Merge.merge_back("cel-nonexistent")
     end
   end
 
-  describe "merge_back/1 with nil merge_strategy on comb" do
-    test "defaults to manual when comb has nil merge_strategy", ctx do
-      # Set merge_strategy to nil directly, simulating an older comb record
-      updated_comb = %{ctx.comb | merge_strategy: nil}
-      Store.put(:combs, updated_comb)
+  describe "merge_back/1 with nil merge_strategy on sector" do
+    test "defaults to manual when sector has nil merge_strategy", ctx do
+      # Set merge_strategy to nil directly, simulating an older sector record
+      updated_comb = %{ctx.sector | merge_strategy: nil}
+      Store.put(:sectors, updated_comb)
 
-      assert {:ok, "manual"} = Merge.merge_back(ctx.cell.id)
+      assert {:ok, "manual"} = Merge.merge_back(ctx.shell.id)
     end
   end
 
   describe "auto_merge rollback" do
     test "auto_merge with invalid repo path returns error", ctx do
-      # Create a comb with auto_merge strategy but no valid git repo
+      # Create a sector with auto_merge strategy but no valid git repo
       {:ok, auto_comb} =
-        Store.insert(:combs, %{
-          name: "auto-comb-#{:erlang.unique_integer([:positive])}",
+        Store.insert(:sectors, %{
+          name: "auto-sector-#{:erlang.unique_integer([:positive])}",
           merge_strategy: "auto_merge",
           path: "/tmp/nonexistent-repo"
         })
 
       {:ok, auto_cell} =
-        Store.insert(:cells, %{
+        Store.insert(:shells, %{
           ghost_id: ctx.ghost.id,
-          comb_id: auto_comb.id,
+          sector_id: auto_comb.id,
           worktree_path: "/tmp/nonexistent-worktree",
           branch: "ghost/auto-test",
           status: "active"
@@ -119,7 +119,7 @@ defmodule GiTF.MergeTest do
   end
 
   describe "merge_back_with_rebase/1" do
-    test "returns error for non-existent cell" do
+    test "returns error for non-existent shell" do
       assert {:error, :cell_not_found} = Merge.merge_back_with_rebase("cel-nonexistent")
     end
   end

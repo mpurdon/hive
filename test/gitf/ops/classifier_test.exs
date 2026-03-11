@@ -1,7 +1,7 @@
-defmodule GiTF.Jobs.ClassifierTest do
+defmodule GiTF.Ops.ClassifierTest do
   use ExUnit.Case, async: true
 
-  alias GiTF.Jobs.Classifier
+  alias GiTF.Ops.Classifier
 
   describe "classify_type/1" do
     test "classifies planning tasks" do
@@ -71,14 +71,14 @@ defmodule GiTF.Jobs.ClassifierTest do
   describe "classify_and_recommend/2" do
     test "recommends opus for planning" do
       result = Classifier.classify_and_recommend("Plan the authentication system")
-      assert result.job_type == :planning
+      assert result.op_type == :planning
       assert result.recommended_model == "opus"
       assert result.complexity == :complex
     end
 
     test "recommends haiku for research" do
       result = Classifier.classify_and_recommend("Research caching strategies")
-      assert result.job_type == :research
+      assert result.op_type == :research
       assert result.recommended_model == "haiku"
     end
 

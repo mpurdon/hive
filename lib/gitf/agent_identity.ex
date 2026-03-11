@@ -1,15 +1,15 @@
 defmodule GiTF.AgentIdentity do
   @moduledoc """
   Persistent per-model learning profiles that track what each model excels at
-  and struggles with. Survives across quests.
+  and struggles with. Survives across missions.
 
   This is a pure context module -- no GenServer, no state, just data
-  transformations against the Store. Fed by `GiTF.Drone.Scoring` data,
+  transformations against the Store. Fed by `GiTF.Tachikoma.Scoring` data,
   consumed by `GiTF.Runtime.ModelSelector` for informed model selection.
 
-  Each identity is a living CV for a model: total jobs worked, pass rates
-  by job type, trait-based strengths/weaknesses with confidence scores,
-  and a rolling window of recent job summaries.
+  Each identity is a living CV for a model: total ops worked, pass rates
+  by op type, trait-based strengths/weaknesses with confidence scores,
+  and a rolling window of recent op summaries.
   """
 
   alias GiTF.Store
@@ -46,10 +46,10 @@ defmodule GiTF.AgentIdentity do
   end
 
   @doc """
-  Updates an identity from a score map produced by `GiTF.Drone.Scoring.score/2`.
+  Updates an identity from a score map produced by `GiTF.Tachikoma.Scoring.score/2`.
 
-  Increments job counts, recalculates running averages, merges trait
-  confidence, and maintains the recent jobs window.
+  Increments op counts, recalculates running averages, merges trait
+  confidence, and maintains the recent ops window.
   """
   @spec update_from_score(String.t(), map()) :: {:ok, map()}
   def update_from_score(model, score) when is_binary(model) and is_map(score) do
@@ -60,23 +60,23 @@ defmodule GiTF.AgentIdentity do
     |> merge_traits(:strengths, Map.get(score, :strengths, []))
     |> merge_traits(:weaknesses, Map.get(score, :weaknesses, []))
     |> recalculate_avg_scores(score)
-    |> update_job_type_stats(score)
+    |> update_op_type_stats(score)
     |> append_recent_job(score)
     |> Map.put(:last_updated, DateTime.utc_now() |> DateTime.truncate(:second))
     |> then(&Store.put(@collection, &1))
   end
 
   @doc """
-  Recommends the best model for a job type from a list of available models.
+  Recommends the best model for a op type from a list of available models.
 
-  Picks the model with the highest pass rate for the given job type.
-  Falls back to overall pass rate when no job-type-specific data exists.
+  Picks the model with the highest pass rate for the given op type.
+  Falls back to overall pass rate when no op-type-specific data exists.
   Returns `{:error, :no_data}` when no identities exist for any model.
   """
   @spec recommend_model_for(String.t(), [String.t()]) ::
           {:ok, String.t()} | {:error, :no_data}
-  def recommend_model_for(job_type, available_models)
-      when is_binary(job_type) and is_list(available_models) do
+  def recommend_model_for(op_type, available_models)
+      when is_binary(op_type) and is_list(available_models) do
     identities =
       available_models
       |> Enum.map(fn model -> {model, get(model)} end)
@@ -89,7 +89,7 @@ defmodule GiTF.AgentIdentity do
         {:error, :no_data}
 
       candidates ->
-        best = pick_best_for_job_type(candidates, job_type)
+        best = pick_best_for_op_type(candidates, op_type)
         {:ok, best}
     end
   end
@@ -127,8 +127,8 @@ defmodule GiTF.AgentIdentity do
       total_failed: 0,
       strengths: [],
       weaknesses: [],
-      best_job_types: [],
-      worst_job_types: [],
+      best_op_types: [],
+      worst_op_types: [],
       avg_scores: %{correctness: 0.0, completeness: 0.0, code_quality: 0.0, efficiency: 0.0},
       recent_jobs: [],
       last_updated: DateTime.utc_now() |> DateTime.truncate(:second)
@@ -183,13 +183,13 @@ defmodule GiTF.AgentIdentity do
     %{identity | avg_scores: new_avgs}
   end
 
-  defp update_job_type_stats(identity, score) do
-    job_type = Map.get(score, :job_type, "general")
+  defp update_op_type_stats(identity, score) do
+    op_type = Map.get(score, :op_type, "general")
     passed? = Map.get(score, :passed, false)
 
     # Rebuild stats from recent_jobs + this new score for accuracy
     all_type_stats =
-      (identity.recent_jobs ++ [%{type: job_type, passed: passed?}])
+      (identity.recent_jobs ++ [%{type: op_type, passed: passed?}])
       |> Enum.group_by(& &1.type)
       |> Enum.map(fn {type, entries} ->
         count = length(entries)
@@ -202,13 +202,13 @@ defmodule GiTF.AgentIdentity do
     best = Enum.take(all_type_stats, 3)
     worst = all_type_stats |> Enum.reverse() |> Enum.take(3)
 
-    %{identity | best_job_types: best, worst_job_types: worst}
+    %{identity | best_op_types: best, worst_op_types: worst}
   end
 
   defp append_recent_job(identity, score) do
     entry = %{
-      job_id: Map.get(score, :job_id),
-      type: Map.get(score, :job_type, "general"),
+      op_id: Map.get(score, :op_id),
+      type: Map.get(score, :op_type, "general"),
       passed: Map.get(score, :passed, false),
       timestamp: DateTime.utc_now() |> DateTime.truncate(:second)
     }
@@ -222,12 +222,12 @@ defmodule GiTF.AgentIdentity do
 
   # -- Private: model recommendation ----------------------------------------
 
-  defp pick_best_for_job_type(candidates, job_type) do
-    # Try job-type-specific pass rate first
+  defp pick_best_for_op_type(candidates, op_type) do
+    # Try op-type-specific pass rate first
     type_scored =
       candidates
       |> Enum.map(fn {model, id} ->
-        type_stat = Enum.find(id.best_job_types ++ id.worst_job_types, &(&1.type == job_type))
+        type_stat = Enum.find(id.best_op_types ++ id.worst_op_types, &(&1.type == op_type))
 
         type_pass_rate =
           if type_stat && type_stat.count > 0,
@@ -237,7 +237,7 @@ defmodule GiTF.AgentIdentity do
         {model, type_pass_rate, overall_pass_rate(id)}
       end)
 
-    # If any candidate has job-type-specific data, use it
+    # If any candidate has op-type-specific data, use it
     with_type_data = Enum.filter(type_scored, fn {_, tpr, _} -> tpr != nil end)
 
     if with_type_data != [] do
@@ -263,8 +263,8 @@ defmodule GiTF.AgentIdentity do
 
     strengths_text = format_traits(id.strengths)
     weaknesses_text = format_traits(id.weaknesses)
-    best_types_text = format_job_types(id.best_job_types)
-    worst_types_text = format_job_types(id.worst_job_types)
+    best_types_text = format_op_types(id.best_op_types)
+    worst_types_text = format_op_types(id.worst_op_types)
 
     """
     # #{id.model}
@@ -296,9 +296,9 @@ defmodule GiTF.AgentIdentity do
     |> Enum.join(", ")
   end
 
-  defp format_job_types([]), do: "none recorded"
+  defp format_op_types([]), do: "none recorded"
 
-  defp format_job_types(types) do
+  defp format_op_types(types) do
     types
     |> Enum.map(fn t -> "#{t.type} (#{Float.round(t.pass_rate * 100, 0)}%, n=#{t.count})" end)
     |> Enum.join(", ")

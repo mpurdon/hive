@@ -26,45 +26,45 @@ defmodule GiTF.CLI.Errors do
 
   def format_error(:no_combs, _context) do
     """
-    Error: No combs registered
+    Error: No sectors registered
 
-    You need to register at least one codebase before creating quests.
+    You need to register at least one codebase before creating missions.
 
     Quick start:
-      $ section comb add /path/to/repo --auto
+      $ section sector add /path/to/repo --auto
 
     Or manual setup:
-      $ section comb add /path/to/repo --name myproject --validation-command "mix test"
+      $ section sector add /path/to/repo --name myproject --validation-command "mix test"
 
-    For more options, run: section comb add --help
+    For more options, run: section sector add --help
     """
   end
 
-  def format_error(:quest_not_found, %{quest_id: id}) do
+  def format_error(:quest_not_found, %{mission_id: id}) do
     """
     Error: Quest not found: #{id}
 
-    The quest ID doesn't exist or may have been deleted.
+    The mission ID doesn't exist or may have been deleted.
 
-    To see available quests:
-      $ section quest list
+    To see available missions:
+      $ section mission list
 
-    To create a new quest:
-      $ section quest new "Build feature X"
+    To create a new mission:
+      $ section mission new "Build feature X"
     """
   end
 
-  def format_error(:job_not_found, %{job_id: id}) do
+  def format_error(:job_not_found, %{op_id: id}) do
     """
     Error: Job not found: #{id}
 
-    The job ID doesn't exist or may have been deleted.
+    The op ID doesn't exist or may have been deleted.
 
-    To see available jobs:
-      $ section jobs list
+    To see available ops:
+      $ section ops list
 
-    To see jobs for a specific quest:
-      $ section quest show <quest-id>
+    To see ops for a specific mission:
+      $ section mission show <mission-id>
     """
   end
 
@@ -78,21 +78,21 @@ defmodule GiTF.CLI.Errors do
       $ section ghost list
 
     To spawn a new ghost:
-      $ section ghost spawn --job <job-id> --comb <comb-id>
+      $ section ghost spawn --op <op-id> --sector <sector-id>
     """
   end
 
-  def format_error(:comb_not_found, %{comb_id: id}) do
+  def format_error(:comb_not_found, %{sector_id: id}) do
     """
     Error: Comb not found: #{id}
 
-    The comb doesn't exist or may have been removed.
+    The sector doesn't exist or may have been removed.
 
-    To see registered combs:
-      $ section comb list
+    To see registered sectors:
+      $ section sector list
 
-    To add a new comb:
-      $ section comb add /path/to/repo --auto
+    To add a new sector:
+      $ section sector add /path/to/repo --auto
     """
   end
 
@@ -100,7 +100,7 @@ defmodule GiTF.CLI.Errors do
     """
     Error: Not a git repository: #{path}
 
-    The directory must be a git repository to be registered as a comb.
+    The directory must be a git repository to be registered as a sector.
 
     To initialize git:
       $ cd #{path}
@@ -109,19 +109,19 @@ defmodule GiTF.CLI.Errors do
       $ git commit -m "Initial commit"
 
     Then try again:
-      $ section comb add #{path}
+      $ section sector add #{path}
     """
   end
 
-  def format_error(:validation_failed, %{job_id: id, output: output}) do
+  def format_error(:validation_failed, %{op_id: id, output: output}) do
     """
     Error: Job validation failed: #{id}
 
     Validation command output:
     #{indent(output, 2)}
 
-    To see full job details:
-      $ section jobs show #{id}
+    To see full op details:
+      $ section ops show #{id}
 
     To retry with fixes:
       $ section ghost revive --id <ghost-id>
@@ -144,28 +144,28 @@ defmodule GiTF.CLI.Errors do
     """
   end
 
-  def format_error(:budget_exceeded, %{quest_id: id, budget: budget, spent: spent}) do
+  def format_error(:budget_exceeded, %{mission_id: id, budget: budget, spent: spent}) do
     """
     Error: Quest budget exceeded: #{id}
 
     Budget: $#{Float.round(budget, 2)}
     Spent:  $#{Float.round(spent, 2)}
 
-    The quest has exceeded its cost budget and cannot continue.
+    The mission has exceeded its cost budget and cannot continue.
 
     To increase the budget:
-      $ section budget --quest #{id} --set #{Float.round(budget * 1.5, 2)}
+      $ section budget --mission #{id} --set #{Float.round(budget * 1.5, 2)}
 
     To check costs:
       $ section costs summary
     """
   end
 
-  def format_error(:no_model_available, %{job_type: type}) do
+  def format_error(:no_model_available, %{op_type: type}) do
     """
-    Error: No suitable model available for job type: #{type}
+    Error: No suitable model available for op type: #{type}
 
-    No model plugins are configured or available for this job type.
+    No model plugins are configured or available for this op type.
 
     To check available models:
       $ section plugin list
@@ -175,17 +175,17 @@ defmodule GiTF.CLI.Errors do
     """
   end
 
-  def format_error(:verification_pending, %{job_id: id}) do
+  def format_error(:verification_pending, %{op_id: id}) do
     """
     Notice: Job verification pending: #{id}
 
-    The job has completed but verification hasn't run yet.
+    The op has completed but verification hasn't run yet.
 
     To manually verify:
-      $ section verify --job #{id}
+      $ section verify --op #{id}
 
     To start automatic verification:
-      $ section drone --verify
+      $ section tachikoma --verify
     """
   end
 

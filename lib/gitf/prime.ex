@@ -4,8 +4,8 @@ defmodule GiTF.Prime do
 
   Priming is the act of feeding Claude its initial context at session start.
   The Major gets the QUEEN.md instructions plus a snapshot of the current
-  section state. A Bee gets its specific job description, relevant waggles,
-  and information about the comb it is working on.
+  section state. A Bee gets its specific op description, relevant links,
+  and information about the sector it is working on.
 
   Output is Markdown text, ready for Claude to parse.
   """
@@ -18,7 +18,7 @@ defmodule GiTF.Prime do
   Primes a Major or Bee with context for a Claude Code session.
 
   - `prime(:major, gitf_root)` reads QUEEN.md and appends current section state
-  - `prime(:ghost, ghost_id)` builds a briefing from the ghost's job, cell, and waggles
+  - `prime(:ghost, ghost_id)` builds a briefing from the ghost's op, shell, and links
 
   Returns `{:ok, markdown}` or `{:error, reason}`.
   """
@@ -49,10 +49,10 @@ defmodule GiTF.Prime do
     active_ghosts = Enum.filter(ghosts, &(&1.status in ["working", "idle", "starting"]))
 
     pending_quests =
-      Store.filter(:quests, fn q -> q.status in ["pending", "active", "planning"] end)
+      Store.filter(:missions, fn q -> q.status in ["pending", "active", "planning"] end)
 
-    pending_jobs = Store.filter(:jobs, fn j -> j.status == "pending" end)
-    recent_waggles = GiTF.Waggle.list(to: "major", limit: 10)
+    pending_jobs = Store.filter(:ops, fn j -> j.status == "pending" end)
+    recent_waggles = GiTF.Link.list(to: "major", limit: 10)
 
     planning_quests = Enum.filter(pending_quests, &(&1.status == "planning"))
     quest_specs_section = format_quest_specs(planning_quests)
@@ -80,12 +80,12 @@ defmodule GiTF.Prime do
 
   defp format_quests([]), do: "None."
 
-  defp format_quests(quests) do
-    quests
+  defp format_quests(missions) do
+    missions
     |> Enum.map(fn q ->
-      comb_label = resolve_comb_label(q[:comb_id])
-      job_count = Store.count(:jobs, fn j -> j.quest_id == q.id end)
-      line = "- **#{q.name}** (#{q.id}) [#{q.status}] — #{job_count} job(s)#{comb_label}"
+      comb_label = resolve_comb_label(q[:sector_id])
+      job_count = Store.count(:ops, fn j -> j.mission_id == q.id end)
+      line = "- **#{q.name}** (#{q.id}) [#{q.status}] — #{job_count} op(s)#{comb_label}"
 
       if q[:description] do
         line <> "\n  > #{q.description}"
@@ -98,10 +98,10 @@ defmodule GiTF.Prime do
 
   defp resolve_comb_label(nil), do: ""
 
-  defp resolve_comb_label(comb_id) do
-    case Store.get(:combs, comb_id) do
-      nil -> " | comb: #{comb_id}"
-      comb -> " | comb: #{comb.name}"
+  defp resolve_comb_label(sector_id) do
+    case Store.get(:sectors, sector_id) do
+      nil -> " | sector: #{sector_id}"
+      sector -> " | sector: #{sector.name}"
     end
   end
 
@@ -115,16 +115,16 @@ defmodule GiTF.Prime do
 
   defp format_jobs([]), do: "None."
 
-  defp format_jobs(jobs) do
-    jobs
+  defp format_jobs(ops) do
+    ops
     |> Enum.map(fn j -> "- **#{j.title}** (#{j.id})" end)
     |> Enum.join("\n")
   end
 
   defp format_waggles([]), do: "None."
 
-  defp format_waggles(waggles) do
-    waggles
+  defp format_waggles(links) do
+    links
     |> Enum.map(fn w ->
       read_marker = if w.read, do: "[read]", else: "[unread]"
       "- #{read_marker} From #{w.from}: #{w.subject || "(no subject)"}"
@@ -138,15 +138,15 @@ defmodule GiTF.Prime do
 
   defp format_quest_specs(planning_quests) do
     sections =
-      Enum.flat_map(planning_quests, fn quest ->
-        phases = GiTF.Specs.list_phases(quest.id)
+      Enum.flat_map(planning_quests, fn mission ->
+        phases = GiTF.Specs.list_phases(mission.id)
 
         if phases == [] do
           []
         else
           phase_sections =
             Enum.flat_map(phases, fn phase ->
-              case GiTF.Specs.read(quest.id, phase) do
+              case GiTF.Specs.read(mission.id, phase) do
                 {:ok, content} ->
                   truncated = truncate_spec(content, 100)
                   ["#### #{String.capitalize(phase)}", "", truncated, ""]
@@ -156,7 +156,7 @@ defmodule GiTF.Prime do
               end
             end)
 
-          ["### Planning Specs: #{quest.name} (#{quest.id})", "" | phase_sections]
+          ["### Planning Specs: #{mission.name} (#{mission.id})", "" | phase_sections]
         end
       end)
 
@@ -188,34 +188,34 @@ defmodule GiTF.Prime do
   end
 
   defp build_bee_briefing(ghost) do
-    job = fetch_job_for_bee(ghost)
-    cell = fetch_cell_for_bee(ghost)
-    waggles = GiTF.Waggle.list_unread(ghost.id)
+    op = fetch_job_for_bee(ghost)
+    shell = fetch_cell_for_bee(ghost)
+    links = GiTF.Link.list_unread(ghost.id)
 
-    quest_context = build_quest_context(job)
+    quest_context = build_quest_context(op)
 
     sections = [
       "# Bee Briefing: #{ghost.name} (#{ghost.id})",
       "",
       "## Your Job",
-      format_job_detail(job),
+      format_job_detail(op),
       "",
       quest_context,
       "## Your Workspace",
-      format_cell_detail(cell),
+      format_cell_detail(shell),
       "",
       "## Agent Profile",
-      format_agent_section(cell),
+      format_agent_section(shell),
       "",
-      "## Unread Messages (#{length(waggles)})",
-      format_waggles(waggles),
+      "## Unread Messages (#{length(links)})",
+      format_waggles(links),
       "",
       "## Rules",
-      "- Complete your assigned job and nothing else.",
-      "- When done, send a waggle to the queen: `gitf link send --to queen --subject \"job_complete\" --body \"<summary>\"`",
+      "- Complete your assigned op and nothing else.",
+      "- When done, send a link_msg to the queen: `gitf link send --to queen --subject \"job_complete\" --body \"<summary>\"`",
       "- If you are blocked, send: `gitf link send --to queen --subject \"job_blocked\" --body \"<reason>\"`",
       "- Do NOT modify files outside your worktree.",
-      friction_rules(job)
+      friction_rules(op)
     ]
 
     sections
@@ -223,49 +223,49 @@ defmodule GiTF.Prime do
     |> Enum.join("\n")
   end
 
-  defp fetch_job_for_bee(%{job_id: nil}), do: nil
+  defp fetch_job_for_bee(%{op_id: nil}), do: nil
 
-  defp fetch_job_for_bee(%{job_id: job_id}) when is_binary(job_id) do
-    Store.get(:jobs, job_id)
+  defp fetch_job_for_bee(%{op_id: op_id}) when is_binary(op_id) do
+    Store.get(:ops, op_id)
   end
 
   defp fetch_job_for_bee(_bee), do: nil
 
   defp fetch_cell_for_bee(ghost) do
-    Store.filter(:cells, fn c -> c.ghost_id == ghost.id and c.status == "active" end)
+    Store.filter(:shells, fn c -> c.ghost_id == ghost.id and c.status == "active" end)
     |> List.first()
   end
 
-  defp format_job_detail(nil), do: "No job assigned."
+  defp format_job_detail(nil), do: "No op assigned."
 
-  defp format_job_detail(job) do
+  defp format_job_detail(op) do
     lines = [
-      "**#{job.title}** (#{job.id})",
-      "Status: #{job.status}"
+      "**#{op.title}** (#{op.id})",
+      "Status: #{op.status}"
     ]
 
     lines =
-      if job.description,
-        do: lines ++ ["", job.description],
+      if op.description,
+        do: lines ++ ["", op.description],
         else: lines
 
     Enum.join(lines, "\n")
   end
 
-  defp format_cell_detail(nil), do: "No cell assigned."
+  defp format_cell_detail(nil), do: "No shell assigned."
 
-  defp format_cell_detail(cell) do
+  defp format_cell_detail(shell) do
     [
-      "Path: `#{cell.worktree_path}`",
-      "Branch: `#{cell.branch}`"
+      "Path: `#{shell.worktree_path}`",
+      "Branch: `#{shell.branch}`"
     ]
     |> Enum.join("\n")
   end
 
   defp friction_rules(nil), do: ""
 
-  defp friction_rules(job) do
-    risk_level = Map.get(job, :risk_level, :low)
+  defp friction_rules(op) do
+    risk_level = Map.get(op, :risk_level, :low)
     GiTF.Ghost.CognitiveFriction.friction_instructions(risk_level)
   end
 
@@ -273,18 +273,18 @@ defmodule GiTF.Prime do
 
   defp build_quest_context(nil), do: ""
 
-  defp build_quest_context(job) do
-    # Only enrich non-phase implementation jobs
-    if Map.get(job, :phase_job, false) do
+  defp build_quest_context(op) do
+    # Only enrich non-phase implementation ops
+    if Map.get(op, :phase_job, false) do
       ""
     else
-      quest = Store.get(:quests, job.quest_id)
+      mission = Store.get(:missions, op.mission_id)
 
-      if is_nil(quest) or is_nil(Map.get(quest, :artifacts)) or map_size(Map.get(quest, :artifacts, %{})) == 0 do
+      if is_nil(mission) or is_nil(Map.get(mission, :artifacts)) or map_size(Map.get(mission, :artifacts, %{})) == 0 do
         ""
       else
         sections = []
-        artifacts = quest.artifacts
+        artifacts = mission.artifacts
 
         # Add relevant requirements
         sections =
@@ -312,13 +312,13 @@ defmodule GiTF.Prime do
               sections
 
             design ->
-              relevant = extract_relevant_design(design, job)
+              relevant = extract_relevant_design(design, op)
               sections ++ ["## Technical Design\n", relevant, ""]
           end
 
-        # Add this job's acceptance criteria
+        # Add this op's acceptance criteria
         sections =
-          case Map.get(job, :acceptance_criteria, []) do
+          case Map.get(op, :acceptance_criteria, []) do
             [] ->
               sections
 
@@ -332,8 +332,8 @@ defmodule GiTF.Prime do
     end
   end
 
-  defp extract_relevant_design(design, job) do
-    target_files = Map.get(job, :target_files, [])
+  defp extract_relevant_design(design, op) do
+    target_files = Map.get(op, :target_files, [])
     components = Map.get(design, "components", [])
 
     relevant =
@@ -358,18 +358,18 @@ defmodule GiTF.Prime do
 
   defp format_agent_section(nil), do: "No workspace -- cannot check agents."
 
-  defp format_agent_section(cell) do
-    comb_path = get_comb_path(cell.comb_id)
+  defp format_agent_section(shell) do
+    sector_path = get_comb_path(shell.sector_id)
 
-    case comb_path do
+    case sector_path do
       nil ->
-        "No comb path available."
+        "No sector path available."
 
       path ->
         agents = GiTF.AgentProfile.list_agents(path)
 
         case agents do
-          [] -> "No agent profiles configured for this comb."
+          [] -> "No agent profiles configured for this sector."
           list -> Enum.map(list, fn a -> "- #{a}" end) |> Enum.join("\n")
         end
     end
@@ -377,10 +377,10 @@ defmodule GiTF.Prime do
 
   defp get_comb_path(nil), do: nil
 
-  defp get_comb_path(comb_id) do
-    case Store.get(:combs, comb_id) do
+  defp get_comb_path(sector_id) do
+    case Store.get(:sectors, sector_id) do
       nil -> nil
-      comb -> comb.path
+      sector -> sector.path
     end
   end
 
@@ -388,8 +388,8 @@ defmodule GiTF.Prime do
 
   defp build_handoff_section(ghost_id) do
     case GiTF.Handoff.detect_handoff(ghost_id) do
-      {:ok, waggle} ->
-        case GiTF.Handoff.resume(ghost_id, waggle.id) do
+      {:ok, link_msg} ->
+        case GiTF.Handoff.resume(ghost_id, link_msg.id) do
           {:ok, briefing} ->
             "\n\n---\n\n" <> briefing
 

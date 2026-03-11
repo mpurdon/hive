@@ -130,7 +130,7 @@ defmodule GiTF.CLI do
   end
 
   # Extract --mode <mode> from anywhere in argv, set GITF_EXECUTION_MODE, and strip it.
-  # This allows `gitf --mode bedrock quest new "..."` or `gitf mission new "..." --mode cli`.
+  # This allows `gitf --mode bedrock mission new "..."` or `gitf mission new "..." --mode cli`.
   @valid_modes ~w(api cli ollama bedrock)
   defp extract_mode_flag(argv) do
     case find_mode_flag(argv, [], nil) do
@@ -159,12 +159,12 @@ defmodule GiTF.CLI do
 
   @quest_subcommands ~w(new list show remove merge report close spec plan start status)
 
-  defp expand_defaults(["quest" | rest]) when rest != [] do
+  defp expand_defaults(["mission" | rest]) when rest != [] do
     case rest do
-      [sub | _] when sub in @quest_subcommands -> ["quest" | rest]
-      # Don't expand flags like --help into "quest new --help"
-      [<<"-", _::binary>> | _] -> ["quest" | rest]
-      _ -> ["quest", "new" | rest]
+      [sub | _] when sub in @quest_subcommands -> ["mission" | rest]
+      # Don't expand flags like --help into "mission new --help"
+      [<<"-", _::binary>> | _] -> ["mission" | rest]
+      _ -> ["mission", "new" | rest]
     end
   end
 
@@ -259,7 +259,7 @@ defmodule GiTF.CLI do
   # Eventually all dispatch/2 clauses will migrate to handler modules.
 
   @handlers [
-    GiTF.CLI.QuestHandler,
+    GiTF.CLI.MissionHandler,
     GiTF.CLI.GhostHandler
   ]
 
@@ -324,9 +324,9 @@ defmodule GiTF.CLI do
         end)
         |> case do
           {:ok, result} ->
-            Format.success("✓ Quick onboarded: #{result.comb.name}")
+            Format.success("✓ Quick onboarded: #{result.sector.name}")
             Format.info("  Language: #{result.project_info.language}")
-            Format.info("  Path: #{result.comb.path}")
+            Format.info("  Path: #{result.sector.path}")
             GiTF.CLI.Help.show_tip(:comb_added)
           {:error, reason} ->
             Format.error("Onboarding failed: #{reason}")
@@ -338,12 +338,12 @@ defmodule GiTF.CLI do
         end)
         |> case do
           {:ok, result} ->
-            Format.success("✓ Onboarded: #{result.comb.name}")
+            Format.success("✓ Onboarded: #{result.sector.name}")
             Format.info("  Language: #{result.project_info.language}")
             if result.project_info.framework, do: Format.info("  Framework: #{result.project_info.framework}")
             Format.info("  Build Tool: #{result.project_info.build_tool}")
             if result.project_info.validation_command, do: Format.info("  Validation: #{result.project_info.validation_command}")
-            Format.info("  Path: #{result.comb.path}")
+            Format.info("  Path: #{result.sector.path}")
             GiTF.CLI.Help.show_tip(:comb_added)
           {:error, reason} ->
             Format.error("Onboarding failed: #{reason}")
@@ -352,14 +352,14 @@ defmodule GiTF.CLI do
   end
 
   defp dispatch([:verify], result) do
-    job_id = result_get(result, :options, :job)
-    quest_id = result_get(result, :options, :quest)
+    op_id = result_get(result, :options, :op)
+    mission_id = result_get(result, :options, :mission)
 
     cond do
-      job_id ->
-        case GiTF.Verification.verify_job(job_id) do
+      op_id ->
+        case GiTF.Verification.verify_job(op_id) do
           {:ok, :pass, result} ->
-            Format.success("Job #{job_id} verification passed")
+            Format.success("Job #{op_id} verification passed")
             if result[:quality_score] do
               Format.info("  Quality score: #{result.quality_score}/100")
             end
@@ -370,7 +370,7 @@ defmodule GiTF.CLI do
               Format.info("  Performance score: #{result.performance_score}/100")
             end
           {:ok, :fail, result} ->
-            Format.error("Job #{job_id} verification failed")
+            Format.error("Job #{op_id} verification failed")
             if result[:quality_score] do
               Format.warn("  Quality score: #{result.quality_score}/100")
             end
@@ -387,32 +387,32 @@ defmodule GiTF.CLI do
             Format.error("Verification error: #{inspect(reason)}")
         end
 
-      quest_id ->
-        case GiTF.Quests.get(quest_id) do
+      mission_id ->
+        case GiTF.Missions.get(mission_id) do
           {:ok, _quest} ->
-            jobs = GiTF.Jobs.list(quest_id: quest_id)
-            results = Enum.map(jobs, fn job ->
-              if job.status == "done" do
-                case GiTF.Verification.verify_job(job.id) do
-                  {:ok, status, _} -> {job.id, status}
-                  {:error, _} -> {job.id, :error}
+            ops = GiTF.Ops.list(mission_id: mission_id)
+            results = Enum.map(ops, fn op ->
+              if op.status == "done" do
+                case GiTF.Verification.verify_job(op.id) do
+                  {:ok, status, _} -> {op.id, status}
+                  {:error, _} -> {op.id, :error}
                 end
               else
-                {job.id, :skipped}
+                {op.id, :skipped}
               end
             end)
             
             passed = Enum.count(results, fn {_, status} -> status == :pass end)
             failed = Enum.count(results, fn {_, status} -> status == :fail end)
             
-            Format.info("Quest #{quest_id} verification: #{passed} passed, #{failed} failed")
+            Format.info("Quest #{mission_id} verification: #{passed} passed, #{failed} failed")
 
           {:error, :not_found} ->
-            show_not_found_error(:quest, quest_id)
+            show_not_found_error(:mission, mission_id)
         end
 
       true ->
-        Format.error("Usage: section verify --job <id> OR --quest <id>")
+        Format.error("Usage: section verify --op <id> OR --mission <id>")
     end
   end
 
@@ -421,11 +421,11 @@ defmodule GiTF.CLI do
     
     case subcommand do
       "check" ->
-        job_id = result_get(result, :options, :job)
-        if job_id do
-          reports = GiTF.Quality.get_reports(job_id)
+        op_id = result_get(result, :options, :op)
+        if op_id do
+          reports = GiTF.Quality.get_reports(op_id)
           if Enum.empty?(reports) do
-            Format.warn("No quality reports for job #{job_id}")
+            Format.warn("No quality reports for op #{op_id}")
           else
             Enum.each(reports, fn report ->
               Format.info("#{report.analysis_type}: #{report.score}/100 (#{report.tool})")
@@ -466,16 +466,16 @@ defmodule GiTF.CLI do
             end)
           end
         else
-          Format.error("Usage: section quality check --job <id>")
+          Format.error("Usage: section quality check --op <id>")
         end
       
       "report" ->
-        quest_id = result_get(result, :options, :quest)
-        if quest_id do
-          jobs = GiTF.Jobs.list(quest_id: quest_id)
-          scores = Enum.map(jobs, fn job ->
-            score = GiTF.Quality.calculate_composite_score(job.id)
-            {job.id, score}
+        mission_id = result_get(result, :options, :mission)
+        if mission_id do
+          ops = GiTF.Ops.list(mission_id: mission_id)
+          scores = Enum.map(ops, fn op ->
+            score = GiTF.Quality.calculate_composite_score(op.id)
+            {op.id, score}
           end)
           
           avg_score = 
@@ -488,87 +488,87 @@ defmodule GiTF.CLI do
             end
           
           if avg_score do
-            Format.info("Quest #{quest_id} average quality: #{Float.round(avg_score, 1)}/100")
+            Format.info("Quest #{mission_id} average quality: #{Float.round(avg_score, 1)}/100")
           else
-            Format.warn("No quality data for quest #{quest_id}")
+            Format.warn("No quality data for mission #{mission_id}")
           end
         else
-          Format.error("Usage: section quality report --quest <id>")
+          Format.error("Usage: section quality report --mission <id>")
         end
       
       "baseline" ->
-        comb_id = result_get(result, :options, :comb)
-        job_id = result_get(result, :options, :job)
+        sector_id = result_get(result, :options, :sector)
+        op_id = result_get(result, :options, :op)
         
         cond do
-          comb_id && job_id ->
-            # Set baseline from job's performance report
-            reports = GiTF.Quality.get_reports(job_id)
+          sector_id && op_id ->
+            # Set baseline from op's performance report
+            reports = GiTF.Quality.get_reports(op_id)
             perf_report = Enum.find(reports, &(&1.analysis_type == "performance"))
             
             if perf_report do
-              {:ok, _} = GiTF.Quality.set_performance_baseline(comb_id, perf_report.issues)
-              Format.success("Performance baseline set for comb #{comb_id}")
+              {:ok, _} = GiTF.Quality.set_performance_baseline(sector_id, perf_report.issues)
+              Format.success("Performance baseline set for sector #{sector_id}")
             else
-              Format.error("No performance report found for job #{job_id}")
+              Format.error("No performance report found for op #{op_id}")
             end
           
-          comb_id ->
+          sector_id ->
             # Show current baseline
-            case GiTF.Quality.get_performance_baseline(comb_id) do
+            case GiTF.Quality.get_performance_baseline(sector_id) do
               nil ->
-                Format.warn("No baseline set for comb #{comb_id}")
+                Format.warn("No baseline set for sector #{sector_id}")
               
               baseline ->
-                Format.info("Performance baseline for comb #{comb_id}:")
+                Format.info("Performance baseline for sector #{sector_id}:")
                 Enum.each(baseline.metrics, fn metric ->
                   Format.info("  • #{metric.name}: #{metric.value} #{metric.unit}")
                 end)
             end
           
           true ->
-            Format.error("Usage: section quality baseline --comb <id> [--job <id>]")
+            Format.error("Usage: section quality baseline --sector <id> [--op <id>]")
         end
       
       "thresholds" ->
-        comb_id = result_get(result, :options, :comb)
+        sector_id = result_get(result, :options, :sector)
         
-        if comb_id do
-          thresholds = GiTF.Quality.get_thresholds(comb_id)
-          Format.info("Quality thresholds for comb #{comb_id}:")
+        if sector_id do
+          thresholds = GiTF.Quality.get_thresholds(sector_id)
+          Format.info("Quality thresholds for sector #{sector_id}:")
           Format.info("  • Composite: #{thresholds.composite}/100")
           Format.info("  • Static: #{thresholds.static}/100")
           Format.info("  • Security: #{thresholds.security}/100")
           Format.info("  • Performance: #{thresholds.performance}/100")
         else
-          Format.error("Usage: section quality thresholds --comb <id>")
+          Format.error("Usage: section quality thresholds --sector <id>")
         end
       
       "trends" ->
-        comb_id = result_get(result, :options, :comb)
+        sector_id = result_get(result, :options, :sector)
         
-        if comb_id do
-          stats = GiTF.Quality.get_quality_stats(comb_id)
+        if sector_id do
+          stats = GiTF.Quality.get_quality_stats(sector_id)
           
           if stats.total_jobs == 0 do
-            Format.warn("No quality data for comb #{comb_id}")
+            Format.warn("No quality data for sector #{sector_id}")
           else
-            Format.info("Quality statistics for comb #{comb_id}:")
+            Format.info("Quality statistics for sector #{sector_id}:")
             Format.info("  • Average: #{stats.average}/100")
             Format.info("  • Min: #{stats.min}/100")
             Format.info("  • Max: #{stats.max}/100")
             Format.info("  • Trend: #{stats.trend}")
-            Format.info("  • Total jobs: #{stats.total_jobs}")
+            Format.info("  • Total ops: #{stats.total_jobs}")
             
             IO.puts("")
             Format.info("Recent scores:")
-            trends = GiTF.Quality.get_quality_trends(comb_id, 5)
+            trends = GiTF.Quality.get_quality_trends(sector_id, 5)
             Enum.each(trends, fn t ->
-              Format.info("  • #{t.job_id}: #{t.score}/100")
+              Format.info("  • #{t.op_id}: #{t.score}/100")
             end)
           end
         else
-          Format.error("Usage: section quality trends --comb <id>")
+          Format.error("Usage: section quality trends --sector <id>")
         end
       
       _ ->
@@ -581,12 +581,12 @@ defmodule GiTF.CLI do
     
     case subcommand do
       "analyze" ->
-        job_id = result_get(result, :options, :job)
+        op_id = result_get(result, :options, :op)
         
-        if job_id do
-          case GiTF.Intelligence.analyze_and_suggest(job_id) do
+        if op_id do
+          case GiTF.Intelligence.analyze_and_suggest(op_id) do
             {:ok, result} ->
-              Format.info("Failure Analysis for job #{job_id}:")
+              Format.info("Failure Analysis for op #{op_id}:")
               Format.info("  Type: #{result.analysis.failure_type}")
               Format.info("  Cause: #{result.analysis.root_cause}")
               Format.info("  Similar failures: #{result.analysis.similar_count}")
@@ -602,16 +602,16 @@ defmodule GiTF.CLI do
               Format.error("Analysis failed: #{inspect(reason)}")
           end
         else
-          Format.error("Usage: section intelligence analyze --job <id>")
+          Format.error("Usage: section intelligence analyze --op <id>")
         end
       
       "retry" ->
-        job_id = result_get(result, :options, :job)
+        op_id = result_get(result, :options, :op)
         
-        if job_id do
-          case GiTF.Intelligence.auto_retry(job_id) do
+        if op_id do
+          case GiTF.Intelligence.auto_retry(op_id) do
             {:ok, new_job} ->
-              Format.success("Created retry job: #{new_job.id}")
+              Format.success("Created retry op: #{new_job.id}")
               Format.info("  Strategy: #{new_job.retry_strategy}")
               if new_job.retry_metadata[:note] do
                 Format.info("  Note: #{new_job.retry_metadata.note}")
@@ -621,18 +621,18 @@ defmodule GiTF.CLI do
               Format.error("Retry failed: #{inspect(reason)}")
           end
         else
-          Format.error("Usage: section intelligence retry --job <id>")
+          Format.error("Usage: section intelligence retry --op <id>")
         end
       
       "insights" ->
-        comb_id = result_get(result, :options, :comb)
+        sector_id = result_get(result, :options, :sector)
         
-        if comb_id do
-          insights = GiTF.Intelligence.get_insights(comb_id)
+        if sector_id do
+          insights = GiTF.Intelligence.get_insights(sector_id)
           
-          Format.info("Intelligence Insights for comb #{comb_id}:")
-          Format.info("  Total jobs: #{insights.total_jobs}")
-          Format.info("  Failed jobs: #{insights.failed_jobs}")
+          Format.info("Intelligence Insights for sector #{sector_id}:")
+          Format.info("  Total ops: #{insights.total_jobs}")
+          Format.info("  Failed ops: #{insights.failed_jobs}")
           Format.info("  Success rate: #{insights.success_rate}%")
           
           if insights.top_failure_type do
@@ -650,14 +650,14 @@ defmodule GiTF.CLI do
             end)
           end
         else
-          Format.error("Usage: section intelligence insights --comb <id>")
+          Format.error("Usage: section intelligence insights --sector <id>")
         end
       
       "learn" ->
-        comb_id = result_get(result, :options, :comb)
+        sector_id = result_get(result, :options, :sector)
         
-        if comb_id do
-          case GiTF.Intelligence.learn(comb_id) do
+        if sector_id do
+          case GiTF.Intelligence.learn(sector_id) do
             {:ok, learning} ->
               Format.success("Learned from #{learning.total_failures} failures")
               Format.info("  Patterns identified: #{length(learning.patterns)}")
@@ -666,19 +666,19 @@ defmodule GiTF.CLI do
               Format.error("Learning failed: #{inspect(reason)}")
           end
         else
-          Format.error("Usage: section intelligence learn --comb <id>")
+          Format.error("Usage: section intelligence learn --sector <id>")
         end
       
       "best-practices" ->
-        comb_id = result_get(result, :options, :comb)
+        sector_id = result_get(result, :options, :sector)
         
-        if comb_id do
-          practices = GiTF.Intelligence.get_best_practices(comb_id)
+        if sector_id do
+          practices = GiTF.Intelligence.get_best_practices(sector_id)
           
           if Enum.empty?(practices.common_factors || []) do
-            Format.warn("No success patterns found for comb #{comb_id}")
+            Format.warn("No success patterns found for sector #{sector_id}")
           else
-            Format.info("Best Practices for comb #{comb_id}:")
+            Format.info("Best Practices for sector #{sector_id}:")
             
             if practices.recommended_model do
               Format.info("  Recommended model: #{practices.recommended_model}")
@@ -700,22 +700,22 @@ defmodule GiTF.CLI do
             if length(practices.high_quality_examples || []) > 0 do
               IO.puts("")
               Format.info("High Quality Examples:")
-              Enum.each(practices.high_quality_examples, fn job_id ->
-                Format.info("  • #{job_id}")
+              Enum.each(practices.high_quality_examples, fn op_id ->
+                Format.info("  • #{op_id}")
               end)
             end
           end
         else
-          Format.error("Usage: section intelligence best-practices --comb <id>")
+          Format.error("Usage: section intelligence best-practices --sector <id>")
         end
       
       "recommend" ->
-        comb_id = result_get(result, :options, :comb)
+        sector_id = result_get(result, :options, :sector)
         
-        if comb_id do
-          recommendation = GiTF.Intelligence.recommend_approach(comb_id)
+        if sector_id do
+          recommendation = GiTF.Intelligence.recommend_approach(sector_id)
           
-          Format.info("Recommended Approach for comb #{comb_id}:")
+          Format.info("Recommended Approach for sector #{sector_id}:")
           Format.info("  Model: #{recommendation.model}")
           Format.info("  Confidence: #{recommendation.confidence}")
           
@@ -729,7 +729,7 @@ defmodule GiTF.CLI do
             Format.info("  • #{s}")
           end)
         else
-          Format.error("Usage: section intelligence recommend --comb <id>")
+          Format.error("Usage: section intelligence recommend --sector <id>")
         end
       
       _ ->
@@ -763,16 +763,16 @@ defmodule GiTF.CLI do
       return_early()
     end
 
-    comb_id = result_get(result, :options, :comb)
+    sector_id = result_get(result, :options, :sector)
     
-    if comb_id do
+    if sector_id do
       # Predict issues
-      predictions = GiTF.Autonomy.predict_issues(comb_id)
+      predictions = GiTF.Autonomy.predict_issues(sector_id)
       
       if Enum.empty?(predictions) do
-        Format.success("No issues predicted for comb #{comb_id}")
+        Format.success("No issues predicted for sector #{sector_id}")
       else
-        Format.warn("Predicted Issues for comb #{comb_id}:")
+        Format.warn("Predicted Issues for sector #{sector_id}:")
         Enum.each(predictions, fn {type, message} ->
           Format.warn("  • #{type}: #{message}")
         end)
@@ -798,15 +798,15 @@ defmodule GiTF.CLI do
       return_early()
     end
 
-    quest_id = result_get(result, :options, :quest)
+    mission_id = result_get(result, :options, :mission)
     
-    if quest_id do
-      case GiTF.Resilience.detect_deadlock(quest_id) do
+    if mission_id do
+      case GiTF.Resilience.detect_deadlock(mission_id) do
         {:ok, :no_deadlock} ->
-          Format.success("No deadlock detected in quest #{quest_id}")
+          Format.success("No deadlock detected in mission #{mission_id}")
         
         {:error, {:deadlock, cycles}} ->
-          Format.error("Deadlock detected in quest #{quest_id}!")
+          Format.error("Deadlock detected in mission #{mission_id}!")
           Format.warn("Circular dependencies found:")
           Enum.each(cycles, fn cycle ->
             Format.warn("  • #{Enum.join(cycle, " → ")}")
@@ -815,11 +815,11 @@ defmodule GiTF.CLI do
           IO.puts("")
           Format.info("Attempting to resolve...")
           
-          {:ok, :deadlock_resolved} = GiTF.Resilience.resolve_deadlock(quest_id, cycles)
+          {:ok, :deadlock_resolved} = GiTF.Resilience.resolve_deadlock(mission_id, cycles)
           Format.success("Deadlock resolved")
       end
     else
-      Format.error("Usage: section deadlock --quest <id>")
+      Format.error("Usage: section deadlock --mission <id>")
     end
   end
 
@@ -843,7 +843,7 @@ defmodule GiTF.CLI do
         
         Format.info("System Status:")
         IO.puts("  Health: #{status.health.status}")
-        IO.puts("  Quests: #{status.metrics.quests.active} active, #{status.metrics.quests.completed} completed")
+        IO.puts("  Quests: #{status.metrics.missions.active} active, #{status.metrics.missions.completed} completed")
         IO.puts("  Bees: #{status.metrics.ghosts.active} active")
         IO.puts("  Quality: #{Float.round(status.metrics.quality.average, 1)}")
         IO.puts("  Cost: $#{Float.round(status.metrics.costs.total, 2)}")
@@ -873,13 +873,13 @@ defmodule GiTF.CLI do
   end
 
   defp dispatch([:accept], result) do
-    job_id = result_get(result, :options, :job)
-    quest_id = result_get(result, :options, :quest)
+    op_id = result_get(result, :options, :op)
+    mission_id = result_get(result, :options, :mission)
     
     cond do
-      job_id ->
-        Format.info("Testing acceptance criteria for job #{job_id}...")
-        result = GiTF.Acceptance.test_acceptance(job_id)
+      op_id ->
+        Format.info("Testing acceptance criteria for op #{op_id}...")
+        result = GiTF.Acceptance.test_acceptance(op_id)
         
         IO.puts("\nAcceptance Test Results:")
         IO.puts("  Goal Met: #{if result.goal_met, do: "✓", else: "✗"}")
@@ -898,9 +898,9 @@ defmodule GiTF.CLI do
           end)
         end
       
-      quest_id ->
-        Format.info("Testing acceptance criteria for quest #{quest_id}...")
-        result = GiTF.Acceptance.test_quest_acceptance(quest_id)
+      mission_id ->
+        Format.info("Testing acceptance criteria for mission #{mission_id}...")
+        result = GiTF.Acceptance.test_quest_acceptance(mission_id)
         
         IO.puts("\nQuest Acceptance:")
         IO.puts("  Goal Achieved: #{if result.goal_achieved, do: "✓", else: "✗"}")
@@ -915,19 +915,19 @@ defmodule GiTF.CLI do
         end
       
       true ->
-        Format.error("Usage: section accept --job <id> OR --quest <id>")
+        Format.error("Usage: section accept --op <id> OR --mission <id>")
     end
   end
 
   defp dispatch([:scope], result) do
-    job_id = result_get(result, :options, :job)
-    quest_id = result_get(result, :options, :quest)
+    op_id = result_get(result, :options, :op)
+    mission_id = result_get(result, :options, :mission)
     
     cond do
-      job_id ->
-        result = GiTF.ScopeGuard.check_scope(job_id)
+      op_id ->
+        result = GiTF.ScopeGuard.check_scope(op_id)
         
-        IO.puts("Scope Check for job #{job_id}:")
+        IO.puts("Scope Check for op #{op_id}:")
         IO.puts("  In Scope: #{if result.in_scope, do: "✓", else: "✗"}")
         
         if !Enum.empty?(result.warnings) do
@@ -939,10 +939,10 @@ defmodule GiTF.CLI do
         
         IO.puts("\nRecommendation: #{result.recommendation}")
       
-      quest_id ->
-        result = GiTF.ScopeGuard.check_quest_scope(quest_id)
+      mission_id ->
+        result = GiTF.ScopeGuard.check_quest_scope(mission_id)
         
-        IO.puts("Scope Check for quest #{quest_id}:")
+        IO.puts("Scope Check for mission #{mission_id}:")
         IO.puts("  Total Jobs: #{result.total_jobs}")
         IO.puts("  Status: #{result.overall_status}")
         
@@ -954,16 +954,16 @@ defmodule GiTF.CLI do
         end
       
       true ->
-        Format.error("Usage: section scope --job <id> OR --quest <id>")
+        Format.error("Usage: section scope --op <id> OR --mission <id>")
     end
   end
 
-  defp dispatch([:comb, :add], result) do
+  defp dispatch([:sector, :add], result) do
     path = result_get(result, :args, :path)
 
     if GiTF.Client.remote?() do
       unless path do
-        Format.error("Remote mode requires an explicit path. Usage: section comb add <path>")
+        Format.error("Remote mode requires an explicit path. Usage: section sector add <path>")
         System.halt(1)
       end
 
@@ -971,8 +971,8 @@ defmodule GiTF.CLI do
       opts = if name, do: [name: name], else: []
 
       case GiTF.Client.add_comb(path, opts) do
-        {:ok, comb} -> Format.success("Comb \"#{comb.name}\" registered (#{comb.id})")
-        {:error, reason} -> Format.error("Failed to add comb: #{inspect(reason)}")
+        {:ok, sector} -> Format.success("Comb \"#{sector.name}\" registered (#{sector.id})")
+        {:error, reason} -> Format.error("Failed to add sector: #{inspect(reason)}")
       end
     else
       auto = result_get(result, :options, :auto) || false
@@ -1022,7 +1022,7 @@ defmodule GiTF.CLI do
 
         case GiTF.Onboarding.onboard(path, opts) do
           {:ok, result} ->
-            Format.success("Comb \"#{result.comb.name}\" auto-configured (#{result.comb.id})")
+            Format.success("Comb \"#{result.sector.name}\" auto-configured (#{result.sector.id})")
             Format.info("  Language: #{result.project_info.language}")
             if result.project_info.framework, do: Format.info("  Framework: #{result.project_info.framework}")
             if result.project_info.validation_command, do: Format.info("  Validation: #{result.project_info.validation_command}")
@@ -1049,39 +1049,39 @@ defmodule GiTF.CLI do
         opts = if github_owner, do: Keyword.put(opts, :github_owner, github_owner), else: opts
         opts = if github_repo, do: Keyword.put(opts, :github_repo, github_repo), else: opts
 
-        case GiTF.Comb.add(path, opts) do
-          {:ok, comb} ->
-            Format.success("Comb \"#{comb.name}\" registered (#{comb.id})")
+        case GiTF.Sector.add(path, opts) do
+          {:ok, sector} ->
+            Format.success("Comb \"#{sector.name}\" registered (#{sector.id})")
 
           {:error, :path_not_found} ->
             Format.error("Path does not exist: #{path}")
 
           {:error, reason} ->
-            Format.error("Failed to add comb: #{inspect(reason)}")
+            Format.error("Failed to add sector: #{inspect(reason)}")
         end
       end
     end
   end
 
-  defp dispatch([:comb, :list], _result) do
-    combs =
+  defp dispatch([:sector, :list], _result) do
+    sectors =
       if GiTF.Client.remote?() do
         case GiTF.Client.list_combs() do
           {:ok, c} -> c
           {:error, reason} -> Format.error("Remote error: #{inspect(reason)}"); []
         end
       else
-        GiTF.Comb.list()
+        GiTF.Sector.list()
       end
 
-    case combs do
+    case sectors do
       [] ->
-        Format.info("No combs registered. Use `gitf sector add <path>` to register one.")
+        Format.info("No sectors registered. Use `gitf sector add <path>` to register one.")
 
-      combs ->
+      sectors ->
         current_id =
           unless GiTF.Client.remote?() do
-            case GiTF.Comb.current() do
+            case GiTF.Sector.current() do
               {:ok, c} -> c.id
               _ -> nil
             end
@@ -1090,7 +1090,7 @@ defmodule GiTF.CLI do
         headers = ["", "ID", "Name", "Path"]
 
         rows =
-          Enum.map(combs, fn c ->
+          Enum.map(sectors, fn c ->
             marker = if current_id && c.id == current_id, do: "*", else: ""
             [marker, c.id, c.name, c[:path] || c[:repo_url] || "-"]
           end)
@@ -1099,76 +1099,76 @@ defmodule GiTF.CLI do
     end
   end
 
-  defp dispatch([:comb, :remove], result) do
+  defp dispatch([:sector, :remove], result) do
     name = result_get(result, :args, :name)
 
     remove_result =
       if GiTF.Client.remote?(),
         do: GiTF.Client.remove_comb(name),
-        else: GiTF.Comb.remove(name)
+        else: GiTF.Sector.remove(name)
 
     case remove_result do
       :ok ->
         Format.success("Comb \"#{name}\" removed.")
 
-      {:ok, comb} ->
-        Format.success("Comb \"#{comb.name}\" removed.")
+      {:ok, sector} ->
+        Format.success("Comb \"#{sector.name}\" removed.")
 
       {:error, :not_found} ->
-        show_not_found_error(:comb, name)
+        show_not_found_error(:sector, name)
     end
   end
 
-  defp dispatch([:comb, :use], result) do
+  defp dispatch([:sector, :use], result) do
     name = result_get(result, :args, :name)
 
     if GiTF.Client.remote?() do
       unless name do
-        Format.error("Remote mode requires an explicit name/id. Usage: section comb use <name>")
+        Format.error("Remote mode requires an explicit name/id. Usage: section sector use <name>")
         System.halt(1)
       end
 
       case GiTF.Client.use_comb(name) do
-        {:ok, comb} -> Format.success("Current comb set to \"#{comb.name}\" (#{comb.id})")
-        {:error, :not_found} -> show_not_found_error(:comb, name)
-        {:error, reason} -> Format.error("Failed to set current comb: #{inspect(reason)}")
+        {:ok, sector} -> Format.success("Current sector set to \"#{sector.name}\" (#{sector.id})")
+        {:error, :not_found} -> show_not_found_error(:sector, name)
+        {:error, reason} -> Format.error("Failed to set current sector: #{inspect(reason)}")
       end
     else
       if name do
-        case GiTF.Comb.set_current(name) do
-          {:ok, comb} ->
-            Format.success("Current comb set to \"#{comb.name}\" (#{comb.id})")
+        case GiTF.Sector.set_current(name) do
+          {:ok, sector} ->
+            Format.success("Current sector set to \"#{sector.name}\" (#{sector.id})")
 
           {:error, :not_found} ->
-            show_not_found_error(:comb, name)
+            show_not_found_error(:sector, name)
 
           {:error, reason} ->
-            Format.error("Failed to set current comb: #{inspect(reason)}")
+            Format.error("Failed to set current sector: #{inspect(reason)}")
         end
       else
-        case GiTF.Comb.list() do
+        case GiTF.Sector.list() do
           [] ->
             IO.puts(GiTF.CLI.Errors.format_error(:no_combs))
 
-          combs ->
-            IO.puts("Registered combs:")
+          sectors ->
+            IO.puts("Registered sectors:")
 
-            combs
+            sectors
             |> Enum.with_index(1)
             |> Enum.each(fn {c, idx} ->
               IO.puts("  #{idx}) #{c.name} (#{c.id})")
             end)
 
             IO.puts("")
-            answer = IO.gets("Select a comb [1-#{length(combs)}]: ") |> String.trim()
+            answer = IO.gets("Select a sector [1-#{length(sectors)}]: ") |> String.trim()
 
             case Integer.parse(answer) do
-              {n, ""} when n >= 1 and n <= length(combs) ->
-                comb = Enum.at(combs, n - 1)
+              {n, ""} when n >= 1 and n <= length(sectors) ->
+                sector = Enum.at(sectors, n - 1)
 
-                case GiTF.Comb.set_current(comb.id) do
+                case GiTF.Sector.set_current(sector.id) do
                   {:ok, c} ->
-                    Format.success("Current comb set to \"#{c.name}\" (#{c.id})")
+                    Format.success("Current sector set to \"#{c.name}\" (#{c.id})")
 
                   {:error, reason} ->
                     Format.error("Failed: #{inspect(reason)}")
@@ -1182,41 +1182,41 @@ defmodule GiTF.CLI do
     end
   end
 
-  defp dispatch([:comb, :rename], result) do
+  defp dispatch([:sector, :rename], result) do
     name = result_get(result, :args, :name)
     new_name = result_get(result, :args, :new_name)
 
-    case GiTF.Comb.rename(name, new_name) do
-      {:ok, comb} ->
-        Format.success("Comb renamed to \"#{comb.name}\" (#{comb.id})")
+    case GiTF.Sector.rename(name, new_name) do
+      {:ok, sector} ->
+        Format.success("Comb renamed to \"#{sector.name}\" (#{sector.id})")
 
       {:error, :not_found} ->
-        show_not_found_error(:comb, name)
+        show_not_found_error(:sector, name)
 
       {:error, :name_already_taken} ->
-        Format.error("A comb named \"#{new_name}\" already exists.")
+        Format.error("A sector named \"#{new_name}\" already exists.")
 
       {:error, {:rename_failed, reason}} ->
         Format.error("Failed to rename directory: #{inspect(reason)}")
 
       {:error, reason} ->
-        Format.error("Failed to rename comb: #{inspect(reason)}")
+        Format.error("Failed to rename sector: #{inspect(reason)}")
     end
   end
 
-  defp dispatch([:waggle, :list], result) do
+  defp dispatch([:link_msg, :list], result) do
     to = result_get(result, :options, :to)
     opts = if to, do: [to: to], else: []
 
-    case GiTF.Waggle.list(opts) do
+    case GiTF.Link.list(opts) do
       [] ->
-        Format.info("No waggle messages found.")
+        Format.info("No link_msg messages found.")
 
-      waggles ->
+      links ->
         headers = ["ID", "From", "To", "Subject", "Read"]
 
         rows =
-          Enum.map(waggles, fn w ->
+          Enum.map(links, fn w ->
             [w.id, w.from, w.to, w.subject || "-", if(w.read, do: "yes", else: "no")]
           end)
 
@@ -1224,63 +1224,63 @@ defmodule GiTF.CLI do
     end
   end
 
-  defp dispatch([:waggle, :show], result) do
+  defp dispatch([:link_msg, :show], result) do
     id = result_get(result, :args, :id)
 
-    case GiTF.Store.get(:waggles, id) do
+    case GiTF.Store.get(:links, id) do
       nil ->
-        Format.error("Waggle not found: #{id}")
+        Format.error("Link not found: #{id}")
         Format.info("Hint: use `gitf link list` to see all messages.")
 
-      waggle ->
-        IO.puts("ID:      #{waggle.id}")
-        IO.puts("From:    #{waggle.from}")
-        IO.puts("To:      #{waggle.to}")
-        IO.puts("Subject: #{waggle.subject || "-"}")
-        IO.puts("Read:    #{waggle.read}")
-        IO.puts("Sent:    #{waggle.inserted_at}")
+      link_msg ->
+        IO.puts("ID:      #{link_msg.id}")
+        IO.puts("From:    #{link_msg.from}")
+        IO.puts("To:      #{link_msg.to}")
+        IO.puts("Subject: #{link_msg.subject || "-"}")
+        IO.puts("Read:    #{link_msg.read}")
+        IO.puts("Sent:    #{link_msg.inserted_at}")
         IO.puts("")
 
-        if waggle.body do
-          IO.puts(waggle.body)
+        if link_msg.body do
+          IO.puts(link_msg.body)
         end
     end
   end
 
-  defp dispatch([:waggle, :send], result) do
+  defp dispatch([:link_msg, :send], result) do
     from = result_get(result, :options, :from)
     to = result_get(result, :options, :to)
     subject = result_get(result, :options, :subject)
     body = result_get(result, :options, :body)
 
-    {:ok, waggle} = GiTF.Waggle.send(from, to, subject, body)
-    Format.success("Waggle sent (#{waggle.id})")
+    {:ok, link_msg} = GiTF.Link.send(from, to, subject, body)
+    Format.success("Link sent (#{link_msg.id})")
   end
 
-  defp dispatch([:cell, :list], _result) do
-    case GiTF.Cell.list(status: "active") do
+  defp dispatch([:shell, :list], _result) do
+    case GiTF.Shell.list(status: "active") do
       [] ->
-        Format.info("No active cells. Use `gitf shell list` after spawning a ghost.")
+        Format.info("No active shells. Use `gitf shell list` after spawning a ghost.")
 
-      cells ->
+      shells ->
         headers = ["ID", "Bee ID", "Comb ID", "Branch", "Path"]
 
         rows =
-          Enum.map(cells, fn c ->
-            [c.id, c.ghost_id, c.comb_id, c.branch, c.worktree_path]
+          Enum.map(shells, fn c ->
+            [c.id, c.ghost_id, c.sector_id, c.branch, c.worktree_path]
           end)
 
         Format.table(headers, rows)
     end
   end
 
-  defp dispatch([:cell, :clean], _result) do
-    case GiTF.Cell.cleanup_orphans() do
+  defp dispatch([:shell, :clean], _result) do
+    case GiTF.Shell.cleanup_orphans() do
       {:ok, 0} ->
-        Format.info("No orphaned cells found.")
+        Format.info("No orphaned shells found.")
 
       {:ok, count} ->
-        Format.success("Marked #{count} orphaned cell(s) as removed.")
+        Format.success("Marked #{count} orphaned shell(s) as removed.")
     end
   end
 
@@ -1323,7 +1323,7 @@ defmodule GiTF.CLI do
 
               {:error, reason} ->
                 Format.warn("Could not launch Claude: #{inspect(reason)}")
-                Format.info("Major running without Claude. Listening for waggles.")
+                Format.info("Major running without Claude. Listening for links.")
             end
 
             GiTF.Major.await_session_end()
@@ -1354,7 +1354,7 @@ defmodule GiTF.CLI do
 
     case ghosts do
       [] ->
-        Format.info("No ghosts. Bees are spawned when the Major assigns jobs.")
+        Format.info("No ghosts. Bees are spawned when the Major assigns ops.")
 
       ghosts ->
         headers = ["ID", "Name", "Status", "Job ID", "Context %"]
@@ -1368,7 +1368,7 @@ defmodule GiTF.CLI do
                 _ -> "-"
               end
 
-            [b.id, b.name, b.status, b[:job_id] || "-", context_pct]
+            [b.id, b.name, b.status, b[:op_id] || "-", context_pct]
           end)
 
         Format.table(headers, rows)
@@ -1376,16 +1376,16 @@ defmodule GiTF.CLI do
   end
 
   defp dispatch([:ghost, :spawn], result) do
-    job_id = result_get(result, :options, :job)
+    op_id = result_get(result, :options, :op)
     name = result_get(result, :options, :name)
 
-    case resolve_comb_id(result_get(result, :options, :comb)) do
-      {:ok, comb_id} ->
+    case resolve_comb_id(result_get(result, :options, :sector)) do
+      {:ok, sector_id} ->
         with {:ok, gitf_root} <- GiTF.gitf_dir(),
-             {:ok, comb} <- GiTF.Comb.get(comb_id) do
+             {:ok, sector} <- GiTF.Sector.get(sector_id) do
           opts = if name, do: [name: name], else: []
 
-          case GiTF.Ghosts.spawn_detached(job_id, comb.id, gitf_root, opts) do
+          case GiTF.Ghosts.spawn_detached(op_id, sector.id, gitf_root, opts) do
             {:ok, ghost} ->
               Format.success("Bee \"#{ghost.name}\" spawned (#{ghost.id})")
 
@@ -1397,14 +1397,14 @@ defmodule GiTF.CLI do
             IO.puts(GiTF.CLI.Errors.format_error(:store_not_initialized))
 
           {:error, :not_found} ->
-            show_not_found_error(:comb, comb_id)
+            show_not_found_error(:sector, sector_id)
 
           {:error, reason} ->
             Format.error("Failed: #{inspect(reason)}")
         end
 
       {:error, :no_comb} ->
-        Format.error("No comb specified. Use --comb or set one with `gitf sector use`.")
+        Format.error("No sector specified. Use --sector or set one with `gitf sector use`.")
     end
   end
 
@@ -1438,15 +1438,15 @@ defmodule GiTF.CLI do
         {:ok, ghost} ->
           GiTF.Store.put(:ghosts, %{ghost | status: "stopped"})
 
-          if ghost.job_id do
-            GiTF.Jobs.complete(ghost.job_id)
-            GiTF.Jobs.unblock_dependents(ghost.job_id)
+          if ghost.op_id do
+            GiTF.Ops.complete(ghost.op_id)
+            GiTF.Ops.unblock_dependents(ghost.op_id)
 
-            GiTF.Waggle.send(
+            GiTF.Link.send(
               ghost_id,
               "major",
               "job_complete",
-              "Job #{ghost.job_id} completed successfully"
+              "Job #{ghost.op_id} completed successfully"
             )
           end
 
@@ -1472,9 +1472,9 @@ defmodule GiTF.CLI do
         {:ok, ghost} ->
           GiTF.Store.put(:ghosts, %{ghost | status: "crashed"})
 
-          if ghost.job_id do
-            GiTF.Jobs.fail(ghost.job_id)
-            GiTF.Waggle.send(ghost_id, "major", "job_failed", "Job #{ghost.job_id} failed: #{reason}")
+          if ghost.op_id do
+            GiTF.Ops.fail(ghost.op_id)
+            GiTF.Link.send(ghost_id, "major", "job_failed", "Job #{ghost.op_id} failed: #{reason}")
           end
 
           Format.success("Bee #{ghost_id} marked as failed: #{reason}")
@@ -1526,7 +1526,7 @@ defmodule GiTF.CLI do
     end
   end
 
-  defp dispatch([:quest, :report], result) do
+  defp dispatch([:mission, :report], result) do
     id = result_get(result, :args, :id)
 
     if GiTF.Client.remote?() do
@@ -1540,7 +1540,7 @@ defmodule GiTF.CLI do
           IO.puts(GiTF.Report.format(report))
 
         {:error, :not_found} ->
-          show_not_found_error(:quest, id)
+          show_not_found_error(:mission, id)
 
         {:error, reason} ->
           Format.error("Report failed: #{format_error(reason)}")
@@ -1548,12 +1548,12 @@ defmodule GiTF.CLI do
     end
   end
 
-  defp dispatch([:quest, :merge], result) do
+  defp dispatch([:mission, :merge], result) do
     id = result_get(result, :args, :id)
 
     if GiTF.Client.remote?() do
       case GiTF.Client.quest_merge(id) do
-        {:ok, data} -> Format.success("All ghost branches merged into #{data[:branch] || "quest branch"}")
+        {:ok, data} -> Format.success("All ghost branches merged into #{data[:branch] || "mission branch"}")
         {:error, reason} -> Format.error("Quest merge failed: #{format_error(reason)}")
       end
     else
@@ -1562,10 +1562,10 @@ defmodule GiTF.CLI do
           Format.success("All ghost branches merged into #{branch}")
 
         {:error, :not_found} ->
-          show_not_found_error(:quest, id)
+          show_not_found_error(:mission, id)
 
         {:error, :no_cells} ->
-          Format.error("No active cells to merge for this quest.")
+          Format.error("No active shells to merge for this mission.")
 
         {:error, {:merge_conflicts, branch, failed}} ->
           Format.warn("Merged into #{branch} with conflicts in: #{Enum.join(failed, ", ")}")
@@ -1576,46 +1576,46 @@ defmodule GiTF.CLI do
     end
   end
 
-  defp dispatch([:quest, :close], result) do
+  defp dispatch([:mission, :close], result) do
     id = result_get(result, :args, :id)
 
     close_result =
       if GiTF.Client.remote?(),
         do: GiTF.Client.close_quest(id),
-        else: GiTF.Quests.close(id)
+        else: GiTF.Missions.close(id)
 
     case close_result do
-      {:ok, quest} ->
-        Format.success("Quest \"#{quest.name}\" closed. Associated cells removed.")
+      {:ok, mission} ->
+        Format.success("Quest \"#{mission.name}\" closed. Associated shells removed.")
 
       {:error, :not_found} ->
-        show_not_found_error(:quest, id)
+        show_not_found_error(:mission, id)
     end
   end
 
-  defp dispatch([:quest, :new], result) do
+  defp dispatch([:mission, :new], result) do
     goal = result_get(result, :args, :goal)
 
     if GiTF.Client.remote?() do
-      comb_opt = result_get(result, :options, :comb)
-      attrs = if comb_opt, do: %{goal: goal, comb_id: comb_opt}, else: %{goal: goal}
+      comb_opt = result_get(result, :options, :sector)
+      attrs = if comb_opt, do: %{goal: goal, sector_id: comb_opt}, else: %{goal: goal}
 
       case GiTF.Client.create_quest(attrs) do
-        {:ok, quest} ->
-          Format.success("Quest \"#{quest.name}\" created (#{quest.id})")
-          Format.info("Starting quest execution on remote server...")
+        {:ok, mission} ->
+          Format.success("Quest \"#{mission.name}\" created (#{mission.id})")
+          Format.info("Starting mission execution on remote server...")
 
-          case GiTF.Client.start_quest(quest.id) do
+          case GiTF.Client.start_quest(mission.id) do
             {:ok, data} ->
               phase = if is_map(data), do: data[:phase], else: data
-              Format.success("Quest #{quest.id} is now in #{phase} phase.")
+              Format.success("Quest #{mission.id} is now in #{phase} phase.")
 
             {:error, reason} ->
               Format.warn("Could not auto-start: #{inspect(reason)}")
           end
 
         {:error, reason} ->
-          Format.error("Failed to create quest: #{inspect(reason)}")
+          Format.error("Failed to create mission: #{inspect(reason)}")
       end
     else
       goal = if goal == nil or goal == "" do
@@ -1626,103 +1626,103 @@ defmodule GiTF.CLI do
       end
 
       quest_result =
-        case resolve_comb_id(result_get(result, :options, :comb)) do
-          {:ok, cid} -> GiTF.Quests.create(%{goal: goal, comb_id: cid})
-          {:error, :no_comb} -> GiTF.Quests.create(%{goal: goal})
+        case resolve_comb_id(result_get(result, :options, :sector)) do
+          {:ok, cid} -> GiTF.Missions.create(%{goal: goal, sector_id: cid})
+          {:error, :no_comb} -> GiTF.Missions.create(%{goal: goal})
         end
 
       case quest_result do
-        {:ok, quest} ->
-          Format.success("Quest \"#{quest.name}\" created (#{quest.id})")
-          GiTF.CLI.PlanHandler.start_interactive_planning(quest)
+        {:ok, mission} ->
+          Format.success("Quest \"#{mission.name}\" created (#{mission.id})")
+          GiTF.CLI.PlanHandler.start_interactive_planning(mission)
 
         {:error, reason} ->
-          Format.error("Failed to create quest: #{inspect(reason)}")
+          Format.error("Failed to create mission: #{inspect(reason)}")
       end
     end
   end
 
-  defp dispatch([:quest, :plan], result) do
+  defp dispatch([:mission, :plan], result) do
     id = result_get(result, :args, :id)
 
-    case GiTF.Quests.get(id) do
-      {:ok, quest} ->
-        GiTF.CLI.PlanHandler.start_interactive_planning(quest)
+    case GiTF.Missions.get(id) do
+      {:ok, mission} ->
+        GiTF.CLI.PlanHandler.start_interactive_planning(mission)
 
       {:error, :not_found} ->
         Format.error("Quest not found: #{id}")
     end
   end
 
-  defp dispatch([:quest, :remove], result) do
+  defp dispatch([:mission, :remove], result) do
     id = result_get(result, :args, :id)
 
     del_result =
       if GiTF.Client.remote?(),
         do: GiTF.Client.delete_quest(id),
-        else: GiTF.Quests.kill(id)
+        else: GiTF.Missions.kill(id)
 
     case del_result do
       :ok ->
         Format.success("Quest #{id} removed.")
 
       {:error, :not_found} ->
-        show_not_found_error(:quest, id)
+        show_not_found_error(:mission, id)
     end
   end
 
-  defp dispatch([:quest, :list], _result) do
-    quests =
+  defp dispatch([:mission, :list], _result) do
+    missions =
       if GiTF.Client.remote?() do
         case GiTF.Client.list_quests() do
           {:ok, q} -> q
           {:error, reason} -> Format.error("Remote error: #{inspect(reason)}"); []
         end
       else
-        GiTF.Quests.list()
+        GiTF.Missions.list()
       end
 
-    case quests do
+    case missions do
       [] ->
-        Format.info("No quests. Create one with `gitf mission \"<goal>\"`.")
+        Format.info("No missions. Create one with `gitf mission \"<goal>\"`.")
 
-      quests ->
+      missions ->
         headers = ["ID", "Name", "Phase", "Status", "Comb"]
 
         rows =
-          Enum.map(quests, fn q ->
-            comb_name =
-              if GiTF.Client.remote?(), do: q[:comb_id] || "-", else: resolve_comb_name(q[:comb_id])
+          Enum.map(missions, fn q ->
+            sector_name =
+              if GiTF.Client.remote?(), do: q[:sector_id] || "-", else: resolve_comb_name(q[:sector_id])
             phase = q[:current_phase] || "-"
-            [q[:id], q[:name] || q[:goal] || "-", phase, q[:status] || "pending", comb_name]
+            [q[:id], q[:name] || q[:goal] || "-", phase, q[:status] || "pending", sector_name]
           end)
 
         Format.table(headers, rows)
     end
   end
 
-  defp dispatch([:quest, :show], result) do
+  defp dispatch([:mission, :show], result) do
     id = result_get(result, :args, :id)
 
     quest_result =
       if GiTF.Client.remote?(),
         do: GiTF.Client.get_quest(id),
-        else: GiTF.Quests.get(id)
+        else: GiTF.Missions.get(id)
 
     case quest_result do
-      {:ok, quest} ->
-        IO.puts("ID:     #{quest[:id]}")
-        IO.puts("Name:   #{quest[:name] || quest[:goal] || "-"}")
-        IO.puts("Status: #{quest[:status] || "pending"}")
+      {:ok, mission} ->
+        IO.puts("ID:     #{mission[:id]}")
+        IO.puts("Name:   #{mission[:name] || mission[:goal] || "-"}")
+        IO.puts("Status: #{mission[:status] || "pending"}")
 
-        if quest[:comb_id] do
-          comb_name =
-            if GiTF.Client.remote?(), do: quest[:comb_id], else: resolve_comb_name(quest[:comb_id])
-          IO.puts("Comb:   #{comb_name}")
+        if mission[:sector_id] do
+          sector_name =
+            if GiTF.Client.remote?(), do: mission[:sector_id], else: resolve_comb_name(mission[:sector_id])
+          IO.puts("Comb:   #{sector_name}")
         end
 
-        if quest[:goal] do
-          IO.puts("Goal:   #{quest.goal}")
+        if mission[:goal] do
+          IO.puts("Goal:   #{mission.goal}")
         end
 
         IO.puts("")
@@ -1736,17 +1736,17 @@ defmodule GiTF.CLI do
           end
         end
 
-        jobs = quest[:jobs] || []
+        ops = mission[:ops] || []
 
-        case jobs do
+        case ops do
           [] ->
-            Format.info("No jobs in this quest.")
+            Format.info("No ops in this mission.")
 
-          jobs ->
+          ops ->
             headers = ["Job ID", "Title", "Status", "Bee ID"]
 
             rows =
-              Enum.map(jobs, fn j ->
+              Enum.map(ops, fn j ->
                 [j.id, j.title, j.status, j[:ghost_id] || "-"]
               end)
 
@@ -1754,113 +1754,113 @@ defmodule GiTF.CLI do
         end
 
       {:error, :not_found} ->
-        show_not_found_error(:quest, id)
+        show_not_found_error(:mission, id)
     end
   end
 
-  defp dispatch([:jobs, :list], _result) do
-    jobs =
+  defp dispatch([:ops, :list], _result) do
+    ops =
       if GiTF.Client.remote?() do
         case GiTF.Client.list_jobs() do
           {:ok, j} -> j
           {:error, reason} -> Format.error("Remote error: #{inspect(reason)}"); []
         end
       else
-        GiTF.Jobs.list()
+        GiTF.Ops.list()
       end
 
-    case jobs do
+    case ops do
       [] ->
-        Format.info("No jobs found.")
+        Format.info("No ops found.")
 
-      jobs ->
+      ops ->
         headers = ["ID", "Title", "Status", "Quest ID", "Bee ID"]
 
         rows =
-          Enum.map(jobs, fn j ->
-            [j.id, j.title, j.status, j[:quest_id], j[:ghost_id] || "-"]
+          Enum.map(ops, fn j ->
+            [j.id, j.title, j.status, j[:mission_id], j[:ghost_id] || "-"]
           end)
 
         Format.table(headers, rows)
     end
   end
 
-  defp dispatch([:jobs, :show], result) do
+  defp dispatch([:ops, :show], result) do
     id = result_get(result, :args, :id)
 
     job_result =
       if GiTF.Client.remote?(),
         do: GiTF.Client.get_job(id),
-        else: GiTF.Jobs.get(id)
+        else: GiTF.Ops.get(id)
 
     case job_result do
-      {:ok, job} ->
-        IO.puts("ID:          #{job.id}")
-        IO.puts("Title:       #{job.title}")
-        IO.puts("Status:      #{job.status}")
-        IO.puts("Quest ID:    #{job[:quest_id]}")
-        IO.puts("Comb ID:     #{job[:comb_id]}")
-        IO.puts("Bee ID:      #{job[:ghost_id] || "-"}")
-        IO.puts("Created:     #{job[:inserted_at]}")
+      {:ok, op} ->
+        IO.puts("ID:          #{op.id}")
+        IO.puts("Title:       #{op.title}")
+        IO.puts("Status:      #{op.status}")
+        IO.puts("Quest ID:    #{op[:mission_id]}")
+        IO.puts("Comb ID:     #{op[:sector_id]}")
+        IO.puts("Bee ID:      #{op[:ghost_id] || "-"}")
+        IO.puts("Created:     #{op[:inserted_at]}")
         IO.puts("")
 
-        if job[:description] do
-          IO.puts(job.description)
+        if op[:description] do
+          IO.puts(op.description)
         end
 
       {:error, :not_found} ->
-        show_not_found_error(:job, id)
-        Format.info("Hint: use `gitf ops list` to see all jobs.")
+        show_not_found_error(:op, id)
+        Format.info("Hint: use `gitf ops list` to see all ops.")
     end
   end
 
-  defp dispatch([:jobs, :create], result) do
-    quest_id = result_get(result, :options, :quest)
+  defp dispatch([:ops, :create], result) do
+    mission_id = result_get(result, :options, :mission)
     title = result_get(result, :options, :title)
     description = result_get(result, :options, :description)
 
-    case resolve_comb_id(result_get(result, :options, :comb)) do
-      {:ok, comb_id} ->
+    case resolve_comb_id(result_get(result, :options, :sector)) do
+      {:ok, sector_id} ->
         attrs = %{
-          quest_id: quest_id,
+          mission_id: mission_id,
           title: title,
-          comb_id: comb_id,
+          sector_id: sector_id,
           description: description
         }
 
-        case GiTF.Jobs.create(attrs) do
-          {:ok, job} ->
-            Format.success("Job \"#{job.title}\" created (#{job.id})")
+        case GiTF.Ops.create(attrs) do
+          {:ok, op} ->
+            Format.success("Job \"#{op.title}\" created (#{op.id})")
 
           {:error, reason} ->
-            Format.error("Failed to create job: #{inspect(reason)}")
+            Format.error("Failed to create op: #{inspect(reason)}")
         end
 
       {:error, :no_comb} ->
-        Format.error("No comb specified. Use --comb or set one with `gitf sector use`.")
+        Format.error("No sector specified. Use --sector or set one with `gitf sector use`.")
     end
   end
 
-  defp dispatch([:jobs, :reset], result) do
-    job_id = result_get(result, :args, :id)
+  defp dispatch([:ops, :reset], result) do
+    op_id = result_get(result, :args, :id)
 
     reset_result =
       if GiTF.Client.remote?(),
-        do: GiTF.Client.reset_job(job_id),
-        else: GiTF.Jobs.reset(job_id)
+        do: GiTF.Client.reset_job(op_id),
+        else: GiTF.Ops.reset(op_id)
 
     case reset_result do
-      {:ok, job} ->
-        Format.success("Job \"#{job.title}\" reset to #{job.status} (#{job.id})")
+      {:ok, op} ->
+        Format.success("Job \"#{op.title}\" reset to #{op.status} (#{op.id})")
 
       {:error, :not_found} ->
-        show_not_found_error(:job, job_id)
+        show_not_found_error(:op, op_id)
 
       {:error, :invalid_transition} ->
         Format.error("Job cannot be reset from its current status.")
 
       {:error, reason} ->
-        Format.error("Failed to reset job: #{inspect(reason)}")
+        Format.error("Failed to reset op: #{inspect(reason)}")
     end
   end
 
@@ -2022,8 +2022,8 @@ defmodule GiTF.CLI do
     ghost_id = result_get(result, :options, :ghost)
 
     case GiTF.Handoff.create(ghost_id) do
-      {:ok, waggle} ->
-        Format.success("Handoff created for #{ghost_id} (waggle #{waggle.id})")
+      {:ok, link_msg} ->
+        Format.success("Handoff created for #{ghost_id} (link_msg #{link_msg.id})")
 
       {:error, :bee_not_found} ->
         show_not_found_error(:ghost, ghost_id)
@@ -2037,18 +2037,18 @@ defmodule GiTF.CLI do
     ghost_id = result_get(result, :options, :ghost)
 
     case GiTF.Handoff.detect_handoff(ghost_id) do
-      {:ok, waggle} ->
-        IO.puts("Handoff waggle: #{waggle.id}")
-        IO.puts("Created: #{waggle.inserted_at}")
+      {:ok, link_msg} ->
+        IO.puts("Handoff link_msg: #{link_msg.id}")
+        IO.puts("Created: #{link_msg.inserted_at}")
         IO.puts("")
-        IO.puts(waggle.body || "(empty)")
+        IO.puts(link_msg.body || "(empty)")
 
       {:error, :no_handoff} ->
         Format.info("No handoff found for #{ghost_id}")
     end
   end
 
-  defp dispatch([:drone], result) do
+  defp dispatch([:tachikoma], result) do
     if GiTF.Client.remote?() do
       Format.error("This command runs on the server. Run it there directly.")
       return_early()
@@ -2057,17 +2057,17 @@ defmodule GiTF.CLI do
     no_fix = result_get(result, :flags, :no_fix) || false
     verify = result_get(result, :flags, :verify) || false
 
-    case GiTF.Drone.start_link(auto_fix: !no_fix, verify: verify) do
+    case GiTF.Tachikoma.start_link(auto_fix: !no_fix, verify: verify) do
       {:ok, _pid} ->
-        msg = if verify, do: "Drone started with verification enabled", else: "Drone started"
+        msg = if verify, do: "Tachikoma started with verification enabled", else: "Tachikoma started"
         Format.success("#{msg}. Running health patrols...")
         Process.sleep(:infinity)
 
       {:error, {:already_started, _pid}} ->
-        Format.warn("Drone is already running.")
+        Format.warn("Tachikoma is already running.")
 
       {:error, reason} ->
-        Format.error("Failed to start Drone: #{inspect(reason)}")
+        Format.error("Failed to start Tachikoma: #{inspect(reason)}")
     end
   end
 
@@ -2101,16 +2101,16 @@ defmodule GiTF.CLI do
 
   # -- Phase 1: Job dependencies -----------------------------------------------
 
-  defp dispatch([:jobs, :deps, :add], result) do
-    job_id = result_get(result, :options, :job)
+  defp dispatch([:ops, :deps, :add], result) do
+    op_id = result_get(result, :options, :op)
     depends_on = result_get(result, :options, :depends_on)
 
-    case GiTF.Jobs.add_dependency(job_id, depends_on) do
+    case GiTF.Ops.add_dependency(op_id, depends_on) do
       {:ok, dep} ->
-        Format.success("Dependency added (#{dep.id}): #{job_id} depends on #{depends_on}")
+        Format.success("Dependency added (#{dep.id}): #{op_id} depends on #{depends_on}")
 
       {:error, :self_dependency} ->
-        Format.error("A job cannot depend on itself.")
+        Format.error("A op cannot depend on itself.")
 
       {:error, :cycle_detected} ->
         Format.error("Adding this dependency would create a cycle.")
@@ -2120,23 +2120,23 @@ defmodule GiTF.CLI do
     end
   end
 
-  defp dispatch([:jobs, :deps, :remove], result) do
-    job_id = result_get(result, :options, :job)
+  defp dispatch([:ops, :deps, :remove], result) do
+    op_id = result_get(result, :options, :op)
     depends_on = result_get(result, :options, :depends_on)
 
-    case GiTF.Jobs.remove_dependency(job_id, depends_on) do
+    case GiTF.Ops.remove_dependency(op_id, depends_on) do
       :ok -> Format.success("Dependency removed.")
       {:error, :not_found} -> Format.error("Dependency not found.")
     end
   end
 
-  defp dispatch([:jobs, :deps, :list], result) do
-    job_id = result_get(result, :options, :job)
+  defp dispatch([:ops, :deps, :list], result) do
+    op_id = result_get(result, :options, :op)
 
-    deps = GiTF.Jobs.dependencies(job_id)
-    dependents = GiTF.Jobs.dependents(job_id)
+    deps = GiTF.Ops.dependencies(op_id)
+    dependents = GiTF.Ops.dependents(op_id)
 
-    IO.puts("Dependencies of #{job_id}:")
+    IO.puts("Dependencies of #{op_id}:")
 
     if deps == [] do
       Format.info("  (none)")
@@ -2145,7 +2145,7 @@ defmodule GiTF.CLI do
     end
 
     IO.puts("")
-    IO.puts("Dependents on #{job_id}:")
+    IO.puts("Dependents on #{op_id}:")
 
     if dependents == [] do
       Format.info("  (none)")
@@ -2154,24 +2154,24 @@ defmodule GiTF.CLI do
     end
 
     IO.puts("")
-    IO.puts("Ready? #{GiTF.Jobs.ready?(job_id)}")
+    IO.puts("Ready? #{GiTF.Ops.ready?(op_id)}")
   end
 
   # -- Phase 2: Budget ---------------------------------------------------------
 
   defp dispatch([:budget], result) do
-    quest_id = result_get(result, :options, :quest)
+    mission_id = result_get(result, :options, :mission)
 
-    budget = GiTF.Budget.budget_for(quest_id)
-    spent = GiTF.Budget.spent_for(quest_id)
-    remaining = GiTF.Budget.remaining(quest_id)
+    budget = GiTF.Budget.budget_for(mission_id)
+    spent = GiTF.Budget.spent_for(mission_id)
+    remaining = GiTF.Budget.remaining(mission_id)
 
-    IO.puts("Quest:     #{quest_id}")
+    IO.puts("Quest:     #{mission_id}")
     IO.puts("Budget:    $#{:erlang.float_to_binary(budget, decimals: 2)}")
     IO.puts("Spent:     $#{:erlang.float_to_binary(spent, decimals: 4)}")
     IO.puts("Remaining: $#{:erlang.float_to_binary(remaining, decimals: 4)}")
 
-    if GiTF.Budget.exceeded?(quest_id) do
+    if GiTF.Budget.exceeded?(mission_id) do
       Format.error("BUDGET EXCEEDED")
     else
       pct = if budget > 0, do: Float.round(spent / budget * 100, 1), else: 0.0
@@ -2216,11 +2216,11 @@ defmodule GiTF.CLI do
     if ghost_id do
       case GiTF.Ghosts.get(ghost_id) do
         {:ok, ghost} ->
-          cell =
-            GiTF.Store.find_one(:cells, fn c -> c.ghost_id == ghost.id and c.status == "active" end)
+          shell =
+            GiTF.Store.find_one(:shells, fn c -> c.ghost_id == ghost.id and c.status == "active" end)
 
-          if cell do
-            case GiTF.Conflict.check(cell.id) do
+          if shell do
+            case GiTF.Conflict.check(shell.id) do
               {:ok, :clean} ->
                 Format.success("No conflicts detected.")
 
@@ -2229,7 +2229,7 @@ defmodule GiTF.CLI do
                 Enum.each(files, fn f -> IO.puts("  #{f}") end)
             end
           else
-            Format.info("No active cell for ghost #{ghost_id}")
+            Format.info("No active shell for ghost #{ghost_id}")
           end
 
         {:error, :not_found} ->
@@ -2239,14 +2239,14 @@ defmodule GiTF.CLI do
       results = GiTF.Conflict.check_all_active()
 
       if results == [] do
-        Format.info("No active cells to check.")
+        Format.info("No active shells to check.")
       else
         Enum.each(results, fn
-          {:ok, cell_id, :clean} ->
-            IO.puts("#{cell_id}: clean")
+          {:ok, shell_id, :clean} ->
+            IO.puts("#{shell_id}: clean")
 
-          {:error, cell_id, :conflicts, files} ->
-            Format.warn("#{cell_id}: conflicts in #{Enum.join(files, ", ")}")
+          {:error, shell_id, :conflicts, files} ->
+            Format.warn("#{shell_id}: conflicts in #{Enum.join(files, ", ")}")
         end)
       end
     end
@@ -2258,13 +2258,13 @@ defmodule GiTF.CLI do
     ghost_id = result_get(result, :options, :ghost)
 
     with {:ok, ghost} <- GiTF.Ghosts.get(ghost_id),
-         {:ok, job} <- GiTF.Jobs.get(ghost.job_id) do
-      cell = GiTF.Store.find_one(:cells, fn c -> c.ghost_id == ghost.id and c.status == "active" end)
+         {:ok, op} <- GiTF.Ops.get(ghost.op_id) do
+      shell = GiTF.Store.find_one(:shells, fn c -> c.ghost_id == ghost.id and c.status == "active" end)
 
-      if cell do
+      if shell do
         Format.info("Running validation for ghost #{ghost_id}...")
 
-        case GiTF.Validator.validate(ghost_id, job, cell.id) do
+        case GiTF.Validator.validate(ghost_id, op, shell.id) do
           {:ok, :pass} ->
             Format.success("Validation passed.")
 
@@ -2280,10 +2280,10 @@ defmodule GiTF.CLI do
             end
         end
       else
-        Format.info("No active cell for ghost #{ghost_id}")
+        Format.info("No active shell for ghost #{ghost_id}")
       end
     else
-      {:error, :not_found} -> Format.error("Bee or job not found: #{ghost_id}")
+      {:error, :not_found} -> Format.error("Bee or op not found: #{ghost_id}")
       {:error, reason} -> Format.error("Failed: #{inspect(reason)}")
     end
   end
@@ -2294,40 +2294,40 @@ defmodule GiTF.CLI do
     ghost_id = result_get(result, :options, :ghost)
 
     with {:ok, ghost} <- GiTF.Ghosts.get(ghost_id),
-         {:ok, job} <- GiTF.Jobs.get(ghost.job_id) do
-      cell = GiTF.Store.find_one(:cells, fn c -> c.ghost_id == ghost.id end)
-      comb = cell && GiTF.Store.get(:combs, cell.comb_id)
+         {:ok, op} <- GiTF.Ops.get(ghost.op_id) do
+      shell = GiTF.Store.find_one(:shells, fn c -> c.ghost_id == ghost.id end)
+      sector = shell && GiTF.Store.get(:sectors, shell.sector_id)
 
       cond do
-        is_nil(cell) ->
-          Format.error("No cell found for ghost #{ghost_id}")
+        is_nil(shell) ->
+          Format.error("No shell found for ghost #{ghost_id}")
 
-        is_nil(comb) ->
-          show_not_found_error(:comb, "unknown")
+        is_nil(sector) ->
+          show_not_found_error(:sector, "unknown")
 
-        is_nil(Map.get(comb, :github_owner)) || is_nil(Map.get(comb, :github_repo)) ->
+        is_nil(Map.get(sector, :github_owner)) || is_nil(Map.get(sector, :github_repo)) ->
           Format.error(
-            "Comb #{comb.name} has no GitHub config. Use --github-owner and --github-repo when adding."
+            "Comb #{sector.name} has no GitHub config. Use --github-owner and --github-repo when adding."
           )
 
         true ->
-          case GiTF.GitHub.create_pr(comb, cell, job) do
+          case GiTF.GitHub.create_pr(sector, shell, op) do
             {:ok, url} -> Format.success("PR created: #{url}")
             {:error, reason} -> Format.error("PR creation failed: #{inspect(reason)}")
           end
       end
     else
-      {:error, :not_found} -> Format.error("Bee or job not found: #{ghost_id}")
+      {:error, :not_found} -> Format.error("Bee or op not found: #{ghost_id}")
       {:error, reason} -> Format.error("Failed: #{inspect(reason)}")
     end
   end
 
   defp dispatch([:github, :issues], result) do
-    case resolve_comb_id(result_get(result, :options, :comb)) do
-      {:ok, comb_id} ->
-        case GiTF.Comb.get(comb_id) do
-          {:ok, comb} ->
-            case GiTF.GitHub.list_issues(comb) do
+    case resolve_comb_id(result_get(result, :options, :sector)) do
+      {:ok, sector_id} ->
+        case GiTF.Sector.get(sector_id) do
+          {:ok, sector} ->
+            case GiTF.GitHub.list_issues(sector) do
               {:ok, issues} ->
                 if issues == [] do
                   Format.info("No open issues.")
@@ -2342,22 +2342,22 @@ defmodule GiTF.CLI do
             end
 
           {:error, _} ->
-            show_not_found_error(:comb, comb_id)
+            show_not_found_error(:sector, sector_id)
         end
 
       {:error, :no_comb} ->
-        Format.error("No comb specified. Use --comb or set one with `gitf sector use`.")
+        Format.error("No sector specified. Use --sector or set one with `gitf sector use`.")
     end
   end
 
   defp dispatch([:github, :sync], result) do
-    case resolve_comb_id(result_get(result, :options, :comb)) do
-      {:ok, comb_id} ->
-        case GiTF.Comb.get(comb_id) do
-          {:ok, comb} ->
-            case GiTF.GitHub.list_issues(comb) do
+    case resolve_comb_id(result_get(result, :options, :sector)) do
+      {:ok, sector_id} ->
+        case GiTF.Sector.get(sector_id) do
+          {:ok, sector} ->
+            case GiTF.GitHub.list_issues(sector) do
               {:ok, issues} ->
-                Format.info("Found #{length(issues)} open issues for #{comb.name}")
+                Format.info("Found #{length(issues)} open issues for #{sector.name}")
                 Enum.each(issues, fn i -> IO.puts("  ##{i["number"]} #{i["title"]}") end)
 
               {:error, reason} ->
@@ -2365,23 +2365,23 @@ defmodule GiTF.CLI do
             end
 
           {:error, _} ->
-            show_not_found_error(:comb, comb_id)
+            show_not_found_error(:sector, sector_id)
         end
 
       {:error, :no_comb} ->
-        Format.error("No comb specified. Use --comb or set one with `gitf sector use`.")
+        Format.error("No sector specified. Use --sector or set one with `gitf sector use`.")
     end
   end
 
-  defp dispatch([:quest, :spec, :write], result) do
-    quest_id = result_get(result, :args, :quest_id)
+  defp dispatch([:mission, :spec, :write], result) do
+    mission_id = result_get(result, :args, :mission_id)
     phase = result_get(result, :options, :phase)
     content = result_get(result, :options, :content)
 
     if GiTF.Client.remote?() do
       content = content || IO.read(:stdio, :eof)
 
-      case GiTF.Client.quest_spec_write(quest_id, phase, content) do
+      case GiTF.Client.quest_spec_write(mission_id, phase, content) do
         {:ok, _} -> Format.success("Spec written for #{phase}")
         {:error, reason} -> Format.error("Failed to write spec: #{format_error(reason)}")
       end
@@ -2393,7 +2393,7 @@ defmodule GiTF.CLI do
           IO.read(:stdio, :eof)
         end
 
-      case GiTF.Specs.write(quest_id, phase, content) do
+      case GiTF.Specs.write(mission_id, phase, content) do
         {:ok, path} ->
           Format.success("Spec written: #{path}")
 
@@ -2406,23 +2406,23 @@ defmodule GiTF.CLI do
     end
   end
 
-  defp dispatch([:quest, :spec, :show], result) do
-    quest_id = result_get(result, :args, :quest_id)
+  defp dispatch([:mission, :spec, :show], result) do
+    mission_id = result_get(result, :args, :mission_id)
     phase = result_get(result, :options, :phase)
 
     if GiTF.Client.remote?() do
-      case GiTF.Client.quest_spec(quest_id, phase) do
+      case GiTF.Client.quest_spec(mission_id, phase) do
         {:ok, data} -> IO.puts(data[:content] || inspect(data))
-        {:error, :not_found} -> Format.error("No #{phase} spec found for quest #{quest_id}")
+        {:error, :not_found} -> Format.error("No #{phase} spec found for mission #{mission_id}")
         {:error, reason} -> Format.error("Failed: #{format_error(reason)}")
       end
     else
-      case GiTF.Specs.read(quest_id, phase) do
+      case GiTF.Specs.read(mission_id, phase) do
         {:ok, content} ->
           IO.puts(content)
 
         {:error, :not_found} ->
-          Format.error("No #{phase} spec found for quest #{quest_id}")
+          Format.error("No #{phase} spec found for mission #{mission_id}")
 
         {:error, {:invalid_phase, p}} ->
           Format.error("Invalid phase: #{p}. Valid phases: #{Enum.join(GiTF.Specs.phases(), ", ")}")
@@ -2430,18 +2430,18 @@ defmodule GiTF.CLI do
     end
   end
 
-  defp dispatch([:quest, :status], result) do
-    quest_id = result_get(result, :args, :quest_id)
+  defp dispatch([:mission, :status], result) do
+    mission_id = result_get(result, :args, :mission_id)
 
     status_result =
       if GiTF.Client.remote?(),
-        do: GiTF.Client.quest_status(quest_id),
-        else: GiTF.Major.Orchestrator.get_quest_status(quest_id)
+        do: GiTF.Client.quest_status(mission_id),
+        else: GiTF.Major.Orchestrator.get_quest_status(mission_id)
 
     case status_result do
       {:ok, status} ->
-        quest = status[:quest] || %{}
-        Format.info("Quest: #{quest[:name]} (#{quest[:id]})")
+        mission = status[:mission] || %{}
+        Format.info("Quest: #{mission[:name]} (#{mission[:id]})")
         Format.info("Current phase: #{status[:current_phase]}")
         Format.info("Completed phases: #{inspect(status[:completed_phases] || [])}")
         Format.info("Jobs created: #{status[:jobs_created]}")
@@ -2459,7 +2459,7 @@ defmodule GiTF.CLI do
         end
 
       {:error, reason} ->
-        Format.error("Failed to get quest status: #{inspect(reason)}")
+        Format.error("Failed to get mission status: #{inspect(reason)}")
     end
   end
 
@@ -2566,30 +2566,30 @@ defmodule GiTF.CLI do
   defp show_not_found_error(:ghost, id),
     do: IO.puts(GiTF.CLI.Errors.format_error(:bee_not_found, %{ghost_id: id}))
 
-  defp show_not_found_error(:quest, id),
-    do: IO.puts(GiTF.CLI.Errors.format_error(:quest_not_found, %{quest_id: id}))
+  defp show_not_found_error(:mission, id),
+    do: IO.puts(GiTF.CLI.Errors.format_error(:quest_not_found, %{mission_id: id}))
 
-  defp show_not_found_error(:job, id),
-    do: IO.puts(GiTF.CLI.Errors.format_error(:job_not_found, %{job_id: id}))
+  defp show_not_found_error(:op, id),
+    do: IO.puts(GiTF.CLI.Errors.format_error(:job_not_found, %{op_id: id}))
 
-  defp show_not_found_error(:comb, id),
-    do: IO.puts(GiTF.CLI.Errors.format_error(:comb_not_found, %{comb_id: id}))
+  defp show_not_found_error(:sector, id),
+    do: IO.puts(GiTF.CLI.Errors.format_error(:comb_not_found, %{sector_id: id}))
 
   defp resolve_comb_id(explicit) when is_binary(explicit), do: {:ok, explicit}
 
   defp resolve_comb_id(nil) do
-    case GiTF.Comb.current() do
-      {:ok, comb} -> {:ok, comb.id}
+    case GiTF.Sector.current() do
+      {:ok, sector} -> {:ok, sector.id}
       {:error, :no_current_comb} -> {:error, :no_comb}
     end
   end
 
   defp resolve_comb_name(nil), do: "-"
 
-  defp resolve_comb_name(comb_id) do
-    case GiTF.Comb.get(comb_id) do
-      {:ok, comb} -> comb.name
-      _ -> comb_id
+  defp resolve_comb_name(sector_id) do
+    case GiTF.Sector.get(sector_id) do
+      {:ok, sector} -> sector.name
+      _ -> sector_id
     end
   end
 
@@ -2700,9 +2700,9 @@ defmodule GiTF.CLI do
             ]
           ]
         ],
-        comb: [
-          name: "comb",
-          about: "Manage codebases (combs) tracked by this section",
+        sector: [
+          name: "sector",
+          about: "Manage codebases (sectors) tracked by this section",
           subcommands: [
             add: [
               name: "add",
@@ -2719,7 +2719,7 @@ defmodule GiTF.CLI do
                 name: [
                   short: "-n",
                   long: "--name",
-                  help: "Human-friendly name for the comb",
+                  help: "Human-friendly name for the sector",
                   parser: :string,
                   required: false
                 ],
@@ -2758,15 +2758,15 @@ defmodule GiTF.CLI do
             ],
             list: [
               name: "list",
-              about: "List all registered combs"
+              about: "List all registered sectors"
             ],
             remove: [
               name: "remove",
-              about: "Unregister a comb from the section",
+              about: "Unregister a sector from the section",
               args: [
                 name: [
                   value_name: "NAME",
-                  help: "Name of the comb to remove",
+                  help: "Name of the sector to remove",
                   required: true,
                   parser: :string
                 ]
@@ -2774,11 +2774,11 @@ defmodule GiTF.CLI do
             ],
             use: [
               name: "use",
-              about: "Set the current working comb",
+              about: "Set the current working sector",
               args: [
                 name: [
                   value_name: "NAME",
-                  help: "Name or ID of the comb to set as current",
+                  help: "Name or ID of the sector to set as current",
                   required: false,
                   parser: :string
                 ]
@@ -2786,17 +2786,17 @@ defmodule GiTF.CLI do
             ],
             rename: [
               name: "rename",
-              about: "Rename a comb and update all tracking references",
+              about: "Rename a sector and update all tracking references",
               args: [
                 name: [
                   value_name: "NAME",
-                  help: "Current name or ID of the comb",
+                  help: "Current name or ID of the sector",
                   required: true,
                   parser: :string
                 ],
                 new_name: [
                   value_name: "NEW_NAME",
-                  help: "New name for the comb",
+                  help: "New name for the sector",
                   required: true,
                   parser: :string
                 ]
@@ -2806,7 +2806,7 @@ defmodule GiTF.CLI do
         ],
         queen: [
           name: "major",
-          about: "Start the queen orchestrator for a quest"
+          about: "Start the queen orchestrator for a mission"
         ],
         ghost: [
           name: "ghost",
@@ -2818,19 +2818,19 @@ defmodule GiTF.CLI do
             ],
             spawn: [
               name: "spawn",
-              about: "Spawn a new ghost to work on a job",
+              about: "Spawn a new ghost to work on a op",
               options: [
-                job: [
+                op: [
                   short: "-j",
-                  long: "--job",
+                  long: "--op",
                   help: "Job ID to assign to the ghost",
                   parser: :string,
                   required: true
                 ],
-                comb: [
+                sector: [
                   short: "-c",
-                  long: "--comb",
-                  help: "Comb ID (repository) to work in (defaults to current comb)",
+                  long: "--sector",
+                  help: "Comb ID (repository) to work in (defaults to current sector)",
                   parser: :string,
                   required: false
                 ],
@@ -2914,26 +2914,26 @@ defmodule GiTF.CLI do
             ]
           ]
         ],
-        quest: [
-          name: "quest",
-          about: "Manage quests (high-level objectives)",
+        mission: [
+          name: "mission",
+          about: "Manage missions (high-level objectives)",
           subcommands: [
             new: [
               name: "new",
-              about: "Create a new quest with interactive planning session",
+              about: "Create a new mission with interactive planning session",
               args: [
                 goal: [
                   value_name: "GOAL",
-                  help: "The goal for this quest (omit for discovery mode)",
+                  help: "The goal for this mission (omit for discovery mode)",
                   required: false,
                   parser: :string
                 ]
               ],
               options: [
-                comb: [
+                sector: [
                   short: "-c",
-                  long: "--comb",
-                  help: "Comb ID (defaults to current comb)",
+                  long: "--sector",
+                  help: "Comb ID (defaults to current sector)",
                   parser: :string,
                   required: false
                 ]
@@ -2941,11 +2941,11 @@ defmodule GiTF.CLI do
             ],
             list: [
               name: "list",
-              about: "List all quests"
+              about: "List all missions"
             ],
             show: [
               name: "show",
-              about: "Show quest details",
+              about: "Show mission details",
               args: [
                 id: [
                   value_name: "ID",
@@ -2957,7 +2957,7 @@ defmodule GiTF.CLI do
             ],
             remove: [
               name: "remove",
-              about: "Remove a quest",
+              about: "Remove a mission",
               args: [
                 id: [
                   value_name: "ID",
@@ -2969,7 +2969,7 @@ defmodule GiTF.CLI do
             ],
             merge: [
               name: "merge",
-              about: "Merge all completed ghost branches into a quest branch",
+              about: "Merge all completed ghost branches into a mission branch",
               args: [
                 id: [
                   value_name: "ID",
@@ -2981,7 +2981,7 @@ defmodule GiTF.CLI do
             ],
             report: [
               name: "report",
-              about: "Show performance report for a quest run",
+              about: "Show performance report for a mission run",
               args: [
                 id: [
                   value_name: "ID",
@@ -2993,7 +2993,7 @@ defmodule GiTF.CLI do
             ],
             close: [
               name: "close",
-              about: "Close a quest and remove associated cells/worktrees",
+              about: "Close a mission and remove associated shells/worktrees",
               args: [
                 id: [
                   value_name: "ID",
@@ -3005,7 +3005,7 @@ defmodule GiTF.CLI do
             ],
             plan: [
               name: "plan",
-              about: "Start or resume interactive planning for a quest",
+              about: "Start or resume interactive planning for a mission",
               args: [
                 id: [
                   value_name: "ID",
@@ -3017,13 +3017,13 @@ defmodule GiTF.CLI do
             ],
             spec: [
               name: "spec",
-              about: "Manage quest planning specs (requirements, design, tasks)",
+              about: "Manage mission planning specs (requirements, design, tasks)",
               subcommands: [
                 write: [
                   name: "write",
-                  about: "Write a spec phase for a quest",
+                  about: "Write a spec phase for a mission",
                   args: [
-                    quest_id: [
+                    mission_id: [
                       value_name: "QUEST_ID",
                       help: "Quest identifier",
                       required: true,
@@ -3049,9 +3049,9 @@ defmodule GiTF.CLI do
                 ],
                 show: [
                   name: "show",
-                  about: "Show a spec phase for a quest",
+                  about: "Show a spec phase for a mission",
                   args: [
-                    quest_id: [
+                    mission_id: [
                       value_name: "QUEST_ID",
                       help: "Quest identifier",
                       required: true,
@@ -3072,9 +3072,9 @@ defmodule GiTF.CLI do
             ],
             status: [
               name: "status",
-              about: "Show quest phase status and progress",
+              about: "Show mission phase status and progress",
               args: [
-                quest_id: [
+                mission_id: [
                   value_name: "QUEST_ID",
                   help: "Quest identifier",
                   required: true,
@@ -3084,17 +3084,17 @@ defmodule GiTF.CLI do
             ]
           ]
         ],
-        jobs: [
-          name: "jobs",
-          about: "List and inspect jobs in the current quest",
+        ops: [
+          name: "ops",
+          about: "List and inspect ops in the current mission",
           subcommands: [
             list: [
               name: "list",
-              about: "List all jobs in a quest"
+              about: "List all ops in a mission"
             ],
             show: [
               name: "show",
-              about: "Show job details",
+              about: "Show op details",
               args: [
                 id: [
                   value_name: "ID",
@@ -3106,12 +3106,12 @@ defmodule GiTF.CLI do
             ],
             create: [
               name: "create",
-              about: "Create a new job",
+              about: "Create a new op",
               options: [
-                quest: [
+                mission: [
                   short: "-q",
-                  long: "--quest",
-                  help: "Quest ID to attach the job to",
+                  long: "--mission",
+                  help: "Quest ID to attach the op to",
                   parser: :string,
                   required: true
                 ],
@@ -3122,17 +3122,17 @@ defmodule GiTF.CLI do
                   parser: :string,
                   required: true
                 ],
-                comb: [
+                sector: [
                   short: "-c",
-                  long: "--comb",
-                  help: "Comb ID for the job (defaults to current comb)",
+                  long: "--sector",
+                  help: "Comb ID for the op (defaults to current sector)",
                   parser: :string,
                   required: false
                 ],
                 description: [
                   short: "-d",
                   long: "--description",
-                  help: "Detailed job description",
+                  help: "Detailed op description",
                   parser: :string,
                   required: false
                 ]
@@ -3140,7 +3140,7 @@ defmodule GiTF.CLI do
             ],
             reset: [
               name: "reset",
-              about: "Reset a stuck job back to pending",
+              about: "Reset a stuck op back to pending",
               args: [
                 id: [
                   value_name: "ID",
@@ -3152,15 +3152,15 @@ defmodule GiTF.CLI do
             ],
             deps: [
               name: "deps",
-              about: "Manage job dependencies",
+              about: "Manage op dependencies",
               subcommands: [
                 add: [
                   name: "add",
-                  about: "Add a dependency between jobs",
+                  about: "Add a dependency between ops",
                   options: [
-                    job: [
+                    op: [
                       short: "-j",
-                      long: "--job",
+                      long: "--op",
                       help: "Job ID that has the dependency",
                       parser: :string,
                       required: true
@@ -3175,18 +3175,18 @@ defmodule GiTF.CLI do
                 ],
                 remove: [
                   name: "remove",
-                  about: "Remove a dependency between jobs",
+                  about: "Remove a dependency between ops",
                   options: [
-                    job: [
+                    op: [
                       short: "-j",
-                      long: "--job",
+                      long: "--op",
                       help: "Job ID",
                       parser: :string,
                       required: true
                     ],
                     depends_on: [
                       long: "--depends-on",
-                      help: "Dependency job ID to remove",
+                      help: "Dependency op ID to remove",
                       parser: :string,
                       required: true
                     ]
@@ -3194,11 +3194,11 @@ defmodule GiTF.CLI do
                 ],
                 list: [
                   name: "list",
-                  about: "List dependencies for a job",
+                  about: "List dependencies for a op",
                   options: [
-                    job: [
+                    op: [
                       short: "-j",
-                      long: "--job",
+                      long: "--op",
                       help: "Job ID to list dependencies for",
                       parser: :string,
                       required: true
@@ -3209,13 +3209,13 @@ defmodule GiTF.CLI do
             ]
           ]
         ],
-        waggle: [
-          name: "waggle",
-          about: "View inter-agent messages (waggles)",
+        link_msg: [
+          name: "link_msg",
+          about: "View inter-agent messages (links)",
           subcommands: [
             list: [
               name: "list",
-              about: "List recent waggle messages",
+              about: "List recent link_msg messages",
               options: [
                 to: [
                   short: "-t",
@@ -3228,11 +3228,11 @@ defmodule GiTF.CLI do
             ],
             show: [
               name: "show",
-              about: "Show a specific waggle message",
+              about: "Show a specific link_msg message",
               args: [
                 id: [
                   value_name: "ID",
-                  help: "Waggle message identifier",
+                  help: "Link message identifier",
                   required: true,
                   parser: :string
                 ]
@@ -3240,7 +3240,7 @@ defmodule GiTF.CLI do
             ],
             send: [
               name: "send",
-              about: "Send a waggle message",
+              about: "Send a link_msg message",
               options: [
                 from: [
                   short: "-f",
@@ -3322,23 +3322,23 @@ defmodule GiTF.CLI do
             ]
           ]
         ],
-        cell: [
-          name: "cell",
-          about: "Manage git worktree cells",
+        shell: [
+          name: "shell",
+          about: "Manage git worktree shells",
           subcommands: [
             list: [
               name: "list",
-              about: "List active cells (worktrees)"
+              about: "List active shells (worktrees)"
             ],
             clean: [
               name: "clean",
-              about: "Remove stale cells"
+              about: "Remove stale shells"
             ]
           ]
         ],
-        drone: [
-          name: "drone",
-          about: "Start the health patrol drone",
+        tachikoma: [
+          name: "tachikoma",
+          about: "Start the health patrol tachikoma",
           flags: [
             no_fix: [
               long: "--no-fix",
@@ -3346,7 +3346,7 @@ defmodule GiTF.CLI do
             ],
             verify: [
               long: "--verify",
-              help: "Enable automatic job verification"
+              help: "Enable automatic op verification"
             ]
           ]
         ],
@@ -3385,25 +3385,25 @@ defmodule GiTF.CLI do
             preview: [
               short: "-p",
               long: "--preview",
-              help: "Preview detection results without creating comb"
+              help: "Preview detection results without creating sector"
             ]
           ]
         ],
         verify: [
           name: "verify",
-          about: "Verify completed job work",
+          about: "Verify completed op work",
           options: [
-            job: [
+            op: [
               short: "-j",
-              long: "--job",
+              long: "--op",
               help: "Job ID to verify",
               parser: :string,
               required: false
             ],
-            quest: [
+            mission: [
               short: "-q",
-              long: "--quest",
-              help: "Verify all jobs in a quest",
+              long: "--mission",
+              help: "Verify all ops in a mission",
               parser: :string,
               required: false
             ]
@@ -3411,18 +3411,18 @@ defmodule GiTF.CLI do
         ],
         accept: [
           name: "accept",
-          about: "Test acceptance criteria for jobs or quests",
+          about: "Test acceptance criteria for ops or missions",
           options: [
-            job: [
+            op: [
               short: "-j",
-              long: "--job",
+              long: "--op",
               help: "Job ID to test",
               parser: :string,
               required: false
             ],
-            quest: [
+            mission: [
               short: "-q",
-              long: "--quest",
+              long: "--mission",
               help: "Quest ID to test",
               parser: :string,
               required: false
@@ -3433,16 +3433,16 @@ defmodule GiTF.CLI do
           name: "scope",
           about: "Check for scope creep and violations",
           options: [
-            job: [
+            op: [
               short: "-j",
-              long: "--job",
+              long: "--op",
               help: "Job ID to check",
               parser: :string,
               required: false
             ],
-            quest: [
+            mission: [
               short: "-q",
-              long: "--quest",
+              long: "--mission",
               help: "Quest ID to check",
               parser: :string,
               required: false
@@ -3460,23 +3460,23 @@ defmodule GiTF.CLI do
             ]
           ],
           options: [
-            job: [
+            op: [
               short: "-j",
-              long: "--job",
+              long: "--op",
               help: "Job ID for quality check or baseline source",
               parser: :string,
               required: false
             ],
-            quest: [
+            mission: [
               short: "-q",
-              long: "--quest",
+              long: "--mission",
               help: "Quest ID for quality report",
               parser: :string,
               required: false
             ],
-            comb: [
+            sector: [
               short: "-c",
-              long: "--comb",
+              long: "--sector",
               help: "Comb ID for baseline management",
               parser: :string,
               required: false
@@ -3494,16 +3494,16 @@ defmodule GiTF.CLI do
             ]
           ],
           options: [
-            job: [
+            op: [
               short: "-j",
-              long: "--job",
+              long: "--op",
               help: "Job ID for analysis or retry",
               parser: :string,
               required: false
             ],
-            comb: [
+            sector: [
               short: "-c",
-              long: "--comb",
+              long: "--sector",
               help: "Comb ID for insights or learning",
               parser: :string,
               required: false
@@ -3538,9 +3538,9 @@ defmodule GiTF.CLI do
           name: "optimize",
           about: "Optimize resources and predict issues",
           options: [
-            comb: [
+            sector: [
               short: "-c",
-              long: "--comb",
+              long: "--sector",
               help: "Comb ID for issue prediction",
               parser: :string,
               required: false
@@ -3551,9 +3551,9 @@ defmodule GiTF.CLI do
           name: "deadlock",
           about: "Detect and resolve dependency deadlocks",
           options: [
-            quest: [
+            mission: [
               short: "-q",
-              long: "--quest",
+              long: "--mission",
               help: "Quest ID to check for deadlocks",
               parser: :string,
               required: true
@@ -3566,7 +3566,7 @@ defmodule GiTF.CLI do
         ],
         server: [
           name: "server",
-          about: "Start the GiTF web server for real-time quest monitoring",
+          about: "Start the GiTF web server for real-time mission monitoring",
           options: [
             port: [
               short: "-p",
@@ -3622,7 +3622,7 @@ defmodule GiTF.CLI do
             ghost: [
               short: "-b",
               long: "--ghost",
-              help: "Bee ID to prime with job context",
+              help: "Bee ID to prime with op context",
               parser: :string,
               required: false
             ]
@@ -3630,11 +3630,11 @@ defmodule GiTF.CLI do
         ],
         budget: [
           name: "budget",
-          about: "Show budget status for a quest",
+          about: "Show budget status for a mission",
           options: [
-            quest: [
+            mission: [
               short: "-q",
-              long: "--quest",
+              long: "--mission",
               help: "Quest ID to check budget for",
               parser: :string,
               required: true
@@ -3651,7 +3651,7 @@ defmodule GiTF.CLI do
           subcommands: [
             check: [
               name: "check",
-              about: "Check for merge conflicts in active cells",
+              about: "Check for merge conflicts in active shells",
               options: [
                 ghost: [
                   short: "-b",
@@ -3696,12 +3696,12 @@ defmodule GiTF.CLI do
             ],
             issues: [
               name: "issues",
-              about: "List GitHub issues for a comb",
+              about: "List GitHub issues for a sector",
               options: [
-                comb: [
+                sector: [
                   short: "-c",
-                  long: "--comb",
-                  help: "Comb ID (defaults to current comb)",
+                  long: "--sector",
+                  help: "Comb ID (defaults to current sector)",
                   parser: :string,
                   required: false
                 ]
@@ -3709,12 +3709,12 @@ defmodule GiTF.CLI do
             ],
             sync: [
               name: "sync",
-              about: "Sync GitHub issues for a comb",
+              about: "Sync GitHub issues for a sector",
               options: [
-                comb: [
+                sector: [
                   short: "-c",
-                  long: "--comb",
-                  help: "Comb ID to sync (defaults to current comb)",
+                  long: "--sector",
+                  help: "Comb ID to sync (defaults to current sector)",
                   parser: :string,
                   required: false
                 ]
@@ -3728,19 +3728,19 @@ defmodule GiTF.CLI do
         ],
         verify: [
           name: "verify",
-          about: "Verify completed jobs",
+          about: "Verify completed ops",
           options: [
-            job: [
+            op: [
               short: "-j",
-              long: "--job",
+              long: "--op",
               help: "Job ID to verify",
               parser: :string,
               required: false
             ],
-            quest: [
+            mission: [
               short: "-q",
-              long: "--quest",
-              help: "Quest ID to verify all jobs",
+              long: "--mission",
+              help: "Quest ID to verify all ops",
               parser: :string,
               required: false
             ]

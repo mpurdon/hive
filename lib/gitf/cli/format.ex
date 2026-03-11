@@ -38,7 +38,7 @@ defmodule GiTF.CLI.Format do
     format_row = fn row ->
       row
       |> Enum.zip(widths)
-      |> Enum.map(fn {cell, width} -> String.pad_trailing(cell, width) end)
+      |> Enum.map(fn {shell, width} -> String.pad_trailing(shell, width) end)
       |> Enum.join(" | ")
     end
 

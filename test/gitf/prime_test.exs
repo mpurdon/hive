@@ -57,31 +57,31 @@ defmodule GiTF.PrimeTest do
       assert markdown =~ "busy-ghost"
     end
 
-    test "includes planning quests in state summary" do
+    test "includes planning missions in state summary" do
       gitf_root = create_gitf_workspace()
 
-      {:ok, quest} =
-        Store.insert(:quests, %{name: "plan-quest", goal: "Plan something", status: "planning"})
+      {:ok, mission} =
+        Store.insert(:missions, %{name: "plan-mission", goal: "Plan something", status: "planning"})
 
       {:ok, markdown} = Prime.prime(:major, gitf_root)
-      assert markdown =~ "plan-quest"
-      assert markdown =~ quest.id
+      assert markdown =~ "plan-mission"
+      assert markdown =~ mission.id
     end
 
-    test "includes spec content for planning quests" do
+    test "includes spec content for planning missions" do
       gitf_root = create_gitf_workspace()
 
       # Point GITF_PATH so Specs can find the .gitf dir
       System.put_env("GITF_PATH", gitf_root)
       on_exit(fn -> System.delete_env("GITF_PATH") end)
 
-      {:ok, quest} =
-        Store.insert(:quests, %{name: "spec-quest", goal: "Spec something", status: "planning"})
+      {:ok, mission} =
+        Store.insert(:missions, %{name: "spec-mission", goal: "Spec something", status: "planning"})
 
-      GiTF.Specs.write(quest.id, "requirements", "# Requirements\n\n- FR-1: Do the thing")
+      GiTF.Specs.write(mission.id, "requirements", "# Requirements\n\n- FR-1: Do the thing")
 
       {:ok, markdown} = Prime.prime(:major, gitf_root)
-      assert markdown =~ "Planning Specs: spec-quest"
+      assert markdown =~ "Planning Specs: spec-mission"
       assert markdown =~ "Requirements"
       assert markdown =~ "FR-1: Do the thing"
     end
@@ -92,11 +92,11 @@ defmodule GiTF.PrimeTest do
       System.put_env("GITF_PATH", gitf_root)
       on_exit(fn -> System.delete_env("GITF_PATH") end)
 
-      {:ok, quest} =
-        Store.insert(:quests, %{name: "long-spec", goal: "Long spec", status: "planning"})
+      {:ok, mission} =
+        Store.insert(:missions, %{name: "long-spec", goal: "Long spec", status: "planning"})
 
       long_content = Enum.map(1..150, fn i -> "Line #{i}" end) |> Enum.join("\n")
-      GiTF.Specs.write(quest.id, "requirements", long_content)
+      GiTF.Specs.write(mission.id, "requirements", long_content)
 
       {:ok, markdown} = Prime.prime(:major, gitf_root)
       assert markdown =~ "(truncated"
@@ -122,11 +122,11 @@ defmodule GiTF.PrimeTest do
       assert {:error, :bee_not_found} = Prime.prime(:ghost, "ghost-000000")
     end
 
-    test "shows no job when ghost has no assignment" do
+    test "shows no op when ghost has no assignment" do
       {:ok, ghost} = Store.insert(:ghosts, %{name: "idle-ghost", status: "starting"})
 
       {:ok, markdown} = Prime.prime(:ghost, ghost.id)
-      assert markdown =~ "No job assigned"
+      assert markdown =~ "No op assigned"
     end
   end
 end

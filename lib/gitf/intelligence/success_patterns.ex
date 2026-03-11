@@ -1,28 +1,28 @@
 defmodule GiTF.Intelligence.SuccessPatterns do
   @moduledoc """
-  Identifies and learns from successful job patterns.
+  Identifies and learns from successful op patterns.
   """
 
   alias GiTF.Store
 
   @doc """
-  Analyze a successful job to identify success factors.
+  Analyze a successful op to identify success factors.
   """
-  def analyze_success(job_id) do
-    with {:ok, job} <- GiTF.Jobs.get(job_id),
-         true <- job.status == "done" do
+  def analyze_success(op_id) do
+    with {:ok, op} <- GiTF.Ops.get(op_id),
+         true <- op.status == "done" do
       
-      factors = identify_success_factors(job)
-      quality_score = get_quality_score(job_id)
+      factors = identify_success_factors(op)
+      quality_score = get_quality_score(op_id)
       
       pattern = %{
         id: generate_id("sp"),
-        job_id: job_id,
-        comb_id: job.comb_id,
+        op_id: op_id,
+        sector_id: op.sector_id,
         success_factors: factors,
         quality_score: quality_score,
-        model_used: Map.get(job, :model),
-        complexity: estimate_complexity(job),
+        model_used: Map.get(op, :model),
+        complexity: estimate_complexity(op),
         analyzed_at: DateTime.utc_now()
       }
       
@@ -34,10 +34,10 @@ defmodule GiTF.Intelligence.SuccessPatterns do
   end
 
   @doc """
-  Get best practices for a comb based on successful jobs.
+  Get best practices for a sector based on successful ops.
   """
-  def get_best_practices(comb_id) do
-    patterns = Store.filter(:success_patterns, &(&1.comb_id == comb_id))
+  def get_best_practices(sector_id) do
+    patterns = Store.filter(:success_patterns, &(&1.sector_id == sector_id))
     
     if Enum.empty?(patterns) do
       []
@@ -58,7 +58,7 @@ defmodule GiTF.Intelligence.SuccessPatterns do
         common_factors: Enum.map(factor_frequency, fn {factor, count} ->
           %{factor: factor, frequency: count / length(patterns)}
         end),
-        high_quality_examples: Enum.map(high_quality, & &1.job_id),
+        high_quality_examples: Enum.map(high_quality, & &1.op_id),
         recommended_model: find_best_model(patterns),
         average_quality: calculate_average_quality(patterns)
       }
@@ -66,10 +66,10 @@ defmodule GiTF.Intelligence.SuccessPatterns do
   end
 
   @doc """
-  Recommend approach for a new job based on success patterns.
+  Recommend approach for a new op based on success patterns.
   """
-  def recommend_approach(comb_id, _job_description) do
-    best_practices = get_best_practices(comb_id)
+  def recommend_approach(sector_id, _op_description) do
+    best_practices = get_best_practices(sector_id)
     
     # Handle empty list case
     common_factors = if is_list(best_practices) do
@@ -96,25 +96,25 @@ defmodule GiTF.Intelligence.SuccessPatterns do
 
   # Private functions
 
-  defp identify_success_factors(job) do
+  defp identify_success_factors(op) do
     factors = []
     
     # Model used
-    factors = if Map.get(job, :model) do
-      ["model_#{job.model}" | factors]
+    factors = if Map.get(op, :model) do
+      ["model_#{op.model}" | factors]
     else
       factors
     end
     
     # Verification passed
-    factors = if Map.get(job, :verification_status) == "passed" do
+    factors = if Map.get(op, :verification_status) == "passed" do
       ["verification_passed" | factors]
     else
       factors
     end
     
     # Quality score
-    quality = Map.get(job, :quality_score)
+    quality = Map.get(op, :quality_score)
     factors = cond do
       quality && quality >= 90 -> ["high_quality" | factors]
       quality && quality >= 80 -> ["good_quality" | factors]
@@ -122,15 +122,15 @@ defmodule GiTF.Intelligence.SuccessPatterns do
     end
     
     # No retries
-    factors = if is_nil(Map.get(job, :retry_of)) do
+    factors = if is_nil(Map.get(op, :retry_of)) do
       ["first_attempt_success" | factors]
     else
       factors
     end
     
     # Fast completion (if we have timestamps)
-    created = Map.get(job, :created_at)
-    updated = Map.get(job, :updated_at)
+    created = Map.get(op, :created_at)
+    updated = Map.get(op, :updated_at)
     
     factors = if created && updated do
       duration = DateTime.diff(updated, created, :minute)
@@ -146,13 +146,13 @@ defmodule GiTF.Intelligence.SuccessPatterns do
     factors
   end
 
-  defp get_quality_score(job_id) do
-    GiTF.Quality.calculate_composite_score(job_id)
+  defp get_quality_score(op_id) do
+    GiTF.Quality.calculate_composite_score(op_id)
   end
 
-  defp estimate_complexity(job) do
+  defp estimate_complexity(op) do
     # Simple heuristic based on description length
-    desc_length = String.length(Map.get(job, :description, ""))
+    desc_length = String.length(Map.get(op, :description, ""))
     
     cond do
       desc_length < 100 -> :simple

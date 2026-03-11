@@ -16,12 +16,12 @@ defmodule GiTF.TestDriver.Assertions do
 
   ## Conditions
 
-    * `{:job_done, job_id}` — job status is "done"
-    * `{:job_failed, job_id}` — job status is "failed"
-    * `{:quest_completed, quest_id}` — quest status is "completed"
-    * `{:quest_failed, quest_id}` — quest status is "failed"
+    * `{:job_done, op_id}` — op status is "done"
+    * `{:job_failed, op_id}` — op status is "failed"
+    * `{:quest_completed, mission_id}` — mission status is "completed"
+    * `{:quest_failed, mission_id}` — mission status is "failed"
     * `{:bee_stopped, ghost_id}` — ghost status is "stopped" or "crashed"
-    * `{:waggle, filter}` — a waggle matching the filter exists in Store
+    * `{:link_msg, filter}` — a link_msg matching the filter exists in Store
     * `{:event, event_name}` — telemetry event exists in recorder timeline
     * `{:event, event_name, metadata}` — telemetry event with matching metadata
     * `{:store_count, collection, expected}` — collection has expected count
@@ -73,11 +73,11 @@ defmodule GiTF.TestDriver.Assertions do
   end
 
   @doc """
-  Asserts that a waggle message matching the filter exists in the Store.
+  Asserts that a link_msg message matching the filter exists in the Store.
 
   ## Filter keys
 
-    * `:subject` — waggle subject
+    * `:subject` — link_msg subject
     * `:from` — sender
     * `:to` — recipient
 
@@ -87,9 +87,9 @@ defmodule GiTF.TestDriver.Assertions do
     {opts, filter} = extract_opts(filter_and_opts, [:timeout, :interval, :message])
     timeout = Keyword.get(opts, :timeout, 5_000)
 
-    await({:waggle, Map.new(filter)},
+    await({:link_msg, Map.new(filter)},
       timeout: timeout,
-      message: "Expected waggle matching #{inspect(filter)}"
+      message: "Expected link_msg matching #{inspect(filter)}"
     )
   end
 
@@ -132,29 +132,29 @@ defmodule GiTF.TestDriver.Assertions do
 
   # -- Private: condition checking ---------------------------------------------
 
-  defp check_condition({:job_done, job_id}) do
-    case GiTF.Jobs.get(job_id) do
+  defp check_condition({:job_done, op_id}) do
+    case GiTF.Ops.get(op_id) do
       {:ok, %{status: "done"}} -> true
       _ -> false
     end
   end
 
-  defp check_condition({:job_failed, job_id}) do
-    case GiTF.Jobs.get(job_id) do
+  defp check_condition({:job_failed, op_id}) do
+    case GiTF.Ops.get(op_id) do
       {:ok, %{status: "failed"}} -> true
       _ -> false
     end
   end
 
-  defp check_condition({:quest_completed, quest_id}) do
-    case GiTF.Quests.get(quest_id) do
+  defp check_condition({:quest_completed, mission_id}) do
+    case GiTF.Missions.get(mission_id) do
       {:ok, %{status: "completed"}} -> true
       _ -> false
     end
   end
 
-  defp check_condition({:quest_failed, quest_id}) do
-    case GiTF.Quests.get(quest_id) do
+  defp check_condition({:quest_failed, mission_id}) do
+    case GiTF.Missions.get(mission_id) do
       {:ok, %{status: "failed"}} -> true
       _ -> false
     end
@@ -167,10 +167,10 @@ defmodule GiTF.TestDriver.Assertions do
     end
   end
 
-  defp check_condition({:waggle, filter}) when is_map(filter) do
-    waggles = GiTF.Store.all(:waggles)
+  defp check_condition({:link_msg, filter}) when is_map(filter) do
+    links = GiTF.Store.all(:links)
 
-    Enum.any?(waggles, fn w ->
+    Enum.any?(links, fn w ->
       Enum.all?(filter, fn {k, v} -> Map.get(w, k) == v end)
     end)
   end
@@ -250,7 +250,7 @@ defmodule GiTF.TestDriver.Assertions do
       :subject,
       :from,
       :ghost_id,
-      :job_id,
+      :op_id,
       :status,
       :metadata,
       :measurements

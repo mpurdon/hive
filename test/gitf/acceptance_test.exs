@@ -16,18 +16,18 @@ defmodule GiTF.AcceptanceTest do
   end
 
   describe "test_acceptance/1" do
-    test "approves job meeting all criteria" do
-      quest = %{
+    test "approves op meeting all criteria" do
+      mission = %{
         id: "qst-accept",
         description: "Test",
         created_at: DateTime.utc_now(),
         updated_at: DateTime.utc_now()
       }
-      Store.insert(:quests, quest)
+      Store.insert(:missions, mission)
       
-      job = %{
-        id: "job-accept",
-        quest_id: "qst-accept",
+      op = %{
+        id: "op-accept",
+        mission_id: "qst-accept",
         title: "Simple implementation",
         status: "completed",
         verification_status: "passed",
@@ -36,9 +36,9 @@ defmodule GiTF.AcceptanceTest do
         created_at: DateTime.utc_now(),
         updated_at: DateTime.utc_now()
       }
-      Store.insert(:jobs, job)
+      Store.insert(:ops, op)
       
-      result = Acceptance.test_acceptance("job-accept")
+      result = Acceptance.test_acceptance("op-accept")
       
       assert result.goal_met == true
       assert result.in_scope == true
@@ -48,18 +48,18 @@ defmodule GiTF.AcceptanceTest do
       assert Enum.empty?(result.blockers)
     end
 
-    test "blocks job with violations" do
-      quest = %{
+    test "blocks op with violations" do
+      mission = %{
         id: "qst-block",
         description: "Test",
         created_at: DateTime.utc_now(),
         updated_at: DateTime.utc_now()
       }
-      Store.insert(:quests, quest)
+      Store.insert(:missions, mission)
       
-      job = %{
-        id: "job-block",
-        quest_id: "qst-block",
+      op = %{
+        id: "op-block",
+        mission_id: "qst-block",
         title: "Complex refactor",
         status: "in_progress",
         quality_score: 50,
@@ -67,9 +67,9 @@ defmodule GiTF.AcceptanceTest do
         created_at: DateTime.utc_now(),
         updated_at: DateTime.utc_now()
       }
-      Store.insert(:jobs, job)
+      Store.insert(:ops, op)
       
-      result = Acceptance.test_acceptance("job-block")
+      result = Acceptance.test_acceptance("op-block")
       
       assert result.ready_to_merge == false
       assert length(result.blockers) > 0

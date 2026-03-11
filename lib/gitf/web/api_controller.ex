@@ -21,11 +21,11 @@ defmodule GiTF.Web.ApiController do
   def create_quest(conn, params) do
     attrs =
       params
-      |> Map.take(["goal", "comb_id"])
+      |> Map.take(["goal", "sector_id"])
       |> atomize_keys()
 
-    case GiTF.Quests.create(attrs) do
-      {:ok, quest} -> json(conn, %{data: serialize_quest(quest)})
+    case GiTF.Missions.create(attrs) do
+      {:ok, mission} -> json(conn, %{data: serialize_quest(mission)})
       {:error, reason} -> error(conn, 422, reason)
     end
   end
@@ -37,59 +37,59 @@ defmodule GiTF.Web.ApiController do
         status -> [status: status]
       end
 
-    quests = GiTF.Quests.list(opts)
+    missions = GiTF.Missions.list(opts)
 
-    quests =
-      case params["comb_id"] do
-        nil -> quests
-        comb_id -> Enum.filter(quests, &(&1[:comb_id] == comb_id))
+    missions =
+      case params["sector_id"] do
+        nil -> missions
+        sector_id -> Enum.filter(missions, &(&1[:sector_id] == sector_id))
       end
 
     # Default to active only unless ?all=true
-    quests =
+    missions =
       if params["all"] == "true" do
-        quests
+        missions
       else
         case params["status"] do
-          nil -> Enum.reject(quests, &(&1[:status] in ["completed", "closed"]))
-          _ -> quests
+          nil -> Enum.reject(missions, &(&1[:status] in ["completed", "closed"]))
+          _ -> missions
         end
       end
 
-    json(conn, %{data: Enum.map(quests, &serialize_quest/1)})
+    json(conn, %{data: Enum.map(missions, &serialize_quest/1)})
   end
 
   def show_quest(conn, %{"id" => id}) do
-    case GiTF.Quests.get(id) do
-      {:ok, quest} -> json(conn, %{data: serialize_quest(quest)})
+    case GiTF.Missions.get(id) do
+      {:ok, mission} -> json(conn, %{data: serialize_quest(mission)})
       {:error, :not_found} -> error(conn, 404, :not_found)
     end
   end
 
   def delete_quest(conn, %{"id" => id}) do
-    case GiTF.Quests.delete(id) do
+    case GiTF.Missions.delete(id) do
       :ok -> json(conn, %{data: %{deleted: true}})
       {:error, reason} -> error(conn, 422, reason)
     end
   end
 
   def kill_quest(conn, %{"id" => id}) do
-    case GiTF.Quests.kill(id) do
+    case GiTF.Missions.kill(id) do
       :ok -> json(conn, %{data: %{id: id, status: "killed"}})
       {:error, :not_found} -> error(conn, 404, :not_found)
     end
   end
 
   def close_quest(conn, %{"id" => id}) do
-    case GiTF.Quests.close(id) do
-      {:ok, quest} -> json(conn, %{data: serialize_quest(quest)})
+    case GiTF.Missions.close(id) do
+      {:ok, mission} -> json(conn, %{data: serialize_quest(mission)})
       {:error, :not_found} -> error(conn, 404, :not_found)
     end
   end
 
   def start_quest(conn, %{"id" => id}) do
     case GiTF.Major.Orchestrator.start_quest(id) do
-      {:ok, phase} -> json(conn, %{data: %{quest_id: id, phase: phase}})
+      {:ok, phase} -> json(conn, %{data: %{mission_id: id, phase: phase}})
       {:error, reason} -> error(conn, 422, reason)
     end
   end
@@ -99,13 +99,13 @@ defmodule GiTF.Web.ApiController do
       {:ok, plan} ->
         tasks = plan[:tasks] || plan.tasks || []
 
-        # Read candidate count from quest record
-        quest_record = GiTF.Store.get(:quests, id)
+        # Read candidate count from mission record
+        quest_record = GiTF.Store.get(:missions, id)
         candidates = if quest_record, do: Map.get(quest_record, :plan_candidates, []), else: []
 
         json(conn, %{
           data: %{
-            quest_id: id,
+            mission_id: id,
             goal: plan[:goal],
             selected_strategy: plan[:strategy],
             candidates_count: length(candidates),
@@ -132,7 +132,7 @@ defmodule GiTF.Web.ApiController do
   end
 
   def list_plan_candidates(conn, %{"id" => id}) do
-    quest_record = GiTF.Store.get(:quests, id)
+    quest_record = GiTF.Store.get(:missions, id)
 
     if quest_record do
       candidates = Map.get(quest_record, :plan_candidates, [])
@@ -154,7 +154,7 @@ defmodule GiTF.Web.ApiController do
 
   def select_plan_candidate(conn, %{"id" => id} = params) do
     strategy = params["strategy"]
-    quest_record = GiTF.Store.get(:quests, id)
+    quest_record = GiTF.Store.get(:missions, id)
 
     cond do
       is_nil(quest_record) ->
@@ -172,13 +172,13 @@ defmodule GiTF.Web.ApiController do
 
           candidate ->
             updated = Map.put(quest_record, :draft_plan, candidate)
-            GiTF.Store.put(:quests, updated)
+            GiTF.Store.put(:missions, updated)
 
             tasks = candidate[:tasks] || candidate.tasks || []
 
             json(conn, %{
               data: %{
-                quest_id: id,
+                mission_id: id,
                 strategy: strategy,
                 score: candidate[:score] || candidate.score,
                 tasks: Enum.map(tasks, fn t ->
@@ -203,7 +203,7 @@ defmodule GiTF.Web.ApiController do
       {:ok, status} ->
         json(conn, %{
           data: %{
-            quest: serialize_quest(status.quest),
+            mission: serialize_quest(status.mission),
             current_phase: status.current_phase,
             completed_phases: status.completed_phases,
             artifacts_summary: status.artifacts_summary,
@@ -223,7 +223,7 @@ defmodule GiTF.Web.ApiController do
   def quest_report(conn, %{"id" => id}) do
     case GiTF.Report.generate(id) do
       {:ok, report} ->
-        json(conn, %{data: %{text: GiTF.Report.format(report), quest_id: id}})
+        json(conn, %{data: %{text: GiTF.Report.format(report), mission_id: id}})
 
       {:error, :not_found} ->
         error(conn, 404, :not_found)
@@ -236,7 +236,7 @@ defmodule GiTF.Web.ApiController do
   def quest_merge(conn, %{"id" => id}) do
     case GiTF.Merge.merge_quest(id) do
       {:ok, branch} ->
-        json(conn, %{data: %{branch: branch, quest_id: id}})
+        json(conn, %{data: %{branch: branch, mission_id: id}})
 
       {:error, :not_found} ->
         error(conn, 404, :not_found)
@@ -246,10 +246,10 @@ defmodule GiTF.Web.ApiController do
     end
   end
 
-  def quest_spec_show(conn, %{"id" => quest_id, "phase" => phase}) do
-    case GiTF.Specs.read(quest_id, phase) do
+  def quest_spec_show(conn, %{"id" => mission_id, "phase" => phase}) do
+    case GiTF.Specs.read(mission_id, phase) do
       {:ok, content} ->
-        json(conn, %{data: %{content: content, quest_id: quest_id, phase: phase}})
+        json(conn, %{data: %{content: content, mission_id: mission_id, phase: phase}})
 
       {:error, :not_found} ->
         error(conn, 404, :not_found)
@@ -259,38 +259,38 @@ defmodule GiTF.Web.ApiController do
     end
   end
 
-  def quest_spec_write(conn, %{"id" => quest_id, "phase" => phase} = params) do
+  def quest_spec_write(conn, %{"id" => mission_id, "phase" => phase} = params) do
     content = params["content"] || ""
 
-    case GiTF.Specs.write(quest_id, phase, content) do
+    case GiTF.Specs.write(mission_id, phase, content) do
       {:ok, path} ->
-        json(conn, %{data: %{path: path, quest_id: quest_id, phase: phase}})
+        json(conn, %{data: %{path: path, mission_id: mission_id, phase: phase}})
 
       {:error, reason} ->
         error(conn, 422, reason)
     end
   end
 
-  def confirm_plan(conn, %{"id" => quest_id} = params) do
+  def confirm_plan(conn, %{"id" => mission_id} = params) do
     specs = params["specs"] || []
 
-    {:ok, jobs} = GiTF.Major.Planner.create_jobs_from_specs(quest_id, specs)
-    GiTF.Quests.store_artifact(quest_id, "planning", specs)
-    json(conn, %{data: %{quest_id: quest_id, jobs_created: length(jobs)}})
+    {:ok, ops} = GiTF.Major.Planner.create_jobs_from_specs(mission_id, specs)
+    GiTF.Missions.store_artifact(mission_id, "planning", specs)
+    json(conn, %{data: %{mission_id: mission_id, jobs_created: length(ops)}})
   end
 
-  def reject_plan(conn, %{"id" => quest_id} = params) do
+  def reject_plan(conn, %{"id" => mission_id} = params) do
     feedback = params["feedback"]
 
     # Clear the draft plan
-    quest_record = GiTF.Store.get(:quests, quest_id)
+    quest_record = GiTF.Store.get(:missions, mission_id)
 
     if quest_record do
       updated = Map.delete(quest_record, :draft_plan)
-      GiTF.Store.put(:quests, updated)
+      GiTF.Store.put(:missions, updated)
 
       if feedback do
-        GiTF.Quests.store_artifact(quest_id, "plan_rejection", %{
+        GiTF.Missions.store_artifact(mission_id, "plan_rejection", %{
           "feedback" => feedback,
           "rejected_at" => DateTime.utc_now()
         })
@@ -302,17 +302,17 @@ defmodule GiTF.Web.ApiController do
     end
   end
 
-  def revise_plan(conn, %{"id" => quest_id} = params) do
+  def revise_plan(conn, %{"id" => mission_id} = params) do
     feedback = params["feedback"] || ""
 
-    case GiTF.Major.Planner.generate_llm_plan(quest_id, %{feedback: feedback}) do
+    case GiTF.Major.Planner.generate_llm_plan(mission_id, %{feedback: feedback}) do
       {:ok, plan} ->
         # Store as draft
-        quest_record = GiTF.Store.get(:quests, quest_id)
+        quest_record = GiTF.Store.get(:missions, mission_id)
 
         if quest_record do
           updated = Map.put(quest_record, :draft_plan, plan)
-          GiTF.Store.put(:quests, updated)
+          GiTF.Store.put(:missions, updated)
         end
 
         json(conn, %{data: plan})
@@ -329,43 +329,43 @@ defmodule GiTF.Web.ApiController do
 
   def list_jobs(conn, params) do
     opts =
-      case params["quest_id"] do
+      case params["mission_id"] do
         nil -> []
-        id -> [quest_id: id]
+        id -> [mission_id: id]
       end
 
-    jobs = GiTF.Jobs.list(opts)
+    ops = GiTF.Ops.list(opts)
 
-    jobs =
+    ops =
       if params["all"] == "true" do
-        jobs
+        ops
       else
         case params["status"] do
-          nil -> Enum.reject(jobs, &(&1.status in ["done", "failed"]))
-          status -> Enum.filter(jobs, &(&1.status == status))
+          nil -> Enum.reject(ops, &(&1.status in ["done", "failed"]))
+          status -> Enum.filter(ops, &(&1.status == status))
         end
       end
 
-    json(conn, %{data: Enum.map(jobs, &serialize_job/1)})
+    json(conn, %{data: Enum.map(ops, &serialize_job/1)})
   end
 
   def show_job(conn, %{"id" => id}) do
-    case GiTF.Jobs.get(id) do
-      {:ok, job} -> json(conn, %{data: serialize_job(job)})
+    case GiTF.Ops.get(id) do
+      {:ok, op} -> json(conn, %{data: serialize_job(op)})
       {:error, :not_found} -> error(conn, 404, :not_found)
     end
   end
 
   def reset_job(conn, %{"id" => id}) do
-    case GiTF.Jobs.reset(id) do
-      {:ok, job} -> json(conn, %{data: serialize_job(job)})
+    case GiTF.Ops.reset(id) do
+      {:ok, op} -> json(conn, %{data: serialize_job(op)})
       {:error, :not_found} -> error(conn, 404, :not_found)
       {:error, reason} -> error(conn, 422, reason)
     end
   end
 
   def kill_job(conn, %{"id" => id}) do
-    case GiTF.Jobs.kill(id) do
+    case GiTF.Ops.kill(id) do
       :ok -> json(conn, %{data: %{id: id, status: "killed"}})
       {:error, :not_found} -> error(conn, 404, :not_found)
     end
@@ -401,18 +401,18 @@ defmodule GiTF.Web.ApiController do
       {:ok, ghost} ->
         GiTF.Store.put(:ghosts, %{ghost | status: "stopped"})
 
-        if ghost[:job_id] do
-          # For phase jobs, extract artifact from the ghost's log before completing
-          maybe_collect_phase_artifact(ghost_id, ghost[:job_id])
+        if ghost[:op_id] do
+          # For phase ops, extract artifact from the ghost's log before completing
+          maybe_collect_phase_artifact(ghost_id, ghost[:op_id])
 
-          GiTF.Jobs.complete(ghost[:job_id])
-          GiTF.Jobs.unblock_dependents(ghost[:job_id])
+          GiTF.Ops.complete(ghost[:op_id])
+          GiTF.Ops.unblock_dependents(ghost[:op_id])
 
-          GiTF.Waggle.send(
+          GiTF.Link.send(
             ghost_id,
             "major",
             "job_complete",
-            "Job #{ghost[:job_id]} completed successfully"
+            "Job #{ghost[:op_id]} completed successfully"
           )
         end
 
@@ -430,9 +430,9 @@ defmodule GiTF.Web.ApiController do
       {:ok, ghost} ->
         GiTF.Store.put(:ghosts, %{ghost | status: "crashed"})
 
-        if ghost[:job_id] do
-          GiTF.Jobs.fail(ghost[:job_id])
-          GiTF.Waggle.send(ghost_id, "major", "job_failed", "Job #{ghost[:job_id]} failed: #{reason}")
+        if ghost[:op_id] do
+          GiTF.Ops.fail(ghost[:op_id])
+          GiTF.Link.send(ghost_id, "major", "job_failed", "Job #{ghost[:op_id]} failed: #{reason}")
         end
 
         json(conn, %{data: %{failed: true}})
@@ -457,34 +457,34 @@ defmodule GiTF.Web.ApiController do
         _, acc -> acc
       end)
 
-    case GiTF.Comb.add(path, opts) do
-      {:ok, comb} -> json(conn, %{data: serialize_comb(comb)})
+    case GiTF.Sector.add(path, opts) do
+      {:ok, sector} -> json(conn, %{data: serialize_comb(sector)})
       {:error, reason} -> error(conn, 422, reason)
     end
   end
 
   def list_combs(conn, _params) do
-    combs = GiTF.Comb.list()
-    json(conn, %{data: Enum.map(combs, &serialize_comb/1)})
+    sectors = GiTF.Sector.list()
+    json(conn, %{data: Enum.map(sectors, &serialize_comb/1)})
   end
 
   def show_comb(conn, %{"id" => id}) do
-    case GiTF.Comb.get(id) do
-      {:ok, comb} -> json(conn, %{data: serialize_comb(comb)})
+    case GiTF.Sector.get(id) do
+      {:ok, sector} -> json(conn, %{data: serialize_comb(sector)})
       {:error, :not_found} -> error(conn, 404, :not_found)
     end
   end
 
   def remove_comb(conn, %{"id" => id}) do
-    case GiTF.Comb.remove(id) do
+    case GiTF.Sector.remove(id) do
       {:ok, _comb} -> json(conn, %{data: %{deleted: true}})
       {:error, :not_found} -> error(conn, 404, :not_found)
     end
   end
 
   def use_comb(conn, %{"id" => id}) do
-    case GiTF.Comb.set_current(id) do
-      {:ok, comb} -> json(conn, %{data: serialize_comb(comb)})
+    case GiTF.Sector.set_current(id) do
+      {:ok, sector} -> json(conn, %{data: serialize_comb(sector)})
       {:error, :not_found} -> error(conn, 404, :not_found)
       {:error, reason} -> error(conn, 422, reason)
     end
@@ -557,10 +557,10 @@ defmodule GiTF.Web.ApiController do
     |> json(%{error: message})
   end
 
-  defp maybe_collect_phase_artifact(ghost_id, job_id) do
-    with {:ok, job} <- GiTF.Jobs.get(job_id),
-         true <- Map.get(job, :phase_job, false),
-         phase when is_binary(phase) <- Map.get(job, :phase) do
+  defp maybe_collect_phase_artifact(ghost_id, op_id) do
+    with {:ok, op} <- GiTF.Ops.get(op_id),
+         true <- Map.get(op, :phase_job, false),
+         phase when is_binary(phase) <- Map.get(op, :phase) do
       # Read the ghost's log file and extract the JSON artifact
       case find_bee_log(ghost_id) do
         {:ok, log_content} ->
@@ -578,7 +578,7 @@ defmodule GiTF.Web.ApiController do
 
           case GiTF.Major.PhaseCollector.collect(phase, log_content, events) do
             {:ok, artifact} ->
-              GiTF.Quests.store_artifact(job.quest_id, phase, artifact)
+              GiTF.Missions.store_artifact(op.mission_id, phase, artifact)
 
             {:error, reason} ->
               require Logger
@@ -629,13 +629,13 @@ defmodule GiTF.Web.ApiController do
       name: q[:name],
       status: q[:status] || "pending",
       goal: q[:goal],
-      comb_id: q[:comb_id],
+      sector_id: q[:sector_id],
       current_phase: q[:current_phase],
       inserted_at: to_string(q[:inserted_at]),
-      jobs:
-        case q[:jobs] do
+      ops:
+        case q[:ops] do
           nil -> []
-          jobs -> Enum.map(jobs, &serialize_job/1)
+          ops -> Enum.map(ops, &serialize_job/1)
         end
     }
   end
@@ -645,8 +645,8 @@ defmodule GiTF.Web.ApiController do
       id: j.id,
       title: j.title,
       status: j.status,
-      quest_id: j.quest_id,
-      comb_id: j[:comb_id],
+      mission_id: j.mission_id,
+      sector_id: j[:sector_id],
       ghost_id: j[:ghost_id],
       description: j[:description],
       inserted_at: to_string(j[:inserted_at])
@@ -658,7 +658,7 @@ defmodule GiTF.Web.ApiController do
       id: b.id,
       name: b.name,
       status: b.status,
-      job_id: b[:job_id],
+      op_id: b[:op_id],
       context_percentage: b[:context_percentage]
     }
   end

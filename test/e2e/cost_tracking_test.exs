@@ -2,13 +2,13 @@ defmodule GiTF.E2E.CostTrackingTest do
   use GiTF.TestDriver.Scenario
 
   scenario "cost data is recorded from mock Claude output" do
-    {:ok, env, comb} = Harness.add_comb(env)
+    {:ok, env, sector} = Harness.add_comb(env)
 
     {:ok, _quest, [job1]} =
       Harness.create_quest(env,
-        comb_id: comb.id,
+        sector_id: sector.id,
         goal: "Cost tracking test",
-        jobs: [%{title: "Cost-tracked task"}]
+        ops: [%{title: "Cost-tracked task"}]
       )
 
     input_tokens = 500
@@ -21,7 +21,7 @@ defmodule GiTF.E2E.CostTrackingTest do
       )
 
     {:ok, bee1} =
-      Harness.spawn_mock_bee(env, job1.id, comb.id,
+      Harness.spawn_mock_bee(env, job1.id, sector.id,
         delay_ms: 100,
         mock_opts: [events: events]
       )
@@ -42,13 +42,13 @@ defmodule GiTF.E2E.CostTrackingTest do
   end
 
   scenario "cost summary aggregates across ghosts" do
-    {:ok, env, comb} = Harness.add_comb(env)
+    {:ok, env, sector} = Harness.add_comb(env)
 
     {:ok, _quest, [job1, job2]} =
       Harness.create_quest(env,
-        comb_id: comb.id,
+        sector_id: sector.id,
         goal: "Multi-ghost cost test",
-        jobs: [
+        ops: [
           %{title: "Cost task 1"},
           %{title: "Cost task 2"}
         ]
@@ -61,13 +61,13 @@ defmodule GiTF.E2E.CostTrackingTest do
       GiTF.TestDriver.MockClaude.events_with_costs(200, 100, 0.002)
 
     {:ok, bee1} =
-      Harness.spawn_mock_bee(env, job1.id, comb.id,
+      Harness.spawn_mock_bee(env, job1.id, sector.id,
         delay_ms: 100,
         mock_opts: [events: events1]
       )
 
     {:ok, _bee2} =
-      Harness.spawn_mock_bee(env, job2.id, comb.id,
+      Harness.spawn_mock_bee(env, job2.id, sector.id,
         delay_ms: 100,
         mock_opts: [events: events2]
       )

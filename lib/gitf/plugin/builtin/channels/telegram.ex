@@ -5,7 +5,7 @@ defmodule GiTF.Plugin.Builtin.Channels.Telegram do
   Uses Telegram Bot API via `Req` (already a dep). Supports:
   - Long-polling for inbound messages
   - Formatted section event notifications (markdown)
-  - Inbound command parsing (/ghost list, /quest show 1)
+  - Inbound command parsing (/ghost list, /mission show 1)
   - Configurable notification scoping and batching
   """
 
@@ -140,9 +140,9 @@ defmodule GiTF.Plugin.Builtin.Channels.Telegram do
   end
 
   # Handle PubSub messages
-  def handle_info({:waggle, waggle}, state) do
-    text = "Waggle from #{waggle.from}: #{waggle.subject}\n#{waggle.body || ""}"
-    GenServer.cast(self(), {:notification, :waggle, %{text: text}})
+  def handle_info({:link_msg, link_msg}, state) do
+    text = "Link from #{link_msg.from}: #{link_msg.subject}\n#{link_msg.body || ""}"
+    GenServer.cast(self(), {:notification, :link_msg, %{text: text}})
     {:noreply, state}
   end
 
@@ -228,10 +228,10 @@ defmodule GiTF.Plugin.Builtin.Channels.Telegram do
 
   defp format_notification(event, payload) do
     case event do
-      :bee_completed -> "Bee #{payload[:ghost_id]} completed job #{payload[:job_id]}"
+      :bee_completed -> "Bee #{payload[:ghost_id]} completed op #{payload[:op_id]}"
       :bee_failed -> "Bee #{payload[:ghost_id]} failed: #{payload[:error]}"
-      :quest_completed -> "Quest #{payload[:quest_id]} completed!"
-      :waggle -> payload[:text] || "New waggle message"
+      :quest_completed -> "Quest #{payload[:mission_id]} completed!"
+      :link_msg -> payload[:text] || "New link_msg message"
       _ -> "GiTF event: #{event} #{inspect(payload)}"
     end
   end
@@ -256,9 +256,9 @@ defmodule GiTF.Plugin.Builtin.Channels.Telegram do
     telemetry_events =
       Enum.map(events_config, fn event_name ->
         case event_name do
-          "job_complete" -> [:gitf, :job, :completed]
+          "job_complete" -> [:gitf, :op, :completed]
           "job_failed" -> [:gitf, :ghost, :failed]
-          "quest_completed" -> [:gitf, :quest, :completed]
+          "quest_completed" -> [:gitf, :mission, :completed]
           "bee_crashed" -> [:gitf, :ghost, :failed]
           _ -> nil
         end

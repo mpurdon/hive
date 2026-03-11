@@ -2,21 +2,21 @@ defmodule GiTF.Ghost.Worker do
   @moduledoc """
   GenServer managing a single ghost's lifecycle.
 
-  Each ghost is a Claude Code agent working on one job within a comb.
-  The Worker provisions an isolated worktree (cell), spawns Claude
-  headless with the job prompt, and reports results back to the Major
-  via waggle messages.
+  Each ghost is a Claude Code agent working on one op within a sector.
+  The Worker provisions an isolated worktree (shell), spawns Claude
+  headless with the op prompt, and reports results back to the Major
+  via link_msg messages.
 
   ## Lifecycle
 
       start_link -> init -> {:continue, :provision}
-                          -> create cell
+                          -> create shell
                           -> update DB record
                           -> generate settings
                           -> spawn Claude headless
                           -> accumulate port output
-                          -> exit_status 0 -> success -> waggle queen
-                          -> exit_status N -> failure -> waggle queen
+                          -> exit_status 0 -> success -> link_msg queen
+                          -> exit_status N -> failure -> link_msg queen
 
   ## Registration
 
@@ -40,9 +40,9 @@ defmodule GiTF.Ghost.Worker do
 
   @type state :: %{
           ghost_id: String.t(),
-          job_id: String.t(),
-          comb_id: String.t(),
-          cell_id: String.t() | nil,
+          op_id: String.t(),
+          sector_id: String.t(),
+          shell_id: String.t() | nil,
           port: port() | nil,
           task: Task.t() | nil,
           execution_mode: :api | :cli | :ollama | :bedrock,
@@ -73,13 +73,13 @@ defmodule GiTF.Ghost.Worker do
   ## Required options
 
     * `:ghost_id` - the ghost's database ID
-    * `:job_id` - the job being worked on
-    * `:comb_id` - the comb (repository) to work in
+    * `:op_id` - the op being worked on
+    * `:sector_id` - the sector (repository) to work in
     * `:gitf_root` - the gitf workspace root directory
 
   ## Optional
 
-    * `:prompt` - explicit prompt text (overrides job title/description)
+    * `:prompt` - explicit prompt text (overrides op title/description)
     * `:claude_executable` - path to the executable to spawn (for testing)
   """
   @spec start_link(keyword()) :: GenServer.on_start()
@@ -121,18 +121,18 @@ defmodule GiTF.Ghost.Worker do
   @impl true
   def init(opts) do
     ghost_id = Keyword.fetch!(opts, :ghost_id)
-    job_id = Keyword.fetch!(opts, :job_id)
-    comb_id = Keyword.fetch!(opts, :comb_id)
+    op_id = Keyword.fetch!(opts, :op_id)
+    sector_id = Keyword.fetch!(opts, :sector_id)
     gitf_root = Keyword.fetch!(opts, :gitf_root)
 
     # Set correlation IDs for structured logging
-    GiTF.Logger.set_bee_context(ghost_id, job_id)
+    GiTF.Logger.set_bee_context(ghost_id, op_id)
 
     state = %{
       ghost_id: ghost_id,
-      job_id: job_id,
-      comb_id: comb_id,
-      cell_id: nil,
+      op_id: op_id,
+      sector_id: sector_id,
+      shell_id: nil,
       port: nil,
       task: nil,
       execution_mode: GiTF.Runtime.ModelResolver.execution_mode(),
@@ -157,7 +157,7 @@ defmodule GiTF.Ghost.Worker do
         Logger.error("Bee #{state.ghost_id} failed to provision: #{inspect(reason)}")
         GiTF.Telemetry.emit([:gitf, :ghost, :provision_failed], %{}, %{
           ghost_id: state.ghost_id,
-          job_id: state.job_id,
+          op_id: state.op_id,
           reason: inspect(reason)
         })
         mark_failed(state, "Provision failed: #{inspect(reason)}")
@@ -169,9 +169,9 @@ defmodule GiTF.Ghost.Worker do
   def handle_call(:status, _from, state) do
     reply = %{
       ghost_id: state.ghost_id,
-      job_id: state.job_id,
-      comb_id: state.comb_id,
-      cell_id: state.cell_id,
+      op_id: state.op_id,
+      sector_id: state.sector_id,
+      shell_id: state.shell_id,
       status: state.status
     }
 
@@ -278,20 +278,20 @@ defmodule GiTF.Ghost.Worker do
     # Stop the current process (port/task)
     state = do_stop(state)
 
-    # Reset the job to pending so it can be re-spawned with handoff context
-    case GiTF.Jobs.get(state.job_id) do
-      {:ok, job} ->
-        Store.put(:jobs, %{job | status: "pending"})
+    # Reset the op to pending so it can be re-spawned with handoff context
+    case GiTF.Ops.get(state.op_id) do
+      {:ok, op} ->
+        Store.put(:ops, %{op | status: "pending"})
       _ ->
         :ok
     end
 
-    # Notify Major that ghost handed off — Major's job spawner will pick it up
-    GiTF.Waggle.send(
+    # Notify Major that ghost handed off — Major's op spawner will pick it up
+    GiTF.Link.send(
       state.ghost_id,
       "major",
       "context_handoff",
-      "Bee #{state.ghost_id} handed off job #{state.job_id} due to context exhaustion"
+      "Bee #{state.ghost_id} handed off op #{state.op_id} due to context exhaustion"
     )
 
     {:stop, :normal, %{state | status: :done}}
@@ -432,55 +432,55 @@ defmodule GiTF.Ghost.Worker do
   end
 
   defp provision_fresh(state) do
-    # Enrich logging metadata with quest_id
+    # Enrich logging metadata with mission_id
     is_phase_job =
-      case GiTF.Jobs.get(state.job_id) do
-        {:ok, job} ->
-          GiTF.Logger.set_bee_context(state.ghost_id, state.job_id, job.quest_id)
-          Map.get(job, :phase_job, false)
+      case GiTF.Ops.get(state.op_id) do
+        {:ok, op} ->
+          GiTF.Logger.set_bee_context(state.ghost_id, state.op_id, op.mission_id)
+          Map.get(op, :phase_job, false)
 
         _ ->
           false
       end
 
-    with {:ok, cell} <- create_cell(state),
-         :ok <- update_bee_working(state, cell),
+    with {:ok, shell} <- create_shell(state),
+         :ok <- update_bee_working(state, shell),
          :ok <- maybe_transition_job(state),
-         :ok <- maybe_ensure_agent(state, cell) do
+         :ok <- maybe_ensure_agent(state, shell) do
       # Apply role-based tool restrictions via settings.local.json
-      role = role_for_job(state.job_id)
-      GiTF.Runtime.Settings.generate_role_settings(role, cell.worktree_path)
+      role = role_for_job(state.op_id)
+      GiTF.Runtime.Settings.generate_role_settings(role, shell.worktree_path)
 
-      # Pre-dispatch: write job instructions so Claude Code has context at boot
-      write_pre_dispatch(cell.worktree_path, state.job_id)
+      # Pre-dispatch: write op instructions so Claude Code has context at boot
+      write_pre_dispatch(shell.worktree_path, state.op_id)
 
-      # Build task-specific skill for non-phase jobs (works for both API and CLI)
+      # Build task-specific skill for non-phase ops (works for both API and CLI)
       unless is_phase_job do
-        maybe_build_task_skill(build_prompt(state), cell.worktree_path, state.job_id)
+        maybe_build_task_skill(build_prompt(state), shell.worktree_path, state.op_id)
       end
 
-      case spawn_process_with_timeout(state, cell) do
+      case spawn_process_with_timeout(state, shell) do
         {:ok, handle} ->
           # Schedule beacon verification to confirm the process actually started
           Process.send_after(self(), :verify_beacon, 10_000)
 
           if is_struct(handle, Task) do
-            {:ok, %{state | cell_id: cell.id, task: handle, status: :running}}
+            {:ok, %{state | shell_id: shell.id, task: handle, status: :running}}
           else
-            {:ok, %{state | cell_id: cell.id, port: handle, status: :running}}
+            {:ok, %{state | shell_id: shell.id, port: handle, status: :running}}
           end
 
         {:error, reason} ->
-          # Rollback: clean up the cell/worktree on spawn failure
-          Logger.warning("Spawn failed for ghost #{state.ghost_id}, rolling back cell #{cell.id}")
-          rollback_cell(cell.id)
+          # Rollback: clean up the shell/worktree on spawn failure
+          Logger.warning("Spawn failed for ghost #{state.ghost_id}, rolling back shell #{shell.id}")
+          rollback_cell(shell.id)
           {:error, reason}
       end
     else
       {:error, _reason} = err ->
-        # If cell was created but a later step failed, attempt cleanup.
-        # We check whether cell_id is set by looking at state -- if create_cell
-        # succeeded but a subsequent step failed, the cell variable is not in scope
+        # If shell was created but a later step failed, attempt cleanup.
+        # We check whether shell_id is set by looking at state -- if create_shell
+        # succeeded but a subsequent step failed, the shell variable is not in scope
         # here, so we look it up by ghost_id.
         rollback_cell_for_bee(state.ghost_id)
         err
@@ -488,38 +488,38 @@ defmodule GiTF.Ghost.Worker do
   end
 
   defp provision_revive(state) do
-    cell_id = Keyword.fetch!(state.opts, :cell_id)
+    shell_id = Keyword.fetch!(state.opts, :shell_id)
 
-    with {:ok, cell} <- GiTF.Cell.get(cell_id),
-         :ok <- update_bee_working(state, cell),
-         {:ok, handle} <- spawn_process(state, cell) do
+    with {:ok, shell} <- GiTF.Shell.get(shell_id),
+         :ok <- update_bee_working(state, shell),
+         {:ok, handle} <- spawn_process(state, shell) do
       if is_struct(handle, Task) do
-        {:ok, %{state | cell_id: cell.id, task: handle, status: :running}}
+        {:ok, %{state | shell_id: shell.id, task: handle, status: :running}}
       else
-        {:ok, %{state | cell_id: cell.id, port: handle, status: :running}}
+        {:ok, %{state | shell_id: shell.id, port: handle, status: :running}}
       end
     end
   end
 
-  defp create_cell(state) do
-    GiTF.Cell.create(state.comb_id, state.ghost_id, gitf_root: state.gitf_root)
+  defp create_shell(state) do
+    GiTF.Shell.create(state.sector_id, state.ghost_id, gitf_root: state.gitf_root)
   end
 
-  defp role_for_job(job_id) do
-    case GiTF.Jobs.get(job_id) do
-      {:ok, %{scout: true}} -> :scout
+  defp role_for_job(op_id) do
+    case GiTF.Ops.get(op_id) do
+      {:ok, %{recon: true}} -> :recon
       _ -> :builder
     end
   end
 
-  defp update_bee_working(state, cell) do
+  defp update_bee_working(state, shell) do
     case Store.get(:ghosts, state.ghost_id) do
       nil ->
         {:error, :bee_not_found}
 
       ghost ->
         updated =
-          Map.merge(ghost, %{status: "working", cell_path: cell.worktree_path, pid: inspect(self())})
+          Map.merge(ghost, %{status: "working", shell_path: shell.worktree_path, pid: inspect(self())})
 
         Store.put(:ghosts, updated)
         :ok
@@ -527,9 +527,9 @@ defmodule GiTF.Ghost.Worker do
   end
 
   defp maybe_transition_job(state) do
-    case GiTF.Jobs.get(state.job_id) do
+    case GiTF.Ops.get(state.op_id) do
       {:ok, %{status: "assigned"}} ->
-        case GiTF.Jobs.start(state.job_id) do
+        case GiTF.Ops.start(state.op_id) do
           {:ok, _} -> :ok
           {:error, reason} -> {:error, reason}
         end
@@ -544,8 +544,8 @@ defmodule GiTF.Ghost.Worker do
 
   @spawn_timeout_ms 30_000
 
-  defp spawn_process_with_timeout(state, cell) do
-    task = Task.async(fn -> spawn_process(state, cell) end)
+  defp spawn_process_with_timeout(state, shell) do
+    task = Task.async(fn -> spawn_process(state, shell) end)
 
     case Task.yield(task, @spawn_timeout_ms) || Task.shutdown(task, :brutal_kill) do
       {:ok, result} -> result
@@ -555,7 +555,7 @@ defmodule GiTF.Ghost.Worker do
     end
   end
 
-  defp spawn_process(state, cell) do
+  defp spawn_process(state, shell) do
     prompt = build_prompt(state)
     executable = Keyword.get(state.opts, :claude_executable)
 
@@ -577,24 +577,24 @@ defmodule GiTF.Ghost.Worker do
     case executable do
       nil when state.execution_mode in [:api, :ollama, :bedrock] ->
         # API mode: run agent loop in a Task
-        spawn_api_task(prompt, cell.worktree_path, spawn_opts, state)
+        spawn_api_task(prompt, shell.worktree_path, spawn_opts, state)
 
       nil ->
-        # CLI mode: settings are generated during cell creation (GiTF.Cell.create/3)
-        GiTF.Runtime.Models.spawn_headless(prompt, cell.worktree_path, spawn_opts)
+        # CLI mode: settings are generated during shell creation (GiTF.Shell.create/3)
+        GiTF.Runtime.Models.spawn_headless(prompt, shell.worktree_path, spawn_opts)
 
       exe_path ->
         # Testing path: use provided executable instead of Claude
-        spawn_test_executable(exe_path, prompt, cell)
+        spawn_test_executable(exe_path, prompt, shell)
     end
   end
 
   defp spawn_api_task(prompt, working_dir, spawn_opts, state) do
     ghost_id = state.ghost_id
 
-    # Determine tool_set based on phase job type
+    # Determine tool_set based on phase op type
     tool_set =
-      case GiTF.Jobs.get(state.job_id) do
+      case GiTF.Ops.get(state.op_id) do
         {:ok, %{phase_job: true, phase: phase}} when phase in ["research", "requirements", "review", "validation"] ->
           :readonly
 
@@ -617,24 +617,24 @@ defmodule GiTF.Ghost.Worker do
     {:ok, task}
   end
 
-  defp maybe_build_task_skill(_prompt, working_dir, job_id) do
+  defp maybe_build_task_skill(_prompt, working_dir, op_id) do
     skill_path = Path.join([working_dir, ".claude", "agents", "task-skill.md"])
 
     # Check if a recent skill file already exists (skip regeneration on retries)
     if task_skill_fresh?(skill_path) do
-      Logger.debug("Task skill already exists and is fresh for job #{job_id}, skipping")
+      Logger.debug("Task skill already exists and is fresh for op #{op_id}, skipping")
       :ok
     else
       job_info =
-        case GiTF.Jobs.get(job_id) do
-          {:ok, job} -> job
+        case GiTF.Ops.get(op_id) do
+          {:ok, op} -> op
           _ -> nil
         end
 
       if is_nil(job_info) do
         :ok
       else
-        do_build_task_skill(job_info, working_dir, job_id)
+        do_build_task_skill(job_info, working_dir, op_id)
       end
     end
   rescue
@@ -658,7 +658,7 @@ defmodule GiTF.Ghost.Worker do
     end
   end
 
-  defp do_build_task_skill(job_info, working_dir, job_id) do
+  defp do_build_task_skill(job_info, working_dir, op_id) do
     title = Map.get(job_info, :title, "")
     description = Map.get(job_info, :description, "")
     target_files = Map.get(job_info, :target_files, []) |> List.wrap() |> Enum.join(", ")
@@ -689,7 +689,7 @@ defmodule GiTF.Ghost.Worker do
         File.mkdir_p!(agents_dir)
         skill_path = Path.join(agents_dir, "task-skill.md")
         File.write!(skill_path, skill_content)
-        Logger.info("Built task skill for job #{job_id}")
+        Logger.info("Built task skill for op #{op_id}")
 
       _ ->
         :ok
@@ -700,14 +700,14 @@ defmodule GiTF.Ghost.Worker do
       :ok
   end
 
-  defp spawn_test_executable(exe_path, prompt, cell) do
+  defp spawn_test_executable(exe_path, prompt, shell) do
     port =
       Port.open({:spawn_executable, exe_path}, [
         :binary,
         :exit_status,
         :use_stdio,
         args: [prompt],
-        cd: cell.worktree_path
+        cd: shell.worktree_path
       ])
 
     {:ok, port}
@@ -716,16 +716,16 @@ defmodule GiTF.Ghost.Worker do
   defp build_prompt(state) do
     case Keyword.get(state.opts, :prompt) do
       nil ->
-        case GiTF.Jobs.get(state.job_id) do
-          {:ok, job} ->
-            if job.description do
-              "#{job.title}\n\n#{job.description}"
+        case GiTF.Ops.get(state.op_id) do
+          {:ok, op} ->
+            if op.description do
+              "#{op.title}\n\n#{op.description}"
             else
-              job.title
+              op.title
             end
 
           {:error, _} ->
-            "Work on job #{state.job_id}"
+            "Work on op #{state.op_id}"
         end
 
       prompt ->
@@ -738,95 +738,95 @@ defmodule GiTF.Ghost.Worker do
   defp mark_success(state) do
     update_ghost_status(state.ghost_id, "stopped")
 
-    case GiTF.Jobs.get(state.job_id) do
+    case GiTF.Ops.get(state.op_id) do
       {:ok, %{status: "done"}} ->
         :ok
 
       _ ->
-        GiTF.Jobs.complete(state.job_id)
-        GiTF.Jobs.unblock_dependents(state.job_id)
+        GiTF.Ops.complete(state.op_id)
+        GiTF.Ops.unblock_dependents(state.op_id)
     end
 
     GiTF.Telemetry.emit([:gitf, :ghost, :completed], %{}, %{
       ghost_id: state.ghost_id,
-      job_id: state.job_id
+      op_id: state.op_id
     })
 
     record_costs_from_events(state)
 
-    # Collect phase output if this is a phase job
-    job = case GiTF.Jobs.get(state.job_id) do
+    # Collect phase output if this is a phase op
+    op = case GiTF.Ops.get(state.op_id) do
       {:ok, j} -> j
       _ -> nil
     end
 
-    is_phase_job = job && Map.get(job, :phase_job, false)
+    is_phase_job = op && Map.get(op, :phase_job, false)
 
     if is_phase_job do
-      collect_phase_output(state, job)
+      collect_phase_output(state, op)
     else
       record_files_changed(state)
     end
 
-    is_scout = job && Map.get(job, :scout, false)
-    skip_verification = job && Map.get(job, :skip_verification, false)
+    is_scout = op && Map.get(op, :recon, false)
+    skip_verification = op && Map.get(op, :skip_verification, false)
 
     cond do
       is_scout ->
-        # Scout jobs: waggle Major with scout_complete and the raw output
+        # Recon ops: link_msg Major with scout_complete and the raw output
         output = IO.iodata_to_binary(state.output)
-        parent_job_id = Map.get(job, :scout_for)
+        parent_op_id = Map.get(op, :scout_for)
 
         body = Jason.encode!(%{
-          scout_job_id: state.job_id,
-          parent_job_id: parent_job_id,
+          scout_op_id: state.op_id,
+          parent_op_id: parent_op_id,
           output: output
         })
 
-        GiTF.Waggle.send(state.ghost_id, "major", "scout_complete", body)
+        GiTF.Link.send(state.ghost_id, "major", "scout_complete", body)
 
       is_phase_job ->
-        # Phase jobs waggle Major directly — no verification/merge needed
+        # Phase ops link_msg Major directly — no verification/merge needed
         session_id = GiTF.Runtime.Models.extract_session_id(Enum.reverse(state.parsed_events))
-        body = "Job #{state.job_id} completed successfully (phase: #{job.phase})"
+        body = "Job #{state.op_id} completed successfully (phase: #{op.phase})"
         body = if session_id, do: body <> "\nSession ID: #{session_id}", else: body
-        GiTF.Waggle.send(state.ghost_id, "major", "job_complete", body)
+        GiTF.Link.send(state.ghost_id, "major", "job_complete", body)
 
       skip_verification ->
-        # Simple jobs skip drone verification, go straight to Major
-        GiTF.Waggle.send(state.ghost_id, "major", "job_complete",
-          "Job #{state.job_id} completed (skip_verification)")
+        # Simple ops skip tachikoma verification, go straight to Major
+        GiTF.Link.send(state.ghost_id, "major", "job_complete",
+          "Job #{state.op_id} completed (skip_verification)")
 
       true ->
-        # Standard jobs: broadcast to Drone for independent verification.
-        # The Drone verifies, then forwards to MergeQueue on pass.
-        # Do NOT waggle Major here — the MergeQueue will waggle "job_merged" after merge.
+        # Standard ops: broadcast to Tachikoma for independent verification.
+        # The Tachikoma verifies, then forwards to MergeQueue on pass.
+        # Do NOT link_msg Major here — the MergeQueue will link_msg "job_merged" after merge.
         Phoenix.PubSub.broadcast(
           GiTF.PubSub,
-          "drone:review",
-          {:review_job, state.job_id, state.ghost_id, state.cell_id}
+          "tachikoma:review",
+          {:review_job, state.op_id, state.ghost_id, state.shell_id}
         )
     end
 
     GiTF.Progress.clear(state.ghost_id)
   end
 
-  defp collect_phase_output(state, job) do
+  defp collect_phase_output(state, op) do
     raw_output = IO.iodata_to_binary(state.output)
     events = Enum.reverse(state.parsed_events)
 
-    case GiTF.Major.PhaseCollector.collect(job.phase, raw_output, events) do
+    case GiTF.Major.PhaseCollector.collect(op.phase, raw_output, events) do
       {:ok, artifact} ->
-        GiTF.Quests.store_artifact(job.quest_id, job.phase, artifact)
+        GiTF.Missions.store_artifact(op.mission_id, op.phase, artifact)
 
       {:error, reason} ->
-        Logger.warning("Phase output parse failed for #{job.phase}: #{inspect(reason)}, storing raw output as fallback")
+        Logger.warning("Phase output parse failed for #{op.phase}: #{inspect(reason)}, storing raw output as fallback")
         fallback_artifact = %{
           "raw_output" => String.slice(raw_output, 0, 50_000),
           "parse_failed" => true,
           "parse_error" => inspect(reason)
         }
-        GiTF.Quests.store_artifact(job.quest_id, job.phase, fallback_artifact)
+        GiTF.Missions.store_artifact(op.mission_id, op.phase, fallback_artifact)
     end
   rescue
     e ->
@@ -837,20 +837,20 @@ defmodule GiTF.Ghost.Worker do
         "parse_failed" => true,
         "parse_error" => inspect(e)
       }
-      GiTF.Quests.store_artifact(job.quest_id, job.phase, fallback_artifact)
+      GiTF.Missions.store_artifact(op.mission_id, op.phase, fallback_artifact)
   end
 
   defp record_files_changed(state) do
-    case Store.get(:cells, state.cell_id) do
+    case Store.get(:shells, state.shell_id) do
       %{worktree_path: path} when is_binary(path) ->
         case GiTF.Git.safe_cmd( ["diff", "--name-only", "HEAD~1..HEAD"],
                cd: path, stderr_to_stdout: true) do
           {output, 0} ->
             files = String.split(output, "\n", trim: true)
 
-            case GiTF.Jobs.get(state.job_id) do
-              {:ok, job} ->
-                Store.put(:jobs, Map.merge(job, %{
+            case GiTF.Ops.get(state.op_id) do
+              {:ok, op} ->
+                Store.put(:ops, Map.merge(op, %{
                   files_changed: length(files),
                   changed_files: files
                 }))
@@ -874,7 +874,7 @@ defmodule GiTF.Ghost.Worker do
 
   defp mark_failed(state, reason) do
     update_ghost_status(state.ghost_id, "crashed")
-    GiTF.Jobs.fail(state.job_id)
+    GiTF.Ops.fail(state.op_id)
 
     GiTF.Telemetry.emit([:gitf, :ghost, :failed], %{}, %{
       ghost_id: state.ghost_id,
@@ -884,11 +884,11 @@ defmodule GiTF.Ghost.Worker do
     record_costs_from_events(state)
     GiTF.Progress.clear(state.ghost_id)
 
-    GiTF.Waggle.send(
+    GiTF.Link.send(
       state.ghost_id,
       "major",
       "job_failed",
-      "Job #{state.job_id} failed: #{reason}"
+      "Job #{state.op_id} failed: #{reason}"
     )
   end
 
@@ -901,21 +901,21 @@ defmodule GiTF.Ghost.Worker do
     end)
   end
 
-  defp maybe_ensure_agent(state, cell) do
-    case GiTF.Jobs.get(state.job_id) do
-      {:ok, job} ->
-        # Standard comb-level agent
-        case Store.get(:combs, cell.comb_id) do
+  defp maybe_ensure_agent(state, shell) do
+    case GiTF.Ops.get(state.op_id) do
+      {:ok, op} ->
+        # Standard sector-level agent
+        case Store.get(:sectors, shell.sector_id) do
           nil ->
             :ok
 
-          comb when comb.path != nil ->
-            GiTF.AgentProfile.ensure_agent(comb.path, %{
-              title: job.title,
-              description: job.description
+          sector when sector.path != nil ->
+            GiTF.AgentProfile.ensure_agent(sector.path, %{
+              title: op.title,
+              description: op.description
             })
 
-            GiTF.AgentProfile.install_agents(comb.path, cell.worktree_path)
+            GiTF.AgentProfile.install_agents(sector.path, shell.worktree_path)
             :ok
 
           _comb ->
@@ -991,7 +991,7 @@ defmodule GiTF.Ghost.Worker do
         end
 
         # Re-spawn the API task with fallback model
-        case Store.get(:cells, state.cell_id) do
+        case Store.get(:shells, state.shell_id) do
           %{worktree_path: path} ->
             prompt = build_prompt(state)
             task = Task.async(fn ->
@@ -1074,7 +1074,7 @@ defmodule GiTF.Ghost.Worker do
       |> Enum.count(&(Map.get(&1, :type) in [:error, "error"]))
 
     phase =
-      case GiTF.Jobs.get(state.job_id) do
+      case GiTF.Ops.get(state.op_id) do
         {:ok, %{phase: p}} when is_binary(p) -> p
         _ -> "working"
       end
@@ -1086,7 +1086,7 @@ defmodule GiTF.Ghost.Worker do
       iteration: iteration,
       error_count: error_count,
       progress_summary: "Bee running: #{tool_calls} tool calls, #{iteration} iterations",
-      pending_work: "Continuing job #{state.job_id}"
+      pending_work: "Continuing op #{state.op_id}"
     }
   end
 
@@ -1097,14 +1097,14 @@ defmodule GiTF.Ghost.Worker do
   # -- Private: pre-dispatch instructions -------------------------------------
 
   @doc false
-  defp write_pre_dispatch(worktree_path, job_id) do
-    case GiTF.Jobs.get(job_id) do
-      {:ok, job} ->
-        content = build_instructions_content(job)
+  defp write_pre_dispatch(worktree_path, op_id) do
+    case GiTF.Ops.get(op_id) do
+      {:ok, op} ->
+        content = build_instructions_content(op)
         instructions_path = Path.join([worktree_path, ".claude", "instructions.md"])
         File.mkdir_p!(Path.dirname(instructions_path))
         File.write!(instructions_path, content)
-        Logger.debug("Pre-dispatch instructions written for job #{job_id}")
+        Logger.debug("Pre-dispatch instructions written for op #{op_id}")
 
       {:error, _} ->
         :ok
@@ -1115,30 +1115,30 @@ defmodule GiTF.Ghost.Worker do
       :ok
   end
 
-  defp build_instructions_content(job) do
+  defp build_instructions_content(op) do
     sections = [
       "# Job Instructions\n",
-      "## #{job.title}\n"
+      "## #{op.title}\n"
     ]
 
     sections =
-      if job.description && job.description != "" do
-        sections ++ ["### Description\n\n#{job.description}\n"]
+      if op.description && op.description != "" do
+        sections ++ ["### Description\n\n#{op.description}\n"]
       else
         sections
       end
 
     sections =
-      case Map.get(job, :scout_findings) do
+      case Map.get(op, :scout_findings) do
         findings when is_binary(findings) and findings != "" ->
-          sections ++ ["### Scout Findings\n\n#{findings}\n"]
+          sections ++ ["### Recon Findings\n\n#{findings}\n"]
 
         _ ->
           sections
       end
 
     sections =
-      case Map.get(job, :acceptance_criteria) do
+      case Map.get(op, :acceptance_criteria) do
         criteria when is_binary(criteria) and criteria != "" ->
           sections ++ ["### Acceptance Criteria\n\n#{criteria}\n"]
 
@@ -1147,7 +1147,7 @@ defmodule GiTF.Ghost.Worker do
       end
 
     sections =
-      case Map.get(job, :target_files) do
+      case Map.get(op, :target_files) do
         files when is_list(files) and files != [] ->
           file_list = Enum.map_join(files, "\n", &"- `#{&1}`")
           sections ++ ["### Target Files\n\n#{file_list}\n"]
@@ -1161,18 +1161,18 @@ defmodule GiTF.Ghost.Worker do
 
   # -- Private: spawn rollback ------------------------------------------------
 
-  defp rollback_cell(cell_id) do
-    GiTF.Cell.remove(cell_id, force: true)
+  defp rollback_cell(shell_id) do
+    GiTF.Shell.remove(shell_id, force: true)
   rescue
     e ->
-      Logger.debug("Cell rollback failed for #{cell_id}: #{inspect(e)}")
+      Logger.debug("Cell rollback failed for #{shell_id}: #{inspect(e)}")
       :ok
   end
 
   defp rollback_cell_for_bee(ghost_id) do
-    case Store.find_one(:cells, fn c -> c.ghost_id == ghost_id and c.status == "active" end) do
+    case Store.find_one(:shells, fn c -> c.ghost_id == ghost_id and c.status == "active" end) do
       nil -> :ok
-      cell -> rollback_cell(cell.id)
+      shell -> rollback_cell(shell.id)
     end
   rescue
     _ -> :ok

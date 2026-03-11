@@ -23,7 +23,7 @@ defmodule GiTF.DoctorTest do
       assert :model_configured in checks
       assert :database_ok in checks
       assert :settings_valid in checks
-      assert :orphan_cells in checks
+      assert :orphan_shells in checks
       assert :stale_ghosts in checks
     end
   end
@@ -56,36 +56,36 @@ defmodule GiTF.DoctorTest do
     end
   end
 
-  describe "check/1 - orphan_cells" do
-    test "reports ok when no orphan cells exist" do
-      result = Doctor.check(:orphan_cells)
-      assert result.name == :orphan_cells
+  describe "check/1 - orphan_shells" do
+    test "reports ok when no orphan shells exist" do
+      result = Doctor.check(:orphan_shells)
+      assert result.name == :orphan_shells
       assert result.status == :ok
       assert result.message =~ "No orphan"
     end
 
-    test "reports warn when orphan cells exist" do
-      # Create a comb, a stopped ghost, and an active cell for that ghost
-      {:ok, comb} =
-        Store.insert(:combs, %{name: "orphan-test-comb-#{:erlang.unique_integer([:positive])}"})
+    test "reports warn when orphan shells exist" do
+      # Create a sector, a stopped ghost, and an active shell for that ghost
+      {:ok, sector} =
+        Store.insert(:sectors, %{name: "orphan-test-sector-#{:erlang.unique_integer([:positive])}"})
 
       {:ok, ghost} =
         Store.insert(:ghosts, %{name: "orphan-ghost", status: "stopped"})
 
       {:ok, _cell} =
-        Store.insert(:cells, %{
+        Store.insert(:shells, %{
           ghost_id: ghost.id,
-          comb_id: comb.id,
+          sector_id: sector.id,
           worktree_path: "/tmp/fake-worktree",
           branch: "ghost/#{ghost.id}",
           status: "active"
         })
 
-      result = Doctor.check(:orphan_cells)
-      assert result.name == :orphan_cells
+      result = Doctor.check(:orphan_shells)
+      assert result.name == :orphan_shells
       assert result.status == :warn
       assert result.fixable == true
-      assert result.message =~ "orphan cell"
+      assert result.message =~ "orphan shell"
     end
   end
 
@@ -108,25 +108,25 @@ defmodule GiTF.DoctorTest do
     end
   end
 
-  describe "fix/1 - orphan_cells" do
-    test "cleans up orphan cells" do
-      {:ok, comb} =
-        Store.insert(:combs, %{name: "fix-orphan-comb-#{:erlang.unique_integer([:positive])}"})
+  describe "fix/1 - orphan_shells" do
+    test "cleans up orphan shells" do
+      {:ok, sector} =
+        Store.insert(:sectors, %{name: "fix-orphan-sector-#{:erlang.unique_integer([:positive])}"})
 
       {:ok, ghost} =
         Store.insert(:ghosts, %{name: "fix-orphan-ghost", status: "crashed"})
 
       {:ok, _cell} =
-        Store.insert(:cells, %{
+        Store.insert(:shells, %{
           ghost_id: ghost.id,
-          comb_id: comb.id,
+          sector_id: sector.id,
           worktree_path: "/tmp/fake-fix-worktree",
           branch: "ghost/#{ghost.id}",
           status: "active"
         })
 
-      result = Doctor.fix(:orphan_cells)
-      assert result.name == :orphan_cells
+      result = Doctor.fix(:orphan_shells)
+      assert result.name == :orphan_shells
       assert result.status == :ok
       assert result.message =~ "Fixed"
     end

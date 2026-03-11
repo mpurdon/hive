@@ -9,10 +9,10 @@ defmodule GiTF.Intelligence do
   alias GiTF.Store
 
   @doc """
-  Analyze a failed job and suggest retry strategy.
+  Analyze a failed op and suggest retry strategy.
   """
-  def analyze_and_suggest(job_id) do
-    with {:ok, analysis} <- FailureAnalysis.analyze_failure(job_id) do
+  def analyze_and_suggest(op_id) do
+    with {:ok, analysis} <- FailureAnalysis.analyze_failure(op_id) do
       strategy = Retry.recommend_strategy(analysis.failure_type)
       
       {:ok, %{
@@ -24,46 +24,46 @@ defmodule GiTF.Intelligence do
   end
 
   @doc """
-  Analyze a successful job to learn patterns.
+  Analyze a successful op to learn patterns.
   """
-  def analyze_success(job_id) do
-    SuccessPatterns.analyze_success(job_id)
+  def analyze_success(op_id) do
+    SuccessPatterns.analyze_success(op_id)
   end
 
   @doc """
-  Get best practices for a comb.
+  Get best practices for a sector.
   """
-  def get_best_practices(comb_id) do
-    SuccessPatterns.get_best_practices(comb_id)
+  def get_best_practices(sector_id) do
+    SuccessPatterns.get_best_practices(sector_id)
   end
 
   @doc """
-  Recommend approach for a new job.
+  Recommend approach for a new op.
   """
-  def recommend_approach(comb_id, job_description \\ "") do
-    SuccessPatterns.recommend_approach(comb_id, job_description)
+  def recommend_approach(sector_id, op_description \\ "") do
+    SuccessPatterns.recommend_approach(sector_id, op_description)
   end
 
   @doc """
-  Automatically retry a failed job with intelligent strategy.
+  Automatically retry a failed op with intelligent strategy.
   """
-  def auto_retry(job_id) do
-    Retry.retry_with_strategy(job_id)
+  def auto_retry(op_id) do
+    Retry.retry_with_strategy(op_id)
   end
 
   @doc """
-  Get intelligence insights for a comb.
+  Get intelligence insights for a sector.
   """
-  def get_insights(comb_id) do
-    patterns = FailureAnalysis.get_failure_patterns(comb_id)
+  def get_insights(sector_id) do
+    patterns = FailureAnalysis.get_failure_patterns(sector_id)
     
-    jobs = Store.filter(:jobs, &(&1.comb_id == comb_id))
-    total = length(jobs)
-    failed = Enum.count(jobs, &(&1.status == "failed"))
+    ops = Store.filter(:ops, &(&1.sector_id == sector_id))
+    total = length(ops)
+    failed = Enum.count(ops, &(&1.status == "failed"))
     success_rate = if total > 0, do: (total - failed) / total * 100, else: 0
     
     %{
-      comb_id: comb_id,
+      sector_id: sector_id,
       total_jobs: total,
       failed_jobs: failed,
       success_rate: Float.round(success_rate, 1),
@@ -73,10 +73,10 @@ defmodule GiTF.Intelligence do
   end
 
   @doc """
-  Learn from all failures in a comb.
+  Learn from all failures in a sector.
   """
-  def learn(comb_id) do
-    FailureAnalysis.learn_from_failures(comb_id)
+  def learn(sector_id) do
+    FailureAnalysis.learn_from_failures(sector_id)
   end
 
   defp get_top_failure_type(patterns) when length(patterns) > 0 do

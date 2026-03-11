@@ -4,11 +4,11 @@ defmodule GiTF.QuickStart do
 
   Detects the current environment and suggests optimal setup. The quick
   init path auto-discovers git repositories in the target directory and
-  registers them as combs, saving the user from manual `gitf sector add`
+  registers them as sectors, saving the user from manual `gitf sector add`
   invocations.
 
   This is a pure orchestration module -- no process state. It composes
-  `GiTF.Init`, `GiTF.Comb`, and `GiTF.Git` to deliver a streamlined
+  `GiTF.Init`, `GiTF.Sector`, and `GiTF.Git` to deliver a streamlined
   first-time experience.
   """
 
@@ -33,11 +33,11 @@ defmodule GiTF.QuickStart do
   end
 
   @doc """
-  Streamlined initialization that auto-discovers and registers combs.
+  Streamlined initialization that auto-discovers and registers sectors.
 
   1. Initializes the section at the given path (with force if already exists)
   2. Detects git repos in immediate subdirectories
-  3. Registers each as a comb
+  3. Registers each as a sector
   4. Returns a summary of what was set up
 
   Returns `{:ok, summary}` or `{:error, reason}`.
@@ -62,41 +62,41 @@ defmodule GiTF.QuickStart do
   end
 
   @doc """
-  Generates a CLAUDE.md for a comb that includes section-specific instructions.
+  Generates a CLAUDE.md for a sector that includes section-specific instructions.
 
   The generated markdown tells a ghost how to communicate with the queen
-  and other ghosts via waggle messages.
+  and other ghosts via link_msg messages.
   """
   @spec generate_comb_claude_md(String.t(), String.t()) :: String.t()
-  def generate_comb_claude_md(comb_name, comb_path) do
+  def generate_comb_claude_md(sector_name, sector_path) do
     """
-    # #{comb_name} - GiTF Worker Instructions
+    # #{sector_name} - GiTF Worker Instructions
 
-    You are a ghost working on the **#{comb_name}** codebase.
-    Your workspace is at: `#{comb_path}`
+    You are a ghost working on the **#{sector_name}** codebase.
+    Your workspace is at: `#{sector_path}`
 
     ## Communication
 
-    Use waggle messages to communicate with the queen and other ghosts:
+    Use link_msg messages to communicate with the queen and other ghosts:
 
     ```bash
-    # Report job completion
-    section waggle send --to queen --subject "job_complete" --body "Summary of what you did"
+    # Report op completion
+    section link_msg send --to queen --subject "job_complete" --body "Summary of what you did"
 
     # Report a blocker
-    section waggle send --to queen --subject "job_blocked" --body "What is blocking you"
+    section link_msg send --to queen --subject "job_blocked" --body "What is blocking you"
 
     # Send a message to another ghost
-    section waggle send --to <ghost-id> --subject "question" --body "Your question"
+    section link_msg send --to <ghost-id> --subject "question" --body "Your question"
 
     # Check for new messages
-    section waggle list --to <your-ghost-id>
+    section link_msg list --to <your-ghost-id>
     ```
 
     ## Rules
 
-    - Complete your assigned job and nothing else.
-    - Do NOT modify files outside your worktree at `#{comb_path}`.
+    - Complete your assigned op and nothing else.
+    - Do NOT modify files outside your worktree at `#{sector_path}`.
     - When done, always notify the queen.
     - If blocked, notify the queen immediately rather than guessing.
     - Keep your commits focused and well-described.
@@ -140,8 +140,8 @@ defmodule GiTF.QuickStart do
     Enum.reduce(repo_paths, [], fn repo_path, acc ->
       name = Path.basename(repo_path)
 
-      case GiTF.Comb.add(repo_path, name: name) do
-        {:ok, comb} -> [{:ok, comb.name} | acc]
+      case GiTF.Sector.add(repo_path, name: name) do
+        {:ok, sector} -> [{:ok, sector.name} | acc]
         {:error, _reason} -> [{:error, name} | acc]
       end
     end)

@@ -30,28 +30,28 @@ defmodule GiTF.Intelligence.RetryTest do
   end
 
   describe "retry_with_strategy/1" do
-    test "creates retry job with strategy" do
-      job = %{
-        id: "job-retry",
-        quest_id: "qst-123",
-        comb_id: "comb-test",
-        title: "Test job",
+    test "creates retry op with strategy" do
+      op = %{
+        id: "op-retry",
+        mission_id: "qst-123",
+        sector_id: "sector-test",
+        title: "Test op",
         description: "Test",
         status: "failed",
         error_message: "timeout",
         created_at: DateTime.utc_now(),
         updated_at: DateTime.utc_now()
       }
-      Store.insert(:jobs, job)
+      Store.insert(:ops, op)
       
-      {:ok, new_job} = Retry.retry_with_strategy(job.id)
+      {:ok, new_job} = Retry.retry_with_strategy(op.id)
       
-      assert new_job.retry_of == job.id
+      assert new_job.retry_of == op.id
       assert new_job.status == "pending"
       assert is_atom(new_job.retry_strategy)
       
-      # Original job should be marked as retried
-      original = Store.get(:jobs, job.id)
+      # Original op should be marked as retried
+      original = Store.get(:ops, op.id)
       assert original.retried_as == new_job.id
     end
   end

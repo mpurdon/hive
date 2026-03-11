@@ -6,7 +6,7 @@ defmodule GiTF.TUI.Context.Plan do
   that the user can navigate, accept, reject, or ask questions about.
   """
 
-  defstruct quest_id: nil,
+  defstruct mission_id: nil,
             goal: nil,
             sections: [],
             selected: 0,
@@ -22,7 +22,7 @@ defmodule GiTF.TUI.Context.Plan do
         }
 
   @type t :: %__MODULE__{
-          quest_id: String.t() | nil,
+          mission_id: String.t() | nil,
           goal: String.t() | nil,
           sections: [section()],
           selected: non_neg_integer(),
@@ -35,7 +35,7 @@ defmodule GiTF.TUI.Context.Plan do
 
   @doc "Load a plan from an LLM response into the context."
   def load_plan(state, %{} = plan) do
-    quest_id = plan[:quest_id] || plan["quest_id"]
+    mission_id = plan[:mission_id] || plan["mission_id"]
     goal = plan[:goal] || plan["goal"]
     tasks = plan[:tasks] || plan["tasks"] || []
     candidates = plan[:candidates] || plan["candidates"] || state.candidates
@@ -55,7 +55,7 @@ defmodule GiTF.TUI.Context.Plan do
       end)
 
     %{state |
-      quest_id: quest_id,
+      mission_id: mission_id,
       goal: goal,
       sections: sections,
       selected: 0,
@@ -107,7 +107,7 @@ defmodule GiTF.TUI.Context.Plan do
     Enum.any?(sections, &(&1.status == :rejected))
   end
 
-  @doc "Export confirmed sections as job specs for the API."
+  @doc "Export confirmed sections as op specs for the API."
   def to_confirmed_specs(%{sections: sections}) do
     sections
     |> Enum.filter(&(&1.status == :accepted))
@@ -137,6 +137,6 @@ defmodule GiTF.TUI.Context.Plan do
 
   @doc "Reset to hidden state."
   def dismiss(state) do
-    %{state | mode: :hidden, sections: [], selected: 0, quest_id: nil, goal: nil, candidates: [], candidate_index: 0}
+    %{state | mode: :hidden, sections: [], selected: 0, mission_id: nil, goal: nil, candidates: [], candidate_index: 0}
   end
 end

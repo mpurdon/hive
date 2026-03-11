@@ -4,16 +4,16 @@ defmodule GiTF.Quality.StaticAnalysis do
   """
 
   @doc """
-  Analyze code quality in a cell using language-specific tools.
+  Analyze code quality in a shell using language-specific tools.
   Returns {:ok, results} or {:error, reason}.
   """
-  def analyze(cell_path, language) do
+  def analyze(shell_path, language) do
     case language do
-      :elixir -> run_credo(cell_path)
-      :javascript -> run_eslint(cell_path)
-      :typescript -> run_eslint(cell_path)
-      :rust -> run_clippy(cell_path)
-      :python -> run_pylint(cell_path)
+      :elixir -> run_credo(shell_path)
+      :javascript -> run_eslint(shell_path)
+      :typescript -> run_eslint(shell_path)
+      :rust -> run_clippy(shell_path)
+      :python -> run_pylint(shell_path)
       _ -> {:ok, %{issues: [], score: 100, tool: "none", available: true}}
     end
   end

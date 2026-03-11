@@ -7,28 +7,28 @@ defmodule GiTF.Minimalism do
   alias GiTF.Store
 
   @doc "Analyze implementation for minimalism"
-  def analyze_implementation(job_id) do
-    job = Store.get(:jobs, job_id)
+  def analyze_implementation(op_id) do
+    op = Store.get(:ops, op_id)
     
     %{
-      complexity_score: calculate_complexity(job),
-      violations: find_violations(job),
-      suggestions: suggest_simplifications(job),
-      overall_rating: rate_minimalism(job)
+      complexity_score: calculate_complexity(op),
+      violations: find_violations(op),
+      suggestions: suggest_simplifications(op),
+      overall_rating: rate_minimalism(op)
     }
   end
 
   @doc "Check if implementation is minimal"
-  def is_minimal?(job_id) do
-    job = Store.get(:jobs, job_id)
-    violations = find_violations(job)
+  def is_minimal?(op_id) do
+    op = Store.get(:ops, op_id)
+    violations = find_violations(op)
     
     Enum.empty?(violations)
   end
 
-  defp calculate_complexity(job) do
+  defp calculate_complexity(op) do
     # Simple heuristic based on files changed
-    files = job[:files_changed] || 1
+    files = op[:files_changed] || 1
     
     cond do
       files <= 2 -> 10  # Very simple
@@ -38,18 +38,18 @@ defmodule GiTF.Minimalism do
     end
   end
 
-  defp find_violations(job) do
+  defp find_violations(op) do
     violations = []
     
     # Too many files
-    violations = if (job[:files_changed] || 0) > 10 do
-      [{:too_many_files, "#{job[:files_changed]} files modified"} | violations]
+    violations = if (op[:files_changed] || 0) > 10 do
+      [{:too_many_files, "#{op[:files_changed]} files modified"} | violations]
     else
       violations
     end
     
     # Check for common over-engineering patterns in title/description
-    text = "#{job.title} #{job[:description] || ""}" |> String.downcase()
+    text = "#{op.title} #{op[:description] || ""}" |> String.downcase()
     
     violations = if String.contains?(text, ["factory", "builder", "strategy", "adapter", "facade"]) do
       [{:design_pattern_overuse, "Possible unnecessary design patterns"} | violations]
@@ -66,20 +66,20 @@ defmodule GiTF.Minimalism do
     violations
   end
 
-  defp suggest_simplifications(job) do
-    violations = find_violations(job)
+  defp suggest_simplifications(op) do
+    violations = find_violations(op)
     
     Enum.map(violations, fn
-      {:too_many_files, _} -> "Consider splitting into smaller, focused jobs"
+      {:too_many_files, _} -> "Consider splitting into smaller, focused ops"
       {:design_pattern_overuse, _} -> "Use simpler, direct implementations"
       {:over_abstraction, _} -> "Reduce abstraction layers, favor concrete code"
       _ -> "Simplify implementation"
     end)
   end
 
-  defp rate_minimalism(job) do
-    complexity = calculate_complexity(job)
-    violations = find_violations(job)
+  defp rate_minimalism(op) do
+    complexity = calculate_complexity(op)
+    violations = find_violations(op)
     
     cond do
       complexity <= 30 && Enum.empty?(violations) -> :excellent

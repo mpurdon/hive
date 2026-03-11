@@ -12,7 +12,7 @@ defmodule GiTF.TUI.Context.PlanCandidatesTest do
       ]
 
       plan_data = %{
-        quest_id: "qst-123",
+        mission_id: "qst-123",
         goal: "Test goal",
         tasks: [%{"title" => "Task 1"}],
         candidates: candidates
@@ -28,7 +28,7 @@ defmodule GiTF.TUI.Context.PlanCandidatesTest do
 
     test "preserves empty candidates when not provided" do
       plan_data = %{
-        quest_id: "qst-456",
+        mission_id: "qst-456",
         goal: "Another goal",
         tasks: [%{"title" => "Task 1"}]
       }
@@ -114,7 +114,7 @@ defmodule GiTF.TUI.Context.PlanCandidatesTest do
         candidates: candidates,
         candidate_index: 1,
         mode: :reviewing,
-        quest_id: "qst-123"
+        mission_id: "qst-123"
       }
 
       dismissed = Plan.dismiss(state)

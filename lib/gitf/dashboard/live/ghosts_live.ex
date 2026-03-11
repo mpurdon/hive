@@ -2,7 +2,7 @@ defmodule GiTF.Dashboard.GhostsLive do
   @moduledoc """
   Bee monitoring page.
 
-  Displays all ghosts with their status, name, assigned job, and cell
+  Displays all ghosts with their status, name, assigned op, and shell
   information. Subscribes to PubSub for live status updates. Working
   ghosts show a green pulse animation; crashed ghosts appear in red.
   """
@@ -48,7 +48,7 @@ defmodule GiTF.Dashboard.GhostsLive do
 
       <div class="panel">
         <%= if @ghosts == [] do %>
-          <div class="empty">No ghosts spawned yet. Bees are created when the Major assigns jobs.</div>
+          <div class="empty">No ghosts spawned yet. Bees are created when the Major assigns ops.</div>
         <% else %>
           <table>
             <thead>
@@ -71,7 +71,7 @@ defmodule GiTF.Dashboard.GhostsLive do
                   <td style="font-family:monospace; font-size:0.8rem">{ghost.id}</td>
                   <td>{Map.get(ghost, :name, "-")}</td>
                   <td><span class={"badge #{status_badge(Map.get(ghost, :status, "unknown"))}"}>{Map.get(ghost, :status, "unknown")}</span></td>
-                  <td style="font-family:monospace; font-size:0.8rem">{Map.get(ghost, :job_id, "-")}</td>
+                  <td style="font-family:monospace; font-size:0.8rem">{Map.get(ghost, :op_id, "-")}</td>
                   <td style="font-size:0.8rem">{Map.get(ghost, :assigned_model, "-")}</td>
                   <td>
                     <%= if Map.has_key?(ghost, :context_percentage) do %>

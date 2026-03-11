@@ -20,7 +20,7 @@ defmodule GiTF.CLI.GhostHandler do
 
     case ghosts do
       [] ->
-        Format.info("No ghosts. Bees are spawned when the Major assigns jobs.")
+        Format.info("No ghosts. Bees are spawned when the Major assigns ops.")
 
       ghosts ->
         headers = ["ID", "Name", "Status", "Job ID", "Context %"]
@@ -34,7 +34,7 @@ defmodule GiTF.CLI.GhostHandler do
                 _ -> "-"
               end
 
-            [b.id, b.name, b.status, b[:job_id] || "-", context_pct]
+            [b.id, b.name, b.status, b[:op_id] || "-", context_pct]
           end)
 
         Format.table(headers, rows)
@@ -45,16 +45,16 @@ defmodule GiTF.CLI.GhostHandler do
     if GiTF.Client.remote?() do
       Format.error("Bee spawning is a server-side operation. Run it on the server directly.")
     else
-      job_id = helpers.result_get.(result, :options, :job)
+      op_id = helpers.result_get.(result, :options, :op)
       name = helpers.result_get.(result, :options, :name)
 
-      case helpers.resolve_comb_id.(helpers.result_get.(result, :options, :comb)) do
-        {:ok, comb_id} ->
+      case helpers.resolve_comb_id.(helpers.result_get.(result, :options, :sector)) do
+        {:ok, sector_id} ->
           with {:ok, gitf_root} <- GiTF.gitf_dir(),
-               {:ok, comb} <- GiTF.Comb.get(comb_id) do
+               {:ok, sector} <- GiTF.Sector.get(sector_id) do
             opts = if name, do: [name: name], else: []
 
-            case GiTF.Ghosts.spawn_detached(job_id, comb.id, gitf_root, opts) do
+            case GiTF.Ghosts.spawn_detached(op_id, sector.id, gitf_root, opts) do
               {:ok, ghost} ->
                 Format.success("Bee \"#{ghost.name}\" spawned (#{ghost.id})")
 
@@ -66,14 +66,14 @@ defmodule GiTF.CLI.GhostHandler do
               Format.error("Not inside a gitf workspace. Run `gitf init` first.")
 
             {:error, :not_found} ->
-              Format.error("Comb not found: #{comb_id}")
+              Format.error("Comb not found: #{sector_id}")
 
             {:error, reason} ->
               Format.error("Failed: #{inspect(reason)}")
           end
 
         {:error, :no_comb} ->
-          Format.error("No comb specified. Use --comb or set one with `gitf sector use`.")
+          Format.error("No sector specified. Use --sector or set one with `gitf sector use`.")
       end
     end
   end

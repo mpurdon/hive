@@ -52,12 +52,12 @@ defmodule GiTF.SpecsTest do
       assert {:error, {:invalid_phase, "invalid"}} = Specs.write("qst-123", "invalid", "content")
     end
 
-    test "creates quest directory if it doesn't exist" do
-      quest_id = "qst-newdir-#{:erlang.unique_integer([:positive])}"
-      dir = Specs.quest_dir(quest_id)
+    test "creates mission directory if it doesn't exist" do
+      mission_id = "qst-newdir-#{:erlang.unique_integer([:positive])}"
+      dir = Specs.quest_dir(mission_id)
       refute File.dir?(dir)
 
-      assert {:ok, _path} = Specs.write(quest_id, "requirements", "content")
+      assert {:ok, _path} = Specs.write(mission_id, "requirements", "content")
       assert File.dir?(dir)
     end
 
@@ -80,7 +80,7 @@ defmodule GiTF.SpecsTest do
       assert {:error, :not_found} = Specs.read("qst-nonexistent", "requirements")
     end
 
-    test "returns not_found for missing phase of existing quest" do
+    test "returns not_found for missing phase of existing mission" do
       Specs.write("qst-partial", "requirements", "content")
       assert {:error, :not_found} = Specs.read("qst-partial", "design")
     end
@@ -98,7 +98,7 @@ defmodule GiTF.SpecsTest do
       assert Specs.list_phases("qst-phases") == ["requirements", "design"]
     end
 
-    test "returns empty list for nonexistent quest" do
+    test "returns empty list for nonexistent mission" do
       assert Specs.list_phases("qst-no-such") == []
     end
 
@@ -110,22 +110,22 @@ defmodule GiTF.SpecsTest do
       assert Specs.list_phases("qst-all") == ["requirements", "design", "tasks"]
     end
 
-    test "ignores non-phase files in quest directory" do
-      quest_id = "qst-extra-files"
-      Specs.write(quest_id, "requirements", "content")
+    test "ignores non-phase files in mission directory" do
+      mission_id = "qst-extra-files"
+      Specs.write(mission_id, "requirements", "content")
 
       # Write a non-phase file directly
-      dir = Specs.quest_dir(quest_id)
+      dir = Specs.quest_dir(mission_id)
       File.write!(Path.join(dir, "notes.md"), "random")
 
-      assert Specs.list_phases(quest_id) == ["requirements"]
+      assert Specs.list_phases(mission_id) == ["requirements"]
     end
   end
 
   describe "quest_dir/1" do
-    test "returns path under .gitf/quests/" do
+    test "returns path under .gitf/missions/" do
       dir = Specs.quest_dir("qst-abc")
-      assert dir =~ ".gitf/quests/qst-abc"
+      assert dir =~ ".gitf/missions/qst-abc"
     end
   end
 

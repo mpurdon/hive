@@ -30,12 +30,12 @@ defmodule GiTF.Web.GameChannel do
   """
   @impl true
   def handle_in("spawn_quest", %{"goal" => goal} = payload, socket) do
-    # Default to first comb if not provided (demo mode)
-    comb_id = Map.get(payload, "comb_id") || default_comb_id()
+    # Default to first sector if not provided (demo mode)
+    sector_id = Map.get(payload, "sector_id") || default_comb_id()
     
-    case GiTF.Quests.create(%{goal: goal, comb_id: comb_id, source: "game_ui"}) do
-      {:ok, quest} ->
-        {:reply, {:ok, %{quest_id: quest.id}}, socket}
+    case GiTF.Missions.create(%{goal: goal, sector_id: sector_id, source: "game_ui"}) do
+      {:ok, mission} ->
+        {:reply, {:ok, %{mission_id: mission.id}}, socket}
       {:error, reason} ->
         {:reply, {:error, %{reason: inspect(reason)}}, socket}
     end
@@ -77,9 +77,9 @@ defmodule GiTF.Web.GameChannel do
   def handle_info(:send_initial_state, socket) do
     # Snapshot of the world
     state = %{
-      quests: GiTF.Store.all(:quests),
+      missions: GiTF.Store.all(:missions),
       ghosts: GiTF.Store.all(:ghosts),
-      combs: GiTF.Store.all(:combs)
+      sectors: GiTF.Store.all(:sectors)
     }
     
     push(socket, "world_state", state)
@@ -87,7 +87,7 @@ defmodule GiTF.Web.GameChannel do
   end
   
   defp default_comb_id do
-    case GiTF.Comb.list() do
+    case GiTF.Sector.list() do
       [first | _] -> first.id
       _ -> nil
     end

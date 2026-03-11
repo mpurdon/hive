@@ -1,45 +1,45 @@
-defmodule GiTF.Jobs.Classifier do
+defmodule GiTF.Ops.Classifier do
   @moduledoc """
-  Classifies jobs by type and complexity to enable intelligent model selection.
+  Classifies ops by type and complexity to enable intelligent model selection.
   
   Uses heuristics and keyword matching to determine:
   - Job type (planning, implementation, research, etc.)
   - Complexity level (simple, moderate, complex)
   
-  This enables the system to assign the optimal model for each job.
+  This enables the system to assign the optimal model for each op.
   """
 
   alias GiTF.Runtime.ModelSelector
 
   @doc """
-  Classify a job and recommend a model.
+  Classify a op and recommend a model.
   
   Returns a map with:
-  - `:job_type` - The classified job type
+  - `:op_type` - The classified op type
   - `:complexity` - The complexity level
-  - `:recommended_model` - The optimal model for this job
+  - `:recommended_model` - The optimal model for this op
   - `:reason` - Explanation for the classification
   """
   @spec classify_and_recommend(String.t(), String.t() | nil) :: map()
   def classify_and_recommend(title, description \\ nil) do
     text = "#{title} #{description || ""}" |> String.downcase()
 
-    job_type = classify_type(text)
-    complexity = classify_complexity(text, job_type)
-    model = ModelSelector.select_model_for_job(job_type, complexity)
+    op_type = classify_type(text)
+    complexity = classify_complexity(text, op_type)
+    model = ModelSelector.select_model_for_job(op_type, complexity)
     risk_level = classify_risk(title, description)
 
     %{
-      job_type: job_type,
+      op_type: op_type,
       complexity: complexity,
       recommended_model: model,
       risk_level: risk_level,
-      reason: build_reason(job_type, complexity, text)
+      reason: build_reason(op_type, complexity, text)
     }
   end
 
   @doc """
-  Classify job type based on title and description.
+  Classify op type based on title and description.
   """
   def classify_type(text) do
     cond do
@@ -70,11 +70,11 @@ defmodule GiTF.Jobs.Classifier do
   end
 
   @doc """
-  Classify complexity based on text and job type.
+  Classify complexity based on text and op type.
   """
-  def classify_complexity(text, job_type) do
+  def classify_complexity(text, op_type) do
     # Planning is always complex
-    if job_type == :planning do
+    if op_type == :planning do
       :complex
     else
       cond do
@@ -156,8 +156,8 @@ defmodule GiTF.Jobs.Classifier do
     end)
   end
 
-  defp build_reason(job_type, complexity, text) do
-    type_reason = type_reason(job_type, text)
+  defp build_reason(op_type, complexity, text) do
+    type_reason = type_reason(op_type, text)
     complexity_reason = complexity_reason(complexity, text)
 
     "#{type_reason}. #{complexity_reason}"

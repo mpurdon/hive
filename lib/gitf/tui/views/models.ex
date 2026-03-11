@@ -22,7 +22,7 @@ defmodule GiTF.TUI.Views.Models do
           [
             label do
               text(content: id.model, color: :yellow, attributes: [:bold])
-              text(content: "  #{id.total_jobs} jobs  ", color: :white)
+              text(content: "  #{id.total_jobs} ops  ", color: :white)
               text(content: "#{Float.round(pass_rate, 0)}%", color: rate_color, attributes: [:bold])
             end,
             label do

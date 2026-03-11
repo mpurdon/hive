@@ -125,11 +125,11 @@ defmodule GiTF.Store do
   ## Example
 
       Store.transact(fn data ->
-        job = get_in(data, [:jobs, job_id])
-        dep = %{id: GiTF.ID.generate(:jdp), job_id: job_id, depends_on_id: other_id}
+        op = get_in(data, [:ops, op_id])
+        dep = %{id: GiTF.ID.generate(:jdp), op_id: op_id, depends_on_id: other_id}
         data
-        |> put_in([:jobs, job_id], %{job | status: "blocked"})
-        |> put_in([:job_dependencies, dep.id], dep)
+        |> put_in([:ops, op_id], %{op | status: "blocked"})
+        |> put_in([:op_dependencies, dep.id], dep)
       end)
   """
   @spec transact((map() -> map())) :: :ok
@@ -461,16 +461,16 @@ defmodule GiTF.Store do
     Map.put(record, :id, GiTF.ID.generate(prefix))
   end
 
-  defp collection_prefix(:combs), do: :cmb
+  defp collection_prefix(:sectors), do: :cmb
   defp collection_prefix(:ghosts), do: :ghost
-  defp collection_prefix(:jobs), do: :job
-  defp collection_prefix(:quests), do: :qst
-  defp collection_prefix(:waggles), do: :wag
+  defp collection_prefix(:ops), do: :op
+  defp collection_prefix(:missions), do: :qst
+  defp collection_prefix(:links), do: :wag
   defp collection_prefix(:costs), do: :cst
-  defp collection_prefix(:cells), do: :cel
-  defp collection_prefix(:job_dependencies), do: :jdp
-  defp collection_prefix(:quest_phase_transitions), do: :qpt
-  defp collection_prefix(:comb_research_cache), do: :crc
+  defp collection_prefix(:shells), do: :cel
+  defp collection_prefix(:op_dependencies), do: :jdp
+  defp collection_prefix(:mission_phase_transitions), do: :qpt
+  defp collection_prefix(:sector_research_cache), do: :crc
   defp collection_prefix(:research_file_index), do: :rfi
   defp collection_prefix(:verification_results), do: :vrf
   defp collection_prefix(:context_snapshots), do: :ctx

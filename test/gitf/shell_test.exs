@@ -1,7 +1,7 @@
 defmodule GiTF.CellTest do
   use ExUnit.Case, async: false
 
-  alias GiTF.Cell
+  alias GiTF.Shell
   alias GiTF.Store
 
   @tmp_dir System.tmp_dir!()
@@ -13,17 +13,17 @@ defmodule GiTF.CellTest do
     {:ok, _} = GiTF.Store.start_link(data_dir: store_dir)
     on_exit(fn -> File.rm_rf!(store_dir) end)
 
-    # Create a temp git repo to serve as a comb
+    # Create a temp git repo to serve as a sector
     repo_path = create_temp_git_repo()
 
-    # Register the comb in the database
-    {:ok, comb} =
-      GiTF.Comb.add(repo_path, name: "cell-test-comb-#{:erlang.unique_integer([:positive])}")
+    # Register the sector in the database
+    {:ok, sector} =
+      GiTF.Sector.add(repo_path, name: "shell-test-sector-#{:erlang.unique_integer([:positive])}")
 
     # Create a ghost record
     {:ok, ghost} = Store.insert(:ghosts, %{name: "test-ghost", status: "starting"})
 
-    %{comb: comb, ghost: ghost, repo_path: repo_path}
+    %{sector: sector, ghost: ghost, repo_path: repo_path}
   end
 
   defp create_temp_git_repo do
@@ -54,33 +54,33 @@ defmodule GiTF.CellTest do
   end
 
   describe "create/3" do
-    test "creates a cell with worktree and database record", %{comb: comb, ghost: ghost} do
-      assert {:ok, cell} = Cell.create(comb.id, ghost.id)
+    test "creates a shell with worktree and database record", %{sector: sector, ghost: ghost} do
+      assert {:ok, shell} = Cell.create(sector.id, ghost.id)
 
-      assert cell.comb_id == comb.id
-      assert cell.ghost_id == ghost.id
-      assert cell.branch == "ghost/#{ghost.id}"
-      assert cell.status == "active"
-      assert String.starts_with?(cell.id, "cel-")
+      assert shell.sector_id == sector.id
+      assert shell.ghost_id == ghost.id
+      assert shell.branch == "ghost/#{ghost.id}"
+      assert shell.status == "active"
+      assert String.starts_with?(shell.id, "cel-")
 
-      expected_path = Path.join([comb.path, "ghosts", ghost.id])
-      assert cell.worktree_path == expected_path
+      expected_path = Path.join([sector.path, "ghosts", ghost.id])
+      assert shell.worktree_path == expected_path
       assert File.dir?(expected_path)
     end
 
-    test "accepts custom branch name", %{comb: comb, ghost: ghost} do
-      assert {:ok, cell} = Cell.create(comb.id, ghost.id, branch: "feature/custom")
-      assert cell.branch == "feature/custom"
+    test "accepts custom branch name", %{sector: sector, ghost: ghost} do
+      assert {:ok, shell} = Cell.create(sector.id, ghost.id, branch: "feature/custom")
+      assert shell.branch == "feature/custom"
     end
 
-    test "returns error for nonexistent comb", %{ghost: ghost} do
+    test "returns error for nonexistent sector", %{ghost: ghost} do
       assert {:error, :not_found} = Cell.create("cmb-000000", ghost.id)
     end
 
-    test "returns error for comb without a path", %{ghost: ghost} do
-      # Insert a comb with nil path
+    test "returns error for sector without a path", %{ghost: ghost} do
+      # Insert a sector with nil path
       {:ok, remote_comb} =
-        Store.insert(:combs, %{
+        Store.insert(:sectors, %{
           name: "remote-only-#{:erlang.unique_integer([:positive])}",
           repo_url: "https://example.com/repo",
           path: nil
@@ -91,8 +91,8 @@ defmodule GiTF.CellTest do
   end
 
   describe "get/1" do
-    test "retrieves a cell by ID", %{comb: comb, ghost: ghost} do
-      {:ok, created} = Cell.create(comb.id, ghost.id)
+    test "retrieves a shell by ID", %{sector: sector, ghost: ghost} do
+      {:ok, created} = Cell.create(sector.id, ghost.id)
       assert {:ok, found} = Cell.get(created.id)
       assert found.id == created.id
     end
@@ -103,67 +103,67 @@ defmodule GiTF.CellTest do
   end
 
   describe "list/1" do
-    test "lists all cells", %{comb: comb, ghost: ghost} do
-      {:ok, _} = Cell.create(comb.id, ghost.id)
+    test "lists all shells", %{sector: sector, ghost: ghost} do
+      {:ok, _} = Cell.create(sector.id, ghost.id)
 
-      cells = Cell.list()
-      assert length(cells) >= 1
+      shells = Cell.list()
+      assert length(shells) >= 1
     end
 
-    test "filters by comb_id", %{comb: comb, ghost: ghost} do
-      {:ok, _} = Cell.create(comb.id, ghost.id)
+    test "filters by sector_id", %{sector: sector, ghost: ghost} do
+      {:ok, _} = Cell.create(sector.id, ghost.id)
 
-      cells = Cell.list(comb_id: comb.id)
-      assert length(cells) >= 1
-      assert Enum.all?(cells, &(&1.comb_id == comb.id))
+      shells = Cell.list(sector_id: sector.id)
+      assert length(shells) >= 1
+      assert Enum.all?(shells, &(&1.sector_id == sector.id))
     end
 
-    test "filters by status", %{comb: comb, ghost: ghost} do
-      {:ok, _} = Cell.create(comb.id, ghost.id)
+    test "filters by status", %{sector: sector, ghost: ghost} do
+      {:ok, _} = Cell.create(sector.id, ghost.id)
 
       active = Cell.list(status: "active")
       assert length(active) >= 1
 
       removed = Cell.list(status: "removed")
-      # Could be 0 if no cells removed yet in this test
+      # Could be 0 if no shells removed yet in this test
       assert is_list(removed)
     end
   end
 
   describe "remove/2" do
-    test "removes worktree and marks record as removed", %{comb: comb, ghost: ghost} do
-      {:ok, cell} = Cell.create(comb.id, ghost.id)
-      assert File.dir?(cell.worktree_path)
+    test "removes worktree and marks record as removed", %{sector: sector, ghost: ghost} do
+      {:ok, shell} = Cell.create(sector.id, ghost.id)
+      assert File.dir?(shell.worktree_path)
 
-      assert {:ok, removed} = Cell.remove(cell.id)
+      assert {:ok, removed} = Cell.remove(shell.id)
       assert removed.status == "removed"
       assert removed.removed_at != nil
-      refute File.dir?(cell.worktree_path)
+      refute File.dir?(shell.worktree_path)
     end
 
-    test "returns error for nonexistent cell" do
+    test "returns error for nonexistent shell" do
       assert {:error, :not_found} = Cell.remove("cel-000000")
     end
   end
 
   describe "cleanup_orphans/0" do
-    test "marks cells as removed when ghost is stopped", %{comb: comb} do
+    test "marks shells as removed when ghost is stopped", %{sector: sector} do
       # Create a ghost that is stopped
       {:ok, stopped_bee} = Store.insert(:ghosts, %{name: "stopped-ghost", status: "stopped"})
 
-      {:ok, _cell} = Cell.create(comb.id, stopped_ghost.id)
+      {:ok, _cell} = Cell.create(sector.id, stopped_ghost.id)
 
       assert {:ok, count} = Cell.cleanup_orphans()
       assert count >= 1
     end
 
-    test "does not touch cells with active ghosts", %{comb: comb, ghost: ghost} do
+    test "does not touch shells with active ghosts", %{sector: sector, ghost: ghost} do
       # ghost defaults to "starting" status which is active
-      {:ok, cell} = Cell.create(comb.id, ghost.id)
+      {:ok, shell} = Cell.create(sector.id, ghost.id)
 
       {:ok, _count} = Cell.cleanup_orphans()
 
-      {:ok, still_active} = Cell.get(cell.id)
+      {:ok, still_active} = Cell.get(shell.id)
       assert still_active.status == "active"
     end
   end

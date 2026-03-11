@@ -4,7 +4,7 @@ defmodule GiTF.Shutdown do
 
   Traps exit signals and performs ordered teardown:
   1. Notify channels ("gitf shutting down")
-  2. Drain in-flight waggles
+  2. Drain in-flight links
   3. Save Store state
   4. Stop ghosts gracefully (SIGTERM to Claude ports, wait timeout)
   5. Stop Major
@@ -68,7 +68,7 @@ defmodule GiTF.Shutdown do
     # 1. Notify channels
     notify_channels()
 
-    # 2. Mark running jobs as stopped (preserves state for resume)
+    # 2. Mark running ops as stopped (preserves state for resume)
     mark_jobs_stopped()
 
     # 3. Save checkpoints for active ghosts
@@ -77,7 +77,7 @@ defmodule GiTF.Shutdown do
     # 4. Flush Store to ensure all state is persisted before stopping processes
     flush_store()
 
-    # 5. Drain waggles (wait for in-flight to complete)
+    # 5. Drain links (wait for in-flight to complete)
     drain_waggles(drain_timeout)
 
     # 6. Stop ghosts (parallel with per-ghost timeout)
@@ -94,9 +94,9 @@ defmodule GiTF.Shutdown do
   end
 
   defp mark_jobs_stopped do
-    GiTF.Store.filter(:jobs, fn j -> j.status in ["running", "assigned"] end)
-    |> Enum.each(fn job ->
-      GiTF.Store.put(:jobs, %{job | status: "pending"})
+    GiTF.Store.filter(:ops, fn j -> j.status in ["running", "assigned"] end)
+    |> Enum.each(fn op ->
+      GiTF.Store.put(:ops, %{op | status: "pending"})
     end)
   rescue
     _ -> :ok
@@ -116,17 +116,17 @@ defmodule GiTF.Shutdown do
   end
 
   defp drain_waggles(timeout) do
-    # Wait for the full drain timeout to allow in-flight waggles to complete
+    # Wait for the full drain timeout to allow in-flight links to complete
     Process.sleep(timeout)
   end
 
   defp stop_ghosts(timeout) do
-    case Process.whereis(GiTF.CombSupervisor) do
+    case Process.whereis(GiTF.SectorSupervisor) do
       nil ->
         :ok
 
       _pid ->
-        children = DynamicSupervisor.which_children(GiTF.CombSupervisor)
+        children = DynamicSupervisor.which_children(GiTF.SectorSupervisor)
 
         # Stop ghosts in parallel with per-ghost timeout to prevent one hung ghost
         # from blocking shutdown of all others

@@ -9,16 +9,16 @@ defmodule GiTF.Quality do
   alias GiTF.Quality.Performance
 
   @doc """
-  Run static analysis on a job's worktree.
+  Run static analysis on a op's worktree.
   Returns {:ok, report} with score and issues.
   """
-  def analyze_static(job_id, cell_path, language) do
+  def analyze_static(op_id, shell_path, language) do
     {:ok, %{issues: issues, score: score, tool: tool} = result} =
-      StaticAnalysis.analyze(cell_path, language)
+      StaticAnalysis.analyze(shell_path, language)
 
     report = %{
       id: generate_id("qr"),
-      job_id: job_id,
+      op_id: op_id,
       analysis_type: "static",
       score: score,
       issues: issues,
@@ -37,16 +37,16 @@ defmodule GiTF.Quality do
   end
 
   @doc """
-  Run security scan on a job's worktree.
+  Run security scan on a op's worktree.
   Returns {:ok, report} with security score and findings.
   """
-  def analyze_security(job_id, cell_path, language) do
+  def analyze_security(op_id, shell_path, language) do
     {:ok, %{findings: findings, score: score, tool: tool}} =
-      Security.scan(cell_path, language)
+      Security.scan(shell_path, language)
 
     report = %{
       id: generate_id("qr"),
-      job_id: job_id,
+      op_id: op_id,
       analysis_type: "security",
       score: score,
       issues: findings,
@@ -65,14 +65,14 @@ defmodule GiTF.Quality do
   end
 
   @doc """
-  Run performance benchmarks on a job's worktree.
+  Run performance benchmarks on a op's worktree.
   Returns {:ok, report} with performance score and metrics.
   """
-  def analyze_performance(job_id, cell_path, comb) do
-    case Performance.benchmark(cell_path, comb) do
+  def analyze_performance(op_id, shell_path, sector) do
+    case Performance.benchmark(shell_path, sector) do
       {:ok, %{metrics: metrics, score: score, tool: tool} = result} ->
         # Check for baseline and compare
-        baseline = get_performance_baseline(comb.id)
+        baseline = get_performance_baseline(sector.id)
         
         final_score = if baseline do
           case Performance.compare_baseline(result, baseline) do
@@ -85,7 +85,7 @@ defmodule GiTF.Quality do
         
         report = %{
           id: generate_id("qr"),
-          job_id: job_id,
+          op_id: op_id,
           analysis_type: "performance",
           score: final_score,
           issues: metrics,
@@ -105,12 +105,12 @@ defmodule GiTF.Quality do
   end
 
   @doc """
-  Set performance baseline for a comb.
+  Set performance baseline for a sector.
   """
-  def set_performance_baseline(comb_id, metrics) do
+  def set_performance_baseline(sector_id, metrics) do
     baseline = %{
       id: generate_id("pb"),
-      comb_id: comb_id,
+      sector_id: sector_id,
       metrics: metrics,
       score: 100,
       created_at: DateTime.utc_now()
@@ -120,38 +120,38 @@ defmodule GiTF.Quality do
   end
 
   @doc """
-  Get performance baseline for a comb.
+  Get performance baseline for a sector.
   """
-  def get_performance_baseline(comb_id) do
+  def get_performance_baseline(sector_id) do
     Store.all(:performance_baselines)
-    |> Enum.filter(&(&1.comb_id == comb_id))
+    |> Enum.filter(&(&1.sector_id == sector_id))
     |> Enum.sort_by(& &1.created_at, {:desc, DateTime})
     |> List.first()
   end
 
   @doc """
-  Get all quality reports for a job.
+  Get all quality reports for a op.
   """
-  def get_reports(job_id) do
+  def get_reports(op_id) do
     Store.all(:quality_reports)
-    |> Enum.filter(&(&1.job_id == job_id))
+    |> Enum.filter(&(&1.op_id == op_id))
     |> Enum.sort_by(& &1.inserted_at, {:desc, DateTime})
   end
 
   @doc """
-  Get the latest quality report for a job by type.
+  Get the latest quality report for a op by type.
   """
-  def get_latest_report(job_id, analysis_type) do
-    get_reports(job_id)
+  def get_latest_report(op_id, analysis_type) do
+    get_reports(op_id)
     |> Enum.find(&(&1.analysis_type == analysis_type))
   end
 
   @doc """
-  Calculate composite quality score for a job.
+  Calculate composite quality score for a op.
   Returns score 0-100 based on all available reports.
   """
-  def calculate_composite_score(job_id) do
-    reports = get_reports(job_id)
+  def calculate_composite_score(op_id) do
+    reports = get_reports(op_id)
 
     if Enum.empty?(reports) do
       nil
@@ -190,11 +190,11 @@ defmodule GiTF.Quality do
   end
 
   @doc """
-  Check if a job meets quality thresholds.
+  Check if a op meets quality thresholds.
   Returns {:ok, score} or {:error, reason}.
   """
-  def check_quality_gate(job_id, threshold \\ 70) do
-    case calculate_composite_score(job_id) do
+  def check_quality_gate(op_id, threshold \\ 70) do
+    case calculate_composite_score(op_id) do
       nil ->
         {:error, :no_reports}
 
@@ -207,50 +207,50 @@ defmodule GiTF.Quality do
   end
 
   @doc """
-  Get configurable quality thresholds for a comb.
+  Get configurable quality thresholds for a sector.
   Returns default thresholds if not configured.
   """
-  def get_thresholds(comb_id) do
-    case Store.get(:combs, comb_id) do
+  def get_thresholds(sector_id) do
+    case Store.get(:sectors, sector_id) do
       nil ->
         default_thresholds()
       
-      comb ->
-        Map.get(comb, :quality_thresholds, default_thresholds())
+      sector ->
+        Map.get(sector, :quality_thresholds, default_thresholds())
     end
   end
 
   @doc """
-  Set quality thresholds for a comb.
+  Set quality thresholds for a sector.
   """
-  def set_thresholds(comb_id, thresholds) do
-    case Store.get(:combs, comb_id) do
+  def set_thresholds(sector_id, thresholds) do
+    case Store.get(:sectors, sector_id) do
       nil ->
         {:error, :comb_not_found}
       
-      comb ->
-        updated = Map.put(comb, :quality_thresholds, thresholds)
-        Store.put(:combs, updated)
+      sector ->
+        updated = Map.put(sector, :quality_thresholds, thresholds)
+        Store.put(:sectors, updated)
         {:ok, updated}
     end
   end
 
   @doc """
-  Get quality trends for a comb.
+  Get quality trends for a sector.
   Returns list of scores over time.
   """
-  def get_quality_trends(comb_id, limit \\ 10) do
-    # Get all jobs for this comb
-    jobs = Store.filter(:jobs, &(&1.comb_id == comb_id and &1.status == "done"))
+  def get_quality_trends(sector_id, limit \\ 10) do
+    # Get all ops for this sector
+    ops = Store.filter(:ops, &(&1.sector_id == sector_id and &1.status == "done"))
     
     # Calculate scores and sort by completion time
-    jobs
-    |> Enum.map(fn job ->
-      score = calculate_composite_score(job.id)
+    ops
+    |> Enum.map(fn op ->
+      score = calculate_composite_score(op.id)
       %{
-        job_id: job.id,
+        op_id: op.id,
         score: score,
-        completed_at: Map.get(job, :completed_at) || job.updated_at
+        completed_at: Map.get(op, :completed_at) || op.updated_at
       }
     end)
     |> Enum.reject(&is_nil(&1.score))
@@ -259,10 +259,10 @@ defmodule GiTF.Quality do
   end
 
   @doc """
-  Get quality statistics for a comb.
+  Get quality statistics for a sector.
   """
-  def get_quality_stats(comb_id) do
-    trends = get_quality_trends(comb_id, 100)
+  def get_quality_stats(sector_id) do
+    trends = get_quality_trends(sector_id, 100)
     
     if Enum.empty?(trends) do
       %{

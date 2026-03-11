@@ -53,7 +53,7 @@ defmodule GiTF.Application do
       {GiTF.Ingestion.Watchdog, gitf_root: File.cwd!()},
       {GiTF.PubSubBridge, []}
     ] ++ endpoint_child() ++ [
-      {GiTF.CombSupervisor, []},
+      {GiTF.SectorSupervisor, []},
       {GiTF.Budget.Watchdog, []},
       {GiTF.Plugin.MCPSupervisor, []},
       {GiTF.Plugin.ChannelSupervisor, []},
@@ -104,7 +104,7 @@ defmodule GiTF.Application do
     else
       [
         {GiTF.Observability, []},
-        {GiTF.Drone, []},
+        {GiTF.Tachikoma, []},
         {GiTF.Merge.Queue, []}
       ]
     end
@@ -181,7 +181,7 @@ defmodule GiTF.Application do
     })
 
     # Configure Elixir Logger to forward metadata keys
-    Logger.configure(metadata: [:ghost_id, :job_id, :quest_id, :comb_id, :component])
+    Logger.configure(metadata: [:ghost_id, :op_id, :mission_id, :sector_id, :component])
 
     :logger.remove_handler(:default)
   end

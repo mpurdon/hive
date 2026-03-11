@@ -38,20 +38,20 @@ defmodule GiTF.OnboardingTest do
     assert info.suggestions.name == "test_project"
   end
 
-  test "quick_onboard creates comb without research", %{project_dir: project_dir} do
+  test "quick_onboard creates sector without research", %{project_dir: project_dir} do
     {:ok, result} = Onboarding.quick_onboard(project_dir, name: "test_comb")
     
-    assert result.comb.name == "test_comb"
-    assert result.comb.path == project_dir
+    assert result.sector.name == "test_comb"
+    assert result.sector.path == project_dir
     assert result.project_info.language == :elixir
-    assert result.comb.validation_command == "mix test"
+    assert result.sector.validation_command == "mix test"
   end
 
-  test "onboard creates comb with auto-detected settings", %{project_dir: project_dir} do
+  test "onboard creates sector with auto-detected settings", %{project_dir: project_dir} do
     {:ok, result} = Onboarding.onboard(project_dir, name: "auto_comb", skip_research: true)
     
-    assert result.comb.name == "auto_comb"
-    assert result.comb.validation_command == "mix test"
+    assert result.sector.name == "auto_comb"
+    assert result.sector.validation_command == "mix test"
     assert result.project_info.language == :elixir
     assert result.project_info.build_tool == :mix
     assert result.project_info.project_type == :library
@@ -64,7 +64,7 @@ defmodule GiTF.OnboardingTest do
       skip_research: true
     )
     
-    assert result.comb.validation_command == "mix test --only unit"
+    assert result.sector.validation_command == "mix test --only unit"
   end
 
   test "onboard fails for non-existent path" do
@@ -84,6 +84,6 @@ defmodule GiTF.OnboardingTest do
   test "suggests merge strategy based on project type", %{project_dir: project_dir} do
     # Library project should suggest pr_branch
     {:ok, result} = Onboarding.onboard(project_dir, skip_research: true)
-    assert result.comb.merge_strategy == :pr_branch
+    assert result.sector.merge_strategy == :pr_branch
   end
 end

@@ -41,13 +41,13 @@ defmodule GiTF.Migrations do
   end
 
   defp run_migration(1) do
-    # Migration 1: Add multi-model support fields to jobs
-    jobs = Store.all(:jobs)
+    # Migration 1: Add multi-model support fields to ops
+    ops = Store.all(:ops)
 
-    Enum.each(jobs, fn job ->
+    Enum.each(ops, fn op ->
       updated =
-        job
-        |> Map.put_new(:job_type, nil)
+        op
+        |> Map.put_new(:op_type, nil)
         |> Map.put_new(:complexity, "moderate")
         |> Map.put_new(:recommended_model, nil)
         |> Map.put_new(:assigned_model, nil)
@@ -55,7 +55,7 @@ defmodule GiTF.Migrations do
         |> Map.put_new(:verification_criteria, [])
         |> Map.put_new(:estimated_context_tokens, nil)
 
-      Store.put(:jobs, updated)
+      Store.put(:ops, updated)
     end)
 
     # Add ghosts model tracking
@@ -83,44 +83,44 @@ defmodule GiTF.Migrations do
   end
 
   defp run_migration(3) do
-    # Migration 3: Add quest phase tracking fields
-    quests = Store.all(:quests)
+    # Migration 3: Add mission phase tracking fields
+    missions = Store.all(:missions)
 
-    Enum.each(quests, fn quest ->
+    Enum.each(missions, fn mission ->
       updated =
-        quest
+        mission
         |> Map.put_new(:current_phase, "pending")
         |> Map.put_new(:research_summary, nil)
         |> Map.put_new(:implementation_plan, nil)
 
-      Store.put(:quests, updated)
+      Store.put(:missions, updated)
     end)
 
-    # Initialize quest_phase_transitions collection (empty)
+    # Initialize mission_phase_transitions collection (empty)
     # The collection will be created automatically on first insert
     :ok
   end
 
   defp run_migration(4) do
     # Migration 4: Add research caching collections
-    # Initialize comb_research_cache collection (empty)
+    # Initialize sector_research_cache collection (empty)
     # Initialize research_file_index collection (empty)
     # Collections will be created automatically on first insert
     :ok
   end
 
   defp run_migration(5) do
-    # Migration 5: Add verification fields to jobs
-    jobs = Store.all(:jobs)
+    # Migration 5: Add verification fields to ops
+    ops = Store.all(:ops)
 
-    Enum.each(jobs, fn job ->
+    Enum.each(ops, fn op ->
       updated =
-        job
+        op
         |> Map.put_new(:verification_status, "pending")
         |> Map.put_new(:verification_result, nil)
         |> Map.put_new(:verified_at, nil)
 
-      Store.put(:jobs, updated)
+      Store.put(:ops, updated)
     end)
 
     # Initialize verification_results collection (empty)

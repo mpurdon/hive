@@ -1,7 +1,7 @@
 defmodule GiTF.JobsDepTest do
   use ExUnit.Case, async: false
 
-  alias GiTF.Jobs
+  alias GiTF.Ops
   alias GiTF.Store
 
   setup do
@@ -11,21 +11,21 @@ defmodule GiTF.JobsDepTest do
     {:ok, _} = GiTF.Store.start_link(data_dir: tmp_dir)
     on_exit(fn -> File.rm_rf!(tmp_dir) end)
 
-    {:ok, comb} =
-      Store.insert(:combs, %{name: "dep-test-comb-#{:erlang.unique_integer([:positive])}"})
+    {:ok, sector} =
+      Store.insert(:sectors, %{name: "dep-test-sector-#{:erlang.unique_integer([:positive])}"})
 
-    {:ok, quest} =
-      Store.insert(:quests, %{
-        name: "dep-test-quest-#{:erlang.unique_integer([:positive])}",
+    {:ok, mission} =
+      Store.insert(:missions, %{
+        name: "dep-test-mission-#{:erlang.unique_integer([:positive])}",
         status: "pending"
       })
 
-    %{comb: comb, quest: quest}
+    %{sector: sector, mission: mission}
   end
 
-  defp create_job(quest, comb, title \\ nil) do
+  defp create_job(mission, sector, title \\ nil) do
     title = title || "Job #{:erlang.unique_integer([:positive])}"
-    Jobs.create(%{title: title, quest_id: quest.id, comb_id: comb.id})
+    Jobs.create(%{title: title, mission_id: mission.id, sector_id: sector.id})
   end
 
   defp create_bee do
@@ -39,22 +39,22 @@ defmodule GiTF.JobsDepTest do
   end
 
   describe "add_dependency/2" do
-    test "adds a dependency between two jobs", %{quest: q, comb: c} do
+    test "adds a dependency between two ops", %{mission: q, sector: c} do
       {:ok, job_a} = create_job(q, c, "Job A")
       {:ok, job_b} = create_job(q, c, "Job B")
 
       assert {:ok, dep} = Jobs.add_dependency(job_b.id, job_a.id)
-      assert dep.job_id == job_b.id
+      assert dep.op_id == job_b.id
       assert dep.depends_on_id == job_a.id
       assert String.starts_with?(dep.id, "jdp-")
     end
 
-    test "rejects self-dependency", %{quest: q, comb: c} do
-      {:ok, job} = create_job(q, c)
-      assert {:error, :self_dependency} = Jobs.add_dependency(job.id, job.id)
+    test "rejects self-dependency", %{mission: q, sector: c} do
+      {:ok, op} = create_job(q, c)
+      assert {:error, :self_dependency} = Jobs.add_dependency(op.id, op.id)
     end
 
-    test "rejects cycles", %{quest: q, comb: c} do
+    test "rejects cycles", %{mission: q, sector: c} do
       {:ok, a} = create_job(q, c, "A")
       {:ok, b} = create_job(q, c, "B")
       {:ok, cc} = create_job(q, c, "C")
@@ -65,7 +65,7 @@ defmodule GiTF.JobsDepTest do
       assert {:error, :cycle_detected} = Jobs.add_dependency(cc.id, a.id)
     end
 
-    test "rejects direct cycle (A->B, B->A)", %{quest: q, comb: c} do
+    test "rejects direct cycle (A->B, B->A)", %{mission: q, sector: c} do
       {:ok, a} = create_job(q, c, "A")
       {:ok, b} = create_job(q, c, "B")
 
@@ -75,7 +75,7 @@ defmodule GiTF.JobsDepTest do
   end
 
   describe "remove_dependency/2" do
-    test "removes an existing dependency", %{quest: q, comb: c} do
+    test "removes an existing dependency", %{mission: q, sector: c} do
       {:ok, a} = create_job(q, c)
       {:ok, b} = create_job(q, c)
       {:ok, _} = Jobs.add_dependency(a.id, b.id)
@@ -84,7 +84,7 @@ defmodule GiTF.JobsDepTest do
       assert Jobs.dependencies(a.id) == []
     end
 
-    test "returns error for non-existent dependency", %{quest: q, comb: c} do
+    test "returns error for non-existent dependency", %{mission: q, sector: c} do
       {:ok, a} = create_job(q, c)
       {:ok, b} = create_job(q, c)
 
@@ -93,7 +93,7 @@ defmodule GiTF.JobsDepTest do
   end
 
   describe "dependencies/1 and dependents/1" do
-    test "lists dependencies and dependents", %{quest: q, comb: c} do
+    test "lists dependencies and dependents", %{mission: q, sector: c} do
       {:ok, a} = create_job(q, c, "A")
       {:ok, b} = create_job(q, c, "B")
       {:ok, cc} = create_job(q, c, "C")
@@ -113,12 +113,12 @@ defmodule GiTF.JobsDepTest do
   end
 
   describe "ready?/1" do
-    test "returns true when no dependencies", %{quest: q, comb: c} do
-      {:ok, job} = create_job(q, c)
-      assert Jobs.ready?(job.id) == true
+    test "returns true when no dependencies", %{mission: q, sector: c} do
+      {:ok, op} = create_job(q, c)
+      assert Jobs.ready?(op.id) == true
     end
 
-    test "returns false when dependency is not done", %{quest: q, comb: c} do
+    test "returns false when dependency is not done", %{mission: q, sector: c} do
       {:ok, a} = create_job(q, c, "A")
       {:ok, b} = create_job(q, c, "B")
       {:ok, _} = Jobs.add_dependency(b.id, a.id)
@@ -126,13 +126,13 @@ defmodule GiTF.JobsDepTest do
       assert Jobs.ready?(b.id) == false
     end
 
-    test "returns true when all dependencies are done", %{quest: q, comb: c} do
+    test "returns true when all dependencies are done", %{mission: q, sector: c} do
       ghost = create_bee()
       {:ok, a} = create_job(q, c, "A")
       {:ok, b} = create_job(q, c, "B")
       {:ok, _} = Jobs.add_dependency(b.id, a.id)
 
-      # Complete job A
+      # Complete op A
       {:ok, _} = Jobs.assign(a.id, ghost.id)
       {:ok, _} = Jobs.start(a.id)
       {:ok, _} = Jobs.complete(a.id)
@@ -142,7 +142,7 @@ defmodule GiTF.JobsDepTest do
   end
 
   describe "unblock_dependents/1" do
-    test "unblocks blocked dependents when all deps done", %{quest: q, comb: c} do
+    test "unblocks blocked dependents when all deps done", %{mission: q, sector: c} do
       ghost = create_bee()
       {:ok, a} = create_job(q, c, "A")
       {:ok, b} = create_job(q, c, "B")
@@ -160,7 +160,7 @@ defmodule GiTF.JobsDepTest do
       assert b_updated.status == "pending"
     end
 
-    test "does not unblock when other deps remain", %{quest: q, comb: c} do
+    test "does not unblock when other deps remain", %{mission: q, sector: c} do
       ghost = create_bee()
       {:ok, a} = create_job(q, c, "A")
       {:ok, b} = create_job(q, c, "B")
@@ -183,7 +183,7 @@ defmodule GiTF.JobsDepTest do
   end
 
   describe "blocked spawn rejection" do
-    test "Ghosts.spawn returns :blocked when deps not ready", %{quest: q, comb: c} do
+    test "Ghosts.spawn returns :blocked when deps not ready", %{mission: q, sector: c} do
       {:ok, a} = create_job(q, c, "A")
       {:ok, b} = create_job(q, c, "B")
       {:ok, _} = Jobs.add_dependency(b.id, a.id)

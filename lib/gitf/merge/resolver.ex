@@ -5,9 +5,9 @@ defmodule GiTF.Merge.Resolver do
   ## Tiers
 
   0. Clean merge (`git merge --no-edit`)
-  1. Auto-resolve: accept incoming for files only this job touched, union for additive
+  1. Auto-resolve: accept incoming for files only this op touched, union for additive
   2. AI-resolve: use LLM to resolve each conflicted file
-  3. Re-imagine: abort merge, create a new conflict_resolution job
+  3. Re-imagine: abort merge, create a new conflict_resolution op
 
   Each tier escalates to the next on failure. Conflict history is consulted
   to skip tiers that historically fail for the involved files.
@@ -24,18 +24,18 @@ defmodule GiTF.Merge.Resolver do
   # -- Public API --------------------------------------------------------------
 
   @doc """
-  Attempts to merge a job's cell branch into the target branch.
+  Attempts to merge a op's shell branch into the target branch.
   Escalates through tiers on failure.
 
   Returns `{:ok, :merged, tier}` or `{:error, reason, last_tier}`.
   """
   @spec resolve(String.t(), String.t()) ::
           {:ok, :merged, non_neg_integer()} | {:error, term(), non_neg_integer()}
-  def resolve(job_id, cell_id) do
-    with {:ok, cell} <- fetch_cell(cell_id),
-         {:ok, comb} <- fetch_comb(cell.comb_id),
-         {:ok, target} <- determine_target_branch(job_id, comb) do
-      attempt_tiers(job_id, cell_id, cell, comb, target, 0)
+  def resolve(op_id, shell_id) do
+    with {:ok, shell} <- fetch_cell(shell_id),
+         {:ok, sector} <- fetch_comb(shell.sector_id),
+         {:ok, target} <- determine_target_branch(op_id, sector) do
+      attempt_tiers(op_id, shell_id, shell, sector, target, 0)
     else
       {:error, reason} -> {:error, reason, -1}
     end
@@ -43,32 +43,32 @@ defmodule GiTF.Merge.Resolver do
 
   # -- Private: tier escalation ------------------------------------------------
 
-  defp attempt_tiers(job_id, _cell_id, _cell, _comb, _target, tier) when tier > 3 do
-    Logger.error("All merge tiers exhausted for job #{job_id}")
+  defp attempt_tiers(op_id, _cell_id, _cell, _comb, _target, tier) when tier > 3 do
+    Logger.error("All merge tiers exhausted for op #{op_id}")
 
     GiTF.Telemetry.emit([:gitf, :merge, :exhausted], %{}, %{
-      job_id: job_id,
+      op_id: op_id,
       tiers_attempted: 4
     })
 
     {:error, :all_tiers_exhausted, 3}
   end
 
-  defp attempt_tiers(job_id, cell_id, cell, comb, target, tier) do
+  defp attempt_tiers(op_id, shell_id, shell, sector, target, tier) do
     # Check if we should skip this tier based on history
-    changed = get_changed_files(comb.path, cell.branch, target)
+    changed = get_changed_files(sector.path, shell.branch, target)
 
     if tier in [1, 2] and History.should_skip_tier?(tier, changed) do
-      Logger.info("Skipping tier #{tier} for job #{job_id} (history suggests it will fail)")
-      attempt_tiers(job_id, cell_id, cell, comb, target, tier + 1)
+      Logger.info("Skipping tier #{tier} for op #{op_id} (history suggests it will fail)")
+      attempt_tiers(op_id, shell_id, shell, sector, target, tier + 1)
     else
-      result = run_tier(tier, job_id, cell, comb, target)
+      result = run_tier(tier, op_id, shell, sector, target)
 
       case result do
         {:ok, :merged} ->
           History.record(%{
-            job_id: job_id,
-            cell_id: cell_id,
+            op_id: op_id,
+            shell_id: shell_id,
             tier: tier,
             status: :success,
             files: changed,
@@ -79,23 +79,23 @@ defmodule GiTF.Merge.Resolver do
 
         {:error, reason} ->
           History.record(%{
-            job_id: job_id,
-            cell_id: cell_id,
+            op_id: op_id,
+            shell_id: shell_id,
             tier: tier,
             status: :failure,
             files: changed,
             error: inspect(reason)
           })
 
-          Logger.info("Tier #{tier} failed for job #{job_id}: #{inspect(reason)}, escalating")
+          Logger.info("Tier #{tier} failed for op #{op_id}: #{inspect(reason)}, escalating")
 
           GiTF.Telemetry.emit([:gitf, :merge, :tier_failed], %{}, %{
-            job_id: job_id,
+            op_id: op_id,
             tier: tier,
             reason: inspect(reason)
           })
 
-          attempt_tiers(job_id, cell_id, cell, comb, target, tier + 1)
+          attempt_tiers(op_id, shell_id, shell, sector, target, tier + 1)
       end
     end
   end
@@ -103,16 +103,16 @@ defmodule GiTF.Merge.Resolver do
   # -- Private: individual tiers -----------------------------------------------
 
   # Tier 0: Clean merge
-  defp run_tier(0, job_id, cell, comb, target) do
-    Logger.info("Tier 0 (clean merge) for job #{job_id}")
-    repo = comb.path
+  defp run_tier(0, op_id, shell, sector, target) do
+    Logger.info("Tier 0 (clean merge) for op #{op_id}")
+    repo = sector.path
 
-    with_merge_lock(comb.id, fn ->
+    with_merge_lock(sector.id, fn ->
       original_head = get_head(repo)
 
       with :ok <- GiTF.Git.checkout(repo, target),
-           :ok <- GiTF.Git.merge(repo, cell.branch, no_ff: true) do
-        Logger.info("Clean merge succeeded for #{cell.branch} into #{target}")
+           :ok <- GiTF.Git.merge(repo, shell.branch, no_ff: true) do
+        Logger.info("Clean merge succeeded for #{shell.branch} into #{target}")
         {:ok, :merged}
       else
         {:error, reason} ->
@@ -123,20 +123,20 @@ defmodule GiTF.Merge.Resolver do
   end
 
   # Tier 1: Auto-resolve
-  defp run_tier(1, job_id, cell, comb, target) do
-    Logger.info("Tier 1 (auto-resolve) for job #{job_id}")
-    repo = comb.path
+  defp run_tier(1, op_id, shell, sector, target) do
+    Logger.info("Tier 1 (auto-resolve) for op #{op_id}")
+    repo = sector.path
 
-    with_merge_lock(comb.id, fn ->
+    with_merge_lock(sector.id, fn ->
       original_head = get_head(repo)
 
       with :ok <- GiTF.Git.checkout(repo, target) do
         # Attempt merge, expecting conflicts
-        case GiTF.Git.safe_cmd( ["merge", "--no-commit", "--no-ff", cell.branch],
+        case GiTF.Git.safe_cmd( ["merge", "--no-commit", "--no-ff", shell.branch],
                cd: repo, stderr_to_stdout: true) do
           {_output, 0} ->
             # No conflicts — just commit
-            commit_merge(repo, cell.branch, target)
+            commit_merge(repo, shell.branch, target)
             {:ok, :merged}
 
           {_output, _code} ->
@@ -149,11 +149,11 @@ defmodule GiTF.Merge.Resolver do
               rollback(repo, original_head)
               {:error, :no_conflicted_files}
             else
-              resolved = auto_resolve_files(repo, conflicted, cell, comb, target)
+              resolved = auto_resolve_files(repo, conflicted, shell, sector, target)
 
               if resolved == length(conflicted) do
                 # All resolved — commit
-                commit_merge(repo, cell.branch, target)
+                commit_merge(repo, shell.branch, target)
                 {:ok, :merged}
               else
                 abort_merge(repo)
@@ -171,18 +171,18 @@ defmodule GiTF.Merge.Resolver do
   end
 
   # Tier 2: AI-resolve
-  defp run_tier(2, job_id, cell, comb, target) do
-    Logger.info("Tier 2 (AI-resolve) for job #{job_id}")
-    repo = comb.path
+  defp run_tier(2, op_id, shell, sector, target) do
+    Logger.info("Tier 2 (AI-resolve) for op #{op_id}")
+    repo = sector.path
 
-    with_merge_lock(comb.id, fn ->
+    with_merge_lock(sector.id, fn ->
       original_head = get_head(repo)
 
       with :ok <- GiTF.Git.checkout(repo, target) do
-        case GiTF.Git.safe_cmd( ["merge", "--no-commit", "--no-ff", cell.branch],
+        case GiTF.Git.safe_cmd( ["merge", "--no-commit", "--no-ff", shell.branch],
                cd: repo, stderr_to_stdout: true) do
           {_output, 0} ->
-            commit_merge(repo, cell.branch, target)
+            commit_merge(repo, shell.branch, target)
             {:ok, :merged}
 
           {_output, _code} ->
@@ -193,13 +193,13 @@ defmodule GiTF.Merge.Resolver do
               rollback(repo, original_head)
               {:error, {:too_many_conflicts, length(conflicted)}}
             else
-              resolved = ai_resolve_files(repo, conflicted, job_id)
+              resolved = ai_resolve_files(repo, conflicted, op_id)
 
               if resolved == length(conflicted) do
                 # Validate the resolution compiles
-                case validate_resolution(comb) do
+                case validate_resolution(sector) do
                   :ok ->
-                    commit_merge(repo, cell.branch, target)
+                    commit_merge(repo, shell.branch, target)
                     {:ok, :merged}
 
                   {:error, reason} ->
@@ -224,31 +224,31 @@ defmodule GiTF.Merge.Resolver do
 
   @max_reimagine_iterations 3
 
-  # Tier 3: Re-imagine — create a new job to reimplement the changes
-  defp run_tier(3, job_id, cell, comb, target) do
-    Logger.info("Tier 3 (re-imagine) for job #{job_id}")
+  # Tier 3: Re-imagine — create a new op to reimplement the changes
+  defp run_tier(3, op_id, shell, sector, target) do
+    Logger.info("Tier 3 (re-imagine) for op #{op_id}")
 
     # Abort any pending merge state
-    abort_merge(comb.path)
+    abort_merge(sector.path)
 
-    with {:ok, job} <- GiTF.Jobs.get(job_id),
-         :ok <- check_reimagine_limit(job) do
-      # Get the diff that the original job produced
-      diff = get_branch_diff(comb.path, cell.branch, target)
+    with {:ok, op} <- GiTF.Ops.get(op_id),
+         :ok <- check_reimagine_limit(op) do
+      # Get the diff that the original op produced
+      diff = get_branch_diff(sector.path, shell.branch, target)
 
       description = """
       ## Conflict Resolution Job
 
-      The original job "#{job.title}" (#{job_id}) produced changes that conflict
+      The original op "#{op.title}" (#{op_id}) produced changes that conflict
       with the current state of #{target}.
 
       **Your task:** Reimplement the intent of the original changes on top of the
       current #{target} branch. Do NOT try to replay the exact diff — understand
-      what the original job was trying to accomplish and achieve the same result
+      what the original op was trying to accomplish and achieve the same result
       in a way that's compatible with the current codebase.
 
-      ### Original job description
-      #{job.description || "No description"}
+      ### Original op description
+      #{op.description || "No description"}
 
       ### Files that conflicted
       #{diff[:conflicted_files] |> Enum.join("\n")}
@@ -258,24 +258,24 @@ defmodule GiTF.Merge.Resolver do
       """
 
       attrs = %{
-        title: "[Conflict Resolution] #{job.title}",
+        title: "[Conflict Resolution] #{op.title}",
         description: description,
-        quest_id: job.quest_id,
-        comb_id: job.comb_id,
-        job_type: "implementation",
-        retry_of: job_id,
-        retry_count: Map.get(job, :retry_count, 0) + 1,
-        target_files: job[:target_files]
+        mission_id: op.mission_id,
+        sector_id: op.sector_id,
+        op_type: "implementation",
+        retry_of: op_id,
+        retry_count: Map.get(op, :retry_count, 0) + 1,
+        target_files: op[:target_files]
       }
 
-      case GiTF.Jobs.create(attrs) do
+      case GiTF.Ops.create(attrs) do
         {:ok, reimagine_job} ->
-          Logger.info("Created re-imagine job #{reimagine_job.id} for #{job_id}")
+          Logger.info("Created re-imagine op #{reimagine_job.id} for #{op_id}")
 
-          GiTF.Waggle.send("merge_resolver", "major", "reimagine_job_created",
-            "Created conflict resolution job #{reimagine_job.id} for #{job_id}")
+          GiTF.Link.send("merge_resolver", "major", "reimagine_job_created",
+            "Created conflict resolution op #{reimagine_job.id} for #{op_id}")
 
-          # The re-imagine job will go through the full ghost → drone → merge pipeline
+          # The re-imagine op will go through the full ghost → tachikoma → merge pipeline
           {:error, {:reimagined, reimagine_job.id}}
 
         {:error, reason} ->
@@ -286,7 +286,7 @@ defmodule GiTF.Merge.Resolver do
 
   # -- Private: auto-resolve helpers -------------------------------------------
 
-  defp auto_resolve_files(repo, conflicted, cell, _comb, target) do
+  defp auto_resolve_files(repo, conflicted, shell, _comb, target) do
     Enum.count(conflicted, fn file ->
       cond do
         additive_file?(file) ->
@@ -301,7 +301,7 @@ defmodule GiTF.Merge.Resolver do
               false
           end
 
-        file_only_touched_by_branch?(repo, file, cell.branch, target) ->
+        file_only_touched_by_branch?(repo, file, shell.branch, target) ->
           # Accept incoming (the ghost's version) for files only this branch touched
           case GiTF.Git.safe_cmd( ["checkout", "--theirs", "--", file],
                  cd: repo, stderr_to_stdout: true) do
@@ -344,22 +344,22 @@ defmodule GiTF.Merge.Resolver do
 
   # -- Private: AI-resolve helpers ---------------------------------------------
 
-  defp ai_resolve_files(repo, conflicted, job_id) do
+  defp ai_resolve_files(repo, conflicted, op_id) do
     Enum.count(conflicted, fn file ->
-      case ai_resolve_single_file(repo, file, job_id) do
+      case ai_resolve_single_file(repo, file, op_id) do
         :ok -> true
         :error -> false
       end
     end)
   end
 
-  defp ai_resolve_single_file(repo, file, job_id) do
+  defp ai_resolve_single_file(repo, file, op_id) do
     file_path = Path.join(repo, file)
 
     case File.read(file_path) do
       {:ok, content} ->
         if String.contains?(content, "<<<<<<<") do
-          prompt = build_ai_resolve_prompt(file, content, job_id)
+          prompt = build_ai_resolve_prompt(file, content, op_id)
 
           case GiTF.Runtime.Models.generate_text(prompt, model: "haiku", max_tokens: 8192) do
             {:ok, resolved} when is_binary(resolved) and resolved != "" ->
@@ -391,10 +391,10 @@ defmodule GiTF.Merge.Resolver do
       :error
   end
 
-  defp build_ai_resolve_prompt(file, content, job_id) do
+  defp build_ai_resolve_prompt(file, content, op_id) do
     job_context =
-      case GiTF.Jobs.get(job_id) do
-        {:ok, job} -> "Job: #{job.title}\n#{job.description || ""}"
+      case GiTF.Ops.get(op_id) do
+        {:ok, op} -> "Job: #{op.title}\n#{op.description || ""}"
         _ -> ""
       end
 
@@ -433,19 +433,19 @@ defmodule GiTF.Merge.Resolver do
 
   # -- Private: target branch determination ------------------------------------
 
-  defp determine_target_branch(job_id, comb) do
-    # Priority: quest.target_branch > comb config > detect main
-    with {:ok, job} <- GiTF.Jobs.get(job_id) do
+  defp determine_target_branch(op_id, sector) do
+    # Priority: mission.target_branch > sector config > detect main
+    with {:ok, op} <- GiTF.Ops.get(op_id) do
       quest_branch =
-        case job.quest_id && Store.get(:quests, job.quest_id) do
+        case op.mission_id && Store.get(:missions, op.mission_id) do
           nil -> nil
-          quest -> Map.get(quest, :target_branch)
+          mission -> Map.get(mission, :target_branch)
         end
 
-      comb_branch = Map.get(comb, :target_branch)
+      comb_branch = Map.get(sector, :target_branch)
 
       case quest_branch || comb_branch do
-        nil -> detect_main_branch(comb.path)
+        nil -> detect_main_branch(sector.path)
         branch -> {:ok, branch}
       end
     end
@@ -516,11 +516,11 @@ defmodule GiTF.Merge.Resolver do
     _ -> %{conflicted_files: [], summary: "Error generating diff"}
   end
 
-  defp check_reimagine_limit(job) do
-    reimagine_count = Map.get(job, :retry_count, 0)
+  defp check_reimagine_limit(op) do
+    reimagine_count = Map.get(op, :retry_count, 0)
 
     if reimagine_count >= @max_reimagine_iterations do
-      Logger.error("Job #{job.id} hit max reimagine iterations (#{reimagine_count})")
+      Logger.error("Job #{op.id} hit max reimagine iterations (#{reimagine_count})")
       {:error, :max_reimagine_iterations}
     else
       :ok
@@ -538,8 +538,8 @@ defmodule GiTF.Merge.Resolver do
   @validation_timeout_ms 120_000
   @validation_blocklist ~w(rm sudo chmod chown curl wget ssh scp rsync nc ncat mkfifo)
 
-  defp validate_resolution(comb) do
-    case Map.get(comb, :validation_command) do
+  defp validate_resolution(sector) do
+    case Map.get(sector, :validation_command) do
       nil ->
         :ok
 
@@ -547,7 +547,7 @@ defmodule GiTF.Merge.Resolver do
         if command_safe?(command) do
           task = Task.async(fn ->
             System.cmd("sh", ["-c", command],
-              cd: comb.path, stderr_to_stdout: true, env: [])
+              cd: sector.path, stderr_to_stdout: true, env: [])
           end)
 
           case Task.yield(task, @validation_timeout_ms) || Task.shutdown(task, 5_000) do
@@ -574,8 +574,8 @@ defmodule GiTF.Merge.Resolver do
     end)
   end
 
-  defp with_merge_lock(comb_id, fun) do
-    lock_key = {:merge_lock, comb_id}
+  defp with_merge_lock(sector_id, fun) do
+    lock_key = {:merge_lock, sector_id}
 
     case Registry.register(GiTF.Registry, lock_key, :lock) do
       {:ok, _} ->
@@ -603,17 +603,17 @@ defmodule GiTF.Merge.Resolver do
     end
   end
 
-  defp fetch_cell(cell_id) do
-    case Store.get(:cells, cell_id) do
+  defp fetch_cell(shell_id) do
+    case Store.get(:shells, shell_id) do
       nil -> {:error, :cell_not_found}
-      cell -> {:ok, cell}
+      shell -> {:ok, shell}
     end
   end
 
-  defp fetch_comb(comb_id) do
-    case Store.get(:combs, comb_id) do
+  defp fetch_comb(sector_id) do
+    case Store.get(:sectors, sector_id) do
       nil -> {:error, :comb_not_found}
-      comb -> {:ok, comb}
+      sector -> {:ok, sector}
     end
   end
 end

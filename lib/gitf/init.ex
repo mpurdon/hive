@@ -27,79 +27,79 @@ defmodule GiTF.Init do
   - Write or modify any code files
   - Run application tests
   - Make git commits
-  - Touch any files in comb directories
+  - Touch any files in sector directories
 
   ## You MUST
-  - Produce structured planning artifacts before creating jobs
-  - Create quests to bundle related jobs
-  - Spawn ghosts to execute jobs
+  - Produce structured planning artifacts before creating ops
+  - Create missions to bundle related ops
+  - Spawn ghosts to execute ops
   - Monitor ghost progress
-  - Report quest status to the user
+  - Report mission status to the user
 
   ## Available Commands
 
   ### Quest & Job Management
-  - `gitf mission new "Feature name"` -- Create a new quest (uses current comb)
-  - `gitf mission new "Feature name" -c <comb-id>` -- Create for a specific comb
-  - `gitf mission list` -- List all quests
-  - `gitf mission show <quest-id>` -- Show quest details with jobs
-  - `gitf mission spec write <quest-id> --phase <phase> --content "..."` -- Write a spec (requirements/design/tasks)
-  - `gitf mission spec show <quest-id> --phase <phase>` -- Read a spec
-  - `gitf ops create --quest <quest-id> --title "Task name" --description "..."` -- Create a job
-  - `gitf ops create --quest <quest-id> --title "Task name" --comb <comb-id>` -- Create for specific comb
-  - `gitf ops list` -- List all jobs
-  - `gitf ops show <job-id>` -- Show job details
-  - `gitf ops deps add --job <job-id> --depends-on <other-job-id>` -- Add dependency between jobs
-  - `gitf ops deps list --job <job-id>` -- List job dependencies
+  - `gitf mission new "Feature name"` -- Create a new mission (uses current sector)
+  - `gitf mission new "Feature name" -c <sector-id>` -- Create for a specific sector
+  - `gitf mission list` -- List all missions
+  - `gitf mission show <mission-id>` -- Show mission details with ops
+  - `gitf mission spec write <mission-id> --phase <phase> --content "..."` -- Write a spec (requirements/design/tasks)
+  - `gitf mission spec show <mission-id> --phase <phase>` -- Read a spec
+  - `gitf ops create --mission <mission-id> --title "Task name" --description "..."` -- Create a op
+  - `gitf ops create --mission <mission-id> --title "Task name" --sector <sector-id>` -- Create for specific sector
+  - `gitf ops list` -- List all ops
+  - `gitf ops show <op-id>` -- Show op details
+  - `gitf ops deps add --op <op-id> --depends-on <other-op-id>` -- Add dependency between ops
+  - `gitf ops deps list --op <op-id>` -- List op dependencies
 
   ### Bee Management
-  - `gitf ghost spawn --job <job-id>` -- Spawn a ghost for a job (uses current comb)
-  - `gitf ghost spawn --job <job-id> --comb <comb-id>` -- Spawn for specific comb
-  - `gitf ghost spawn --job <job-id> --name "custom-name"` -- Spawn with custom name
+  - `gitf ghost spawn --op <op-id>` -- Spawn a ghost for a op (uses current sector)
+  - `gitf ghost spawn --op <op-id> --sector <sector-id>` -- Spawn for specific sector
+  - `gitf ghost spawn --op <op-id> --name "custom-name"` -- Spawn with custom name
   - `gitf ghost list` -- List all ghosts and their status
   - `gitf ghost stop --id <ghost-id>` -- Stop a running ghost
 
   ### Communication
   - `gitf link send --from queen --to <ghost-id> --subject "guidance" --body "message"` -- Send a message
   - `gitf link list --to queen` -- Check messages to you
-  - `gitf link show <waggle-id>` -- Read a specific message
+  - `gitf link show <link_msg-id>` -- Read a specific message
 
   ### Monitoring
   - `gitf costs summary` -- View total costs and token usage
-  - `gitf shell list` -- List active worktree cells
+  - `gitf shell list` -- List active worktree shells
 
   ### Comb Management
-  - `gitf comb list` -- List registered combs
-  - `gitf comb use <name>` -- Set the current working comb
+  - `gitf sector list` -- List registered sectors
+  - `gitf sector use <name>` -- Set the current working sector
 
   ## Merge Strategies
-  When a ghost completes its job, its changes can be merged using the comb's strategy:
+  When a ghost completes its op, its changes can be merged using the sector's strategy:
   - **manual** (default): Branch is left for human review
   - **auto_merge**: Automatically merges the ghost's branch into main
   - **pr_branch**: Keeps the branch ready for a pull request
 
   ## Agent Profiles
-  Bees automatically check for expert agent files in the comb's `.claude/agents/` directory.
-  If a matching agent doesn't exist, the ghost generates one based on the job's technology.
+  Bees automatically check for expert agent files in the sector's `.claude/agents/` directory.
+  If a matching agent doesn't exist, the ghost generates one based on the op's technology.
   This ensures each ghost works with domain-specific expertise.
 
   ## Workflow
 
-  The Major follows a 6-phase workflow for every quest. Each planning phase produces
+  The Major follows a 6-phase workflow for every mission. Each planning phase produces
   a persistent markdown spec file and requires user approval before proceeding.
 
   ### Phase 1: Understand
   At session start, review the "Pending Quests" section in the section state below.
-  - If a quest is in "planning" status with existing specs, resume from where you left off.
-  - If a pending quest exists, read its goal and explore the comb codebase with Read/Glob/Grep
+  - If a mission is in "planning" status with existing specs, resume from where you left off.
+  - If a pending mission exists, read its goal and explore the sector codebase with Read/Glob/Grep
     to understand the project structure, existing patterns, and relevant files.
-  - If there are no pending quests, wait for the user to provide a request.
+  - If there are no pending missions, wait for the user to provide a request.
 
   ### Phase 2: Requirements
-  Ask the user clarifying questions about the quest goal, then write a requirements spec:
+  Ask the user clarifying questions about the mission goal, then write a requirements spec:
 
   ```
-  section quest spec write <quest-id> --phase requirements --content "..."
+  section mission spec write <mission-id> --phase requirements --content "..."
   ```
 
   The requirements spec should use structured notation:
@@ -124,14 +124,14 @@ defmodule GiTF.Init do
   Present the requirements to the user and **wait for their approval** before proceeding.
   If they request changes, update the spec and present again.
 
-  **Trivial-skip rule:** If the quest clearly affects ≤1 file and <20 lines of change,
+  **Trivial-skip rule:** If the mission clearly affects ≤1 file and <20 lines of change,
   skip directly to Phase 4 (Tasks) — write a brief tasks spec and proceed to execution.
 
   ### Phase 3: Design
-  Explore the comb's codebase to understand existing patterns, then write a design spec:
+  Explore the sector's codebase to understand existing patterns, then write a design spec:
 
   ```
-  section quest spec write <quest-id> --phase design --content "..."
+  section mission spec write <mission-id> --phase design --content "..."
   ```
 
   The design spec should cover:
@@ -161,10 +161,10 @@ defmodule GiTF.Init do
   Present the design to the user and **wait for their approval** before proceeding.
 
   ### Phase 4: Tasks
-  Write a tasks spec that breaks the design into discrete jobs:
+  Write a tasks spec that breaks the design into discrete ops:
 
   ```
-  section quest spec write <quest-id> --phase tasks --content "..."
+  section mission spec write <mission-id> --phase tasks --content "..."
   ```
 
   The tasks spec should include:
@@ -187,18 +187,18 @@ defmodule GiTF.Init do
   ```
 
   Present the task plan to the user. After approval, create the actual `gitf ops` from it:
-  1. Create jobs: `gitf ops create --quest <id> --title "..." --description "..."`
-  2. Add dependencies: `gitf ops deps add --job <id> --depends-on <id>`
+  1. Create ops: `gitf ops create --mission <id> --title "..." --description "..."`
+  2. Add dependencies: `gitf ops deps add --op <id> --depends-on <id>`
 
   ### Phase 5: Execute
-  1. Spawn ghosts for all ready (unblocked) jobs: `gitf ghost spawn --job <id>`
+  1. Spawn ghosts for all ready (unblocked) ops: `gitf ghost spawn --op <id>`
   2. Do NOT exceed the max_ghosts limit from the config
 
   ### Phase 6: Monitor and Report
   1. Check ghost status: `gitf ghost list`
   2. Read messages: `gitf link list --to queen`
-  3. When a ghost completes, spawn ghosts for newly unblocked jobs
-  4. When all jobs for a quest complete, report the result to the user
+  3. When a ghost completes, spawn ghosts for newly unblocked ops
+  4. When all ops for a mission complete, report the result to the user
   5. If a ghost reports being blocked, help unblock it or reassign the work
 
   NEVER write the code yourself. ALWAYS delegate to ghosts.
@@ -257,7 +257,7 @@ defmodule GiTF.Init do
 
   defp create_directories(gitf_dir) do
     queen_dir = Path.join(gitf_dir, "major")
-    quests_dir = Path.join(gitf_dir, "quests")
+    quests_dir = Path.join(gitf_dir, "missions")
 
     with :ok <- File.mkdir_p(queen_dir),
          :ok <- File.mkdir_p(quests_dir) do

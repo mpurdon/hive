@@ -42,15 +42,15 @@ defmodule GiTF.Web.GameChannelTest do
     # Ensure endpoint is still alive (it should be, since setup_all owns it)
     ensure_web_endpoint!()
 
-    # Create dummy comb data
-    comb_name = "game-test-comb-#{System.os_time(:nanosecond)}"
-    comb =
-      case GiTF.Comb.add("/tmp", name: comb_name) do
+    # Create dummy sector data
+    sector_name = "game-test-sector-#{System.os_time(:nanosecond)}"
+    sector =
+      case GiTF.Sector.add("/tmp", name: sector_name) do
         {:ok, c} -> c
         {:error, :name_already_taken} ->
-          case GiTF.Comb.list() do
+          case GiTF.Sector.list() do
             [first | _] -> first
-            [] -> raise "No combs available and could not create one"
+            [] -> raise "No sectors available and could not create one"
           end
       end
 
@@ -58,11 +58,11 @@ defmodule GiTF.Web.GameChannelTest do
     {:ok, socket} = connect(GiTF.Web.UserSocket, %{})
     {:ok, _, socket} = subscribe_and_join(socket, "game:control", %{})
 
-    %{socket: socket, comb: comb}
+    %{socket: socket, sector: sector}
   end
 
   test "receives initial world state on join", %{socket: _socket} do
-    assert_push "world_state", %{quests: _, ghosts: _, combs: _}
+    assert_push "world_state", %{missions: _, ghosts: _, sectors: _}
   end
 
   test "receives section events", %{socket: _socket} do
@@ -73,9 +73,9 @@ defmodule GiTF.Web.GameChannelTest do
     assert_push "gitf_event", %{type: "section.ghost.spawned", data: %{ghost_id: "test-ghost"}}
   end
 
-  test "can spawn quest via command", %{socket: socket} do
+  test "can spawn mission via command", %{socket: socket} do
     ref = push(socket, "spawn_quest", %{"goal" => "Build a game"})
-    assert_reply ref, :ok, %{quest_id: _}
+    assert_reply ref, :ok, %{mission_id: _}
   end
 
   # -- Helpers ----------------------------------------------------------------

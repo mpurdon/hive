@@ -1,21 +1,21 @@
 defmodule GiTF.Intelligence.Retry do
   @moduledoc """
-  Intelligent retry strategies for failed jobs.
+  Intelligent retry strategies for failed ops.
   """
 
   alias GiTF.Intelligence.FailureAnalysis
   alias GiTF.Store
 
   @doc """
-  Retry a failed job with an intelligent strategy.
+  Retry a failed op with an intelligent strategy.
   Returns {:ok, new_job} or {:error, reason}.
   """
-  def retry_with_strategy(job_id, feedback \\ nil) do
-    with {:ok, job} <- GiTF.Jobs.get(job_id),
-         {:ok, analysis} <- FailureAnalysis.analyze_failure(job_id, feedback) do
+  def retry_with_strategy(op_id, feedback \\ nil) do
+    with {:ok, op} <- GiTF.Ops.get(op_id),
+         {:ok, analysis} <- FailureAnalysis.analyze_failure(op_id, feedback) do
 
       strategy = select_strategy(analysis)
-      execute_retry(job, strategy, analysis)
+      execute_retry(op, strategy, analysis)
     end
   end
 
@@ -48,99 +48,99 @@ defmodule GiTF.Intelligence.Retry do
     end
   end
 
-  defp execute_retry(job, strategy, analysis) do
+  defp execute_retry(op, strategy, analysis) do
     case strategy do
       :different_model ->
-        retry_with_different_model(job, analysis)
+        retry_with_different_model(op, analysis)
 
       :simplify_scope ->
-        retry_with_simplified_scope(job, analysis)
+        retry_with_simplified_scope(op, analysis)
 
       :more_context ->
-        retry_with_more_context(job, analysis)
+        retry_with_more_context(op, analysis)
 
       :create_handoff ->
-        create_handoff_and_retry(job, analysis)
+        create_handoff_and_retry(op, analysis)
 
       :different_approach ->
-        retry_with_alternative_approach(job, analysis)
+        retry_with_alternative_approach(op, analysis)
 
       :fresh_worktree ->
-        retry_with_fresh_worktree(job, analysis)
+        retry_with_fresh_worktree(op, analysis)
 
       _ ->
         # Default: just retry with same settings
-        retry_job(job, strategy, analysis)
+        retry_job(op, strategy, analysis)
     end
   end
 
-  defp retry_with_different_model(job, analysis) do
+  defp retry_with_different_model(op, analysis) do
     # Switch to a more capable model
-    new_model = case Map.get(job, :model) do
+    new_model = case Map.get(op, :model) do
       "claude-haiku" -> "claude-sonnet"
       "claude-sonnet" -> "claude-opus"
       _ -> "claude-opus"
     end
 
-    retry_job(job, :different_model, %{model: new_model, feedback: analysis[:feedback]})
+    retry_job(op, :different_model, %{model: new_model, feedback: analysis[:feedback]})
   end
 
-  defp retry_with_simplified_scope(job, analysis) do
-    retry_job(job, :simplify_scope, %{
+  defp retry_with_simplified_scope(op, analysis) do
+    retry_job(op, :simplify_scope, %{
       note: "Previous attempt timed out. Please simplify the implementation.",
       feedback: analysis[:feedback]
     })
   end
 
-  defp retry_with_more_context(job, analysis) do
-    retry_job(job, :more_context, %{
+  defp retry_with_more_context(op, analysis) do
+    retry_job(op, :more_context, %{
       note: "Previous attempt had test failures. Please review test requirements carefully.",
       feedback: analysis[:feedback]
     })
   end
 
-  defp create_handoff_and_retry(job, analysis) do
-    retry_job(job, :create_handoff, %{
+  defp create_handoff_and_retry(op, analysis) do
+    retry_job(op, :create_handoff, %{
       note: "Context overflow detected. Consider breaking into smaller tasks.",
       feedback: analysis[:feedback]
     })
   end
 
-  defp retry_with_alternative_approach(job, analysis) do
-    retry_job(job, :different_approach, %{
+  defp retry_with_alternative_approach(op, analysis) do
+    retry_job(op, :different_approach, %{
       note: "This is a recurring failure. Please try a different implementation approach.",
       feedback: analysis[:feedback]
     })
   end
 
-  defp retry_with_fresh_worktree(job, analysis) do
-    retry_job(job, :fresh_worktree, %{
+  defp retry_with_fresh_worktree(op, analysis) do
+    retry_job(op, :fresh_worktree, %{
       note: "Merge conflict detected. Starting with fresh worktree.",
       feedback: analysis[:feedback]
     })
   end
 
-  defp retry_job(job, strategy, metadata) do
-    # Create a new job based on the failed one
+  defp retry_job(op, strategy, metadata) do
+    # Create a new op based on the failed one
     new_job = %{
-      id: generate_id("job"),
-      quest_id: job.quest_id,
-      comb_id: job.comb_id,
-      title: job.title,
-      description: job.description,
+      id: generate_id("op"),
+      mission_id: op.mission_id,
+      sector_id: op.sector_id,
+      title: op.title,
+      description: op.description,
       status: "pending",
-      retry_of: job.id,
+      retry_of: op.id,
       retry_strategy: strategy,
       retry_metadata: metadata,
       created_at: DateTime.utc_now(),
       updated_at: DateTime.utc_now()
     }
     
-    Store.insert(:jobs, new_job)
+    Store.insert(:ops, new_job)
     
-    # Update original job to mark it as retried
-    updated_original = Map.put(job, :retried_as, new_job.id)
-    Store.put(:jobs, updated_original)
+    # Update original op to mark it as retried
+    updated_original = Map.put(op, :retried_as, new_job.id)
+    Store.put(:ops, updated_original)
     
     {:ok, new_job}
   end

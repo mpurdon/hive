@@ -19,61 +19,61 @@ defmodule GiTF.PostReviewTest do
   end
 
   defp create_quest(opts \\ %{}) do
-    goal = Map.get(opts, :goal, "Test quest")
-    comb_id = Map.get(opts, :comb_id, "cmb_test")
+    goal = Map.get(opts, :goal, "Test mission")
+    sector_id = Map.get(opts, :sector_id, "cmb_test")
 
-    comb_attrs = Map.get(opts, :comb, %{})
-    comb = Map.merge(%{id: comb_id, path: System.tmp_dir!(), name: "test"}, comb_attrs)
-    Store.insert(:combs, comb)
+    comb_attrs = Map.get(opts, :sector, %{})
+    sector = Map.merge(%{id: sector_id, path: System.tmp_dir!(), name: "test"}, comb_attrs)
+    Store.insert(:sectors, sector)
 
-    {:ok, quest} = GiTF.Quests.create(%{goal: goal, comb_id: comb_id})
-    quest
+    {:ok, mission} = GiTF.Missions.create(%{goal: goal, sector_id: sector_id})
+    mission
   end
 
   describe "start_review/1" do
     test "creates an active review record" do
-      quest = create_quest()
-      {:ok, review} = PostReview.start_review(quest.id)
+      mission = create_quest()
+      {:ok, review} = PostReview.start_review(mission.id)
 
-      assert review.quest_id == quest.id
+      assert review.mission_id == mission.id
       assert review.status == "active"
       assert review.expires_at != nil
     end
 
     test "review appears in active_reviews" do
-      quest = create_quest()
-      {:ok, _} = PostReview.start_review(quest.id)
+      mission = create_quest()
+      {:ok, _} = PostReview.start_review(mission.id)
 
       reviews = PostReview.active_reviews()
       assert length(reviews) == 1
-      assert hd(reviews).quest_id == quest.id
+      assert hd(reviews).mission_id == mission.id
     end
   end
 
   describe "enabled?/1" do
-    test "returns false when comb not found" do
+    test "returns false when sector not found" do
       refute PostReview.enabled?("nonexistent")
     end
 
     test "returns false when post_review not set" do
-      Store.insert(:combs, %{id: "cmb_no_review", path: "/tmp", name: "no-review"})
+      Store.insert(:sectors, %{id: "cmb_no_review", path: "/tmp", name: "no-review"})
       refute PostReview.enabled?("cmb_no_review")
     end
 
     test "returns true when post_review is true" do
-      Store.insert(:combs, %{id: "cmb_with_review", path: "/tmp", name: "with-review", post_review: true})
+      Store.insert(:sectors, %{id: "cmb_with_review", path: "/tmp", name: "with-review", post_review: true})
       assert PostReview.enabled?("cmb_with_review")
     end
   end
 
   describe "close_review/1" do
     test "marks review as completed" do
-      quest = create_quest()
-      {:ok, _} = PostReview.start_review(quest.id)
+      mission = create_quest()
+      {:ok, _} = PostReview.start_review(mission.id)
 
       assert length(PostReview.active_reviews()) == 1
 
-      :ok = PostReview.close_review(quest.id)
+      :ok = PostReview.close_review(mission.id)
 
       assert length(PostReview.active_reviews()) == 0
     end
@@ -93,37 +93,37 @@ defmodule GiTF.PostReviewTest do
 
   describe "check_regressions/1" do
     test "returns :clean when no validation command" do
-      quest = create_quest()
-      {:ok, _} = PostReview.start_review(quest.id)
+      mission = create_quest()
+      {:ok, _} = PostReview.start_review(mission.id)
 
-      assert {:ok, :clean} = PostReview.check_regressions(quest.id)
+      assert {:ok, :clean} = PostReview.check_regressions(mission.id)
     end
 
     test "returns :clean when validation passes" do
-      quest = create_quest(%{comb: %{validation_command: "true"}})
-      {:ok, _} = PostReview.start_review(quest.id)
+      mission = create_quest(%{sector: %{validation_command: "true"}})
+      {:ok, _} = PostReview.start_review(mission.id)
 
-      assert {:ok, :clean} = PostReview.check_regressions(quest.id)
+      assert {:ok, :clean} = PostReview.check_regressions(mission.id)
     end
 
     test "returns :regression when validation fails" do
-      quest = create_quest(%{comb: %{validation_command: "echo 'test failed' && exit 1"}})
-      {:ok, _} = PostReview.start_review(quest.id)
+      mission = create_quest(%{sector: %{validation_command: "echo 'test failed' && exit 1"}})
+      {:ok, _} = PostReview.start_review(mission.id)
 
-      assert {:ok, :regression, findings} = PostReview.check_regressions(quest.id)
+      assert {:ok, :regression, findings} = PostReview.check_regressions(mission.id)
       assert String.contains?(findings, "test failed")
     end
   end
 
   describe "handle_regression/2" do
-    test "creates follow-up quest and updates review" do
-      quest = create_quest()
-      {:ok, _} = PostReview.start_review(quest.id)
+    test "creates follow-up mission and updates review" do
+      mission = create_quest()
+      {:ok, _} = PostReview.start_review(mission.id)
 
-      {:ok, followup} = PostReview.handle_regression(quest.id, "Tests failed")
+      {:ok, followup} = PostReview.handle_regression(mission.id, "Tests failed")
 
       assert String.contains?(followup.goal, "Fix regression")
-      assert followup.comb_id == quest.comb_id
+      assert followup.sector_id == mission.sector_id
 
       # Review should be updated
       assert length(PostReview.active_reviews()) == 0
@@ -131,24 +131,24 @@ defmodule GiTF.PostReviewTest do
   end
 
   describe "Reputation.apply_regression_penalty/1" do
-    test "marks jobs with regression_detected" do
-      quest = create_quest()
+    test "marks ops with regression_detected" do
+      mission = create_quest()
 
-      {:ok, job} = GiTF.Jobs.create(%{
-        title: "Test job",
-        quest_id: quest.id,
-        comb_id: quest.comb_id
+      {:ok, op} = GiTF.Ops.create(%{
+        title: "Test op",
+        mission_id: mission.id,
+        sector_id: mission.sector_id
       })
 
       # Initially no regression flag
-      {:ok, fresh_job} = GiTF.Jobs.get(job.id)
+      {:ok, fresh_job} = GiTF.Ops.get(op.id)
       refute Map.get(fresh_job, :regression_detected, false)
 
       # Apply penalty
-      GiTF.Reputation.apply_regression_penalty(quest.id)
+      GiTF.Reputation.apply_regression_penalty(mission.id)
 
       # Now regression flag should be set
-      {:ok, updated_job} = GiTF.Jobs.get(job.id)
+      {:ok, updated_job} = GiTF.Ops.get(op.id)
       assert Map.get(updated_job, :regression_detected) == true
     end
   end

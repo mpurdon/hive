@@ -36,30 +36,30 @@ defmodule GiTF.Web.Router do
     pipe_through :api
 
     # Quests
-    post "/quests", ApiController, :create_quest
-    get "/quests", ApiController, :list_quests
-    get "/quests/:id", ApiController, :show_quest
-    delete "/quests/:id", ApiController, :delete_quest
-    post "/quests/:id/kill", ApiController, :kill_quest
-    post "/quests/:id/close", ApiController, :close_quest
-    post "/quests/:id/start", ApiController, :start_quest
-    get "/quests/:id/status", ApiController, :quest_status
-    post "/quests/:id/plan", ApiController, :plan_quest
-    get "/quests/:id/report", ApiController, :quest_report
-    post "/quests/:id/merge", ApiController, :quest_merge
-    get "/quests/:id/spec/:phase", ApiController, :quest_spec_show
-    put "/quests/:id/spec/:phase", ApiController, :quest_spec_write
-    post "/quests/:id/plan/confirm", ApiController, :confirm_plan
-    post "/quests/:id/plan/reject", ApiController, :reject_plan
-    post "/quests/:id/plan/revise", ApiController, :revise_plan
-    get "/quests/:id/plan/candidates", ApiController, :list_plan_candidates
-    post "/quests/:id/plan/select", ApiController, :select_plan_candidate
+    post "/missions", ApiController, :create_quest
+    get "/missions", ApiController, :list_quests
+    get "/missions/:id", ApiController, :show_quest
+    delete "/missions/:id", ApiController, :delete_quest
+    post "/missions/:id/kill", ApiController, :kill_quest
+    post "/missions/:id/close", ApiController, :close_quest
+    post "/missions/:id/start", ApiController, :start_quest
+    get "/missions/:id/status", ApiController, :quest_status
+    post "/missions/:id/plan", ApiController, :plan_quest
+    get "/missions/:id/report", ApiController, :quest_report
+    post "/missions/:id/merge", ApiController, :quest_merge
+    get "/missions/:id/spec/:phase", ApiController, :quest_spec_show
+    put "/missions/:id/spec/:phase", ApiController, :quest_spec_write
+    post "/missions/:id/plan/confirm", ApiController, :confirm_plan
+    post "/missions/:id/plan/reject", ApiController, :reject_plan
+    post "/missions/:id/plan/revise", ApiController, :revise_plan
+    get "/missions/:id/plan/candidates", ApiController, :list_plan_candidates
+    post "/missions/:id/plan/select", ApiController, :select_plan_candidate
 
     # Jobs
-    get "/jobs", ApiController, :list_jobs
-    get "/jobs/:id", ApiController, :show_job
-    post "/jobs/:id/reset", ApiController, :reset_job
-    delete "/jobs/:id", ApiController, :kill_job
+    get "/ops", ApiController, :list_jobs
+    get "/ops/:id", ApiController, :show_job
+    post "/ops/:id/reset", ApiController, :reset_job
+    delete "/ops/:id", ApiController, :kill_job
 
     # Bees
     get "/ghosts", ApiController, :list_bees
@@ -68,11 +68,11 @@ defmodule GiTF.Web.Router do
     post "/ghosts/:id/fail", ApiController, :fail_bee
 
     # Combs
-    post "/combs", ApiController, :add_comb
-    get "/combs", ApiController, :list_combs
-    get "/combs/:id", ApiController, :show_comb
-    delete "/combs/:id", ApiController, :remove_comb
-    post "/combs/:id/use", ApiController, :use_comb
+    post "/sectors", ApiController, :add_comb
+    get "/sectors", ApiController, :list_combs
+    get "/sectors/:id", ApiController, :show_comb
+    delete "/sectors/:id", ApiController, :remove_comb
+    post "/sectors/:id/use", ApiController, :use_comb
 
     # Costs
     get "/costs/summary", ApiController, :costs_summary

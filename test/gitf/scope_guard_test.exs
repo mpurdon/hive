@@ -16,51 +16,51 @@ defmodule GiTF.ScopeGuardTest do
   end
 
   describe "check_scope/1" do
-    test "approves in-scope job" do
-      quest = %{
+    test "approves in-scope op" do
+      mission = %{
         id: "qst-scope",
         description: "Add feature",
         created_at: DateTime.utc_now(),
         updated_at: DateTime.utc_now()
       }
-      Store.insert(:quests, quest)
+      Store.insert(:missions, mission)
       
-      job = %{
-        id: "job-scope",
-        quest_id: "qst-scope",
+      op = %{
+        id: "op-scope",
+        mission_id: "qst-scope",
         title: "Implement feature",
         files_changed: 3,
         created_at: DateTime.utc_now(),
         updated_at: DateTime.utc_now()
       }
-      Store.insert(:jobs, job)
+      Store.insert(:ops, op)
       
-      result = ScopeGuard.check_scope("job-scope")
+      result = ScopeGuard.check_scope("op-scope")
       
       assert result.in_scope == true
       assert result.recommendation == :approved
     end
 
     test "detects scope violations" do
-      quest = %{
+      mission = %{
         id: "qst-creep",
         description: "Simple fix",
         created_at: DateTime.utc_now(),
         updated_at: DateTime.utc_now()
       }
-      Store.insert(:quests, quest)
+      Store.insert(:missions, mission)
       
-      job = %{
-        id: "job-creep",
-        quest_id: "qst-creep",
+      op = %{
+        id: "op-creep",
+        mission_id: "qst-creep",
         title: "Refactor entire system",
         files_changed: 20,
         created_at: DateTime.utc_now(),
         updated_at: DateTime.utc_now()
       }
-      Store.insert(:jobs, job)
+      Store.insert(:ops, op)
       
-      result = ScopeGuard.check_scope("job-creep")
+      result = ScopeGuard.check_scope("op-creep")
       
       assert result.in_scope == false
       assert length(result.warnings) > 0

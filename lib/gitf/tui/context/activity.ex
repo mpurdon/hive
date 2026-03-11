@@ -1,14 +1,14 @@
 defmodule GiTF.TUI.Context.Activity do
   @moduledoc """
-  Manages the activity status, including factory health, active ghosts, and quests.
+  Manages the activity status, including factory health, active ghosts, and missions.
   """
 
-  defstruct factory_status: :ok, ghosts: [], quests: [], bee_logs: %{}
+  defstruct factory_status: :ok, ghosts: [], missions: [], bee_logs: %{}
 
   @type t :: %__MODULE__{
           factory_status: :ok | :error | :maintenance,
           ghosts: list(map()),
-          quests: list(map()),
+          missions: list(map()),
           bee_logs: map()
         }
 
@@ -24,8 +24,8 @@ defmodule GiTF.TUI.Context.Activity do
     %{state | ghosts: ghosts}
   end
 
-  def update_quests(state, quests) do
-    %{state | quests: quests}
+  def update_quests(state, missions) do
+    %{state | missions: missions}
   end
 
   def update_bee_logs(state, bee_logs) do

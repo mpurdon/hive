@@ -2,17 +2,17 @@ defmodule GiTF.Merge.Queue do
   @moduledoc """
   GenServer that serializes merge operations using optimal ordering.
 
-  Subscribes to the `"merge:queue"` PubSub topic. When a job passes
+  Subscribes to the `"merge:queue"` PubSub topic. When a op passes
   verification, it is added to a pending list. Jobs are dequeued one at
   a time, merged in optimal order (via `GiTF.Merge.Strategy`), and the
-  result is reported back to the Major via waggle.
+  result is reported back to the Major via link_msg.
 
   ## State
 
       %{
-        pending: [{job_id, cell_id}],
-        active: {job_id, cell_id, task_ref} | nil,
-        completed: [{job_id, outcome, DateTime.t()}]
+        pending: [{op_id, shell_id}],
+        active: {op_id, shell_id, task_ref} | nil,
+        completed: [{op_id, outcome, DateTime.t()}]
       }
 
   ## Registration
@@ -89,7 +89,7 @@ defmodule GiTF.Merge.Queue do
       merge_timer: nil
     }
 
-    # Recovery: check for verified-but-unmerged jobs on startup and periodically
+    # Recovery: check for verified-but-unmerged ops on startup and periodically
     Process.send_after(self(), :recover_pending, 5_000)
     Process.send_after(self(), :periodic_recovery, :timer.minutes(5))
 
@@ -101,7 +101,7 @@ defmodule GiTF.Merge.Queue do
   def handle_call(:status, _from, state) do
     active_info =
       case state.active do
-        {job_id, cell_id, _ref} -> %{job_id: job_id, cell_id: cell_id}
+        {op_id, shell_id, _ref} -> %{op_id: op_id, shell_id: shell_id}
         nil -> nil
       end
 
@@ -119,73 +119,73 @@ defmodule GiTF.Merge.Queue do
   end
 
   @impl true
-  def handle_info({:merge_ready, job_id, cell_id}, state) do
-    Logger.info("MergeQueue received merge-ready job #{job_id}")
+  def handle_info({:merge_ready, op_id, shell_id}, state) do
+    Logger.info("MergeQueue received merge-ready op #{op_id}")
 
     # Deduplicate: don't add if already pending or active
     already_queued =
-      Enum.any?(state.pending, fn {jid, _} -> jid == job_id end) or
-        match?({^job_id, _, _}, state.active)
+      Enum.any?(state.pending, fn {jid, _} -> jid == op_id end) or
+        match?({^op_id, _, _}, state.active)
 
     if already_queued do
-      Logger.debug("Job #{job_id} already in merge queue, skipping")
+      Logger.debug("Job #{op_id} already in merge queue, skipping")
       {:noreply, state}
     else
-      state = %{state | pending: state.pending ++ [{job_id, cell_id}]}
+      state = %{state | pending: state.pending ++ [{op_id, shell_id}]}
       state = maybe_process_next(state)
       {:noreply, state}
     end
   end
 
   # Handle Task completion for the active merge
-  def handle_info({ref, {:merge_result, job_id, result}}, %{active: {_, _, ref}} = state) do
+  def handle_info({ref, {:merge_result, op_id, result}}, %{active: {_, _, ref}} = state) do
     Process.demonitor(ref, [:flush])
     if state.merge_timer, do: Process.cancel_timer(state.merge_timer)
-    state = handle_merge_result(job_id, result, state)
+    state = handle_merge_result(op_id, result, state)
     state = %{state | active: nil, merge_timer: nil}
     state = maybe_process_next(state)
     {:noreply, state}
   end
 
   # Task completed but ref doesn't match active — stale result
-  def handle_info({ref, {:merge_result, _job_id, _result}}, state) when is_reference(ref) do
+  def handle_info({ref, {:merge_result, _op_id, _result}}, state) when is_reference(ref) do
     Process.demonitor(ref, [:flush])
     {:noreply, state}
   end
 
-  def handle_info({:DOWN, ref, :process, _pid, reason}, %{active: {job_id, _, ref}} = state) do
-    Logger.error("Merge task crashed for job #{job_id}: #{inspect(reason)}")
+  def handle_info({:DOWN, ref, :process, _pid, reason}, %{active: {op_id, _, ref}} = state) do
+    Logger.error("Merge task crashed for op #{op_id}: #{inspect(reason)}")
     if state.merge_timer, do: Process.cancel_timer(state.merge_timer)
 
-    GiTF.Waggle.send("merge_queue", "major", "merge_failed",
-      "Merge task crashed for job #{job_id}: #{inspect(reason)}")
+    GiTF.Link.send("merge_queue", "major", "merge_failed",
+      "Merge task crashed for op #{op_id}: #{inspect(reason)}")
 
     GiTF.Telemetry.emit([:gitf, :merge, :crashed], %{}, %{
-      job_id: job_id,
+      op_id: op_id,
       reason: inspect(reason)
     })
 
-    entry = {job_id, :crash, DateTime.utc_now()}
+    entry = {op_id, :crash, DateTime.utc_now()}
     state = %{state | active: nil, merge_timer: nil, completed: [entry | Enum.take(state.completed, @max_history - 1)]}
     state = maybe_process_next(state)
     {:noreply, state}
   end
 
   # Merge task timed out — kill it and move on
-  def handle_info({:merge_timeout, ref, task_pid}, %{active: {job_id, _, ref}} = state) do
-    Logger.error("Merge task timed out for job #{job_id} after #{div(@merge_timeout_ms, 1000)}s")
+  def handle_info({:merge_timeout, ref, task_pid}, %{active: {op_id, _, ref}} = state) do
+    Logger.error("Merge task timed out for op #{op_id} after #{div(@merge_timeout_ms, 1000)}s")
     Process.demonitor(ref, [:flush])
     Process.exit(task_pid, :kill)
 
-    GiTF.Waggle.send("merge_queue", "major", "merge_failed",
-      "Merge task timed out for job #{job_id}")
+    GiTF.Link.send("merge_queue", "major", "merge_failed",
+      "Merge task timed out for op #{op_id}")
 
     GiTF.Telemetry.emit([:gitf, :merge, :timeout], %{}, %{
-      job_id: job_id,
+      op_id: op_id,
       timeout_seconds: div(@merge_timeout_ms, 1000)
     })
 
-    entry = {job_id, :timeout, DateTime.utc_now()}
+    entry = {op_id, :timeout, DateTime.utc_now()}
     state = %{state | active: nil, merge_timer: nil, completed: [entry | Enum.take(state.completed, @max_history - 1)]}
     state = maybe_process_next(state)
     {:noreply, state}
@@ -199,21 +199,21 @@ defmodule GiTF.Merge.Queue do
   end
 
   def handle_info(:recover_pending, state) do
-    # Find jobs that are done + verified but haven't been merged yet
-    # This catches jobs that were verified while the MergeQueue was down
+    # Find ops that are done + verified but haven't been merged yet
+    # This catches ops that were verified while the MergeQueue was down
     recovered =
-      GiTF.Store.filter(:jobs, fn j ->
+      GiTF.Store.filter(:ops, fn j ->
         j.status == "done" and
           Map.get(j, :verification_status) == "passed" and
           Map.get(j, :merged_at) == nil and
           not Map.get(j, :phase_job, false)
       end)
-      |> Enum.flat_map(fn job ->
-        case GiTF.Store.find_one(:cells, fn c ->
-               c.ghost_id == job.ghost_id and c.status == "active"
+      |> Enum.flat_map(fn op ->
+        case GiTF.Store.find_one(:shells, fn c ->
+               c.ghost_id == op.ghost_id and c.status == "active"
              end) do
           nil -> []
-          cell -> [{job.id, cell.id}]
+          shell -> [{op.id, shell.id}]
         end
       end)
 
@@ -250,16 +250,16 @@ defmodule GiTF.Merge.Queue do
     ordered = GiTF.Merge.Strategy.optimal_order(pending)
 
     case ordered do
-      [{job_id, cell_id} | rest] ->
-        Logger.info("MergeQueue processing job #{job_id}")
+      [{op_id, shell_id} | rest] ->
+        Logger.info("MergeQueue processing op #{op_id}")
 
         task = Task.async(fn ->
-          result = GiTF.Merge.Resolver.resolve(job_id, cell_id)
-          {:merge_result, job_id, result}
+          result = GiTF.Merge.Resolver.resolve(op_id, shell_id)
+          {:merge_result, op_id, result}
         end)
 
         timer = Process.send_after(self(), {:merge_timeout, task.ref, task.pid}, @merge_timeout_ms)
-        %{state | active: {job_id, cell_id, task.ref}, pending: rest, merge_timer: timer}
+        %{state | active: {op_id, shell_id, task.ref}, pending: rest, merge_timer: timer}
 
       [] ->
         %{state | pending: []}
@@ -271,37 +271,37 @@ defmodule GiTF.Merge.Queue do
 
   # -- Private: result handling ------------------------------------------------
 
-  defp handle_merge_result(job_id, {:ok, :merged, tier}, state) do
-    Logger.info("Job #{job_id} merged successfully at tier #{tier}")
+  defp handle_merge_result(op_id, {:ok, :merged, tier}, state) do
+    Logger.info("Job #{op_id} merged successfully at tier #{tier}")
 
-    # Mark the job as merged
-    case GiTF.Store.get(:jobs, job_id) do
+    # Mark the op as merged
+    case GiTF.Store.get(:ops, op_id) do
       nil -> :ok
-      job -> GiTF.Store.put(:jobs, Map.put(job, :merged_at, DateTime.utc_now()))
+      op -> GiTF.Store.put(:ops, Map.put(op, :merged_at, DateTime.utc_now()))
     end
 
-    # Waggle Major
-    GiTF.Waggle.send("merge_queue", "major", "job_merged",
-      "Job #{job_id} merged successfully (tier #{tier})")
+    # Link Major
+    GiTF.Link.send("merge_queue", "major", "job_merged",
+      "Job #{op_id} merged successfully (tier #{tier})")
 
-    entry = {job_id, :success, DateTime.utc_now()}
+    entry = {op_id, :success, DateTime.utc_now()}
     %{state | completed: [entry | Enum.take(state.completed, @max_history - 1)]}
   end
 
-  defp handle_merge_result(job_id, {:error, {:reimagined, new_job_id}, _tier}, state) do
-    Logger.info("Job #{job_id} escalated to re-imagine job #{new_job_id}")
+  defp handle_merge_result(op_id, {:error, {:reimagined, new_op_id}, _tier}, state) do
+    Logger.info("Job #{op_id} escalated to re-imagine op #{new_op_id}")
 
-    entry = {job_id, {:reimagined, new_job_id}, DateTime.utc_now()}
+    entry = {op_id, {:reimagined, new_op_id}, DateTime.utc_now()}
     %{state | completed: [entry | Enum.take(state.completed, @max_history - 1)]}
   end
 
-  defp handle_merge_result(job_id, {:error, reason, tier}, state) do
-    Logger.warning("Job #{job_id} merge failed at tier #{tier}: #{inspect(reason)}")
+  defp handle_merge_result(op_id, {:error, reason, tier}, state) do
+    Logger.warning("Job #{op_id} merge failed at tier #{tier}: #{inspect(reason)}")
 
-    GiTF.Waggle.send("merge_queue", "major", "merge_failed",
-      "Job #{job_id} merge failed at tier #{tier}: #{inspect(reason)}")
+    GiTF.Link.send("merge_queue", "major", "merge_failed",
+      "Job #{op_id} merge failed at tier #{tier}: #{inspect(reason)}")
 
-    entry = {job_id, {:failure, reason}, DateTime.utc_now()}
+    entry = {op_id, {:failure, reason}, DateTime.utc_now()}
     %{state | completed: [entry | Enum.take(state.completed, @max_history - 1)]}
   end
 end

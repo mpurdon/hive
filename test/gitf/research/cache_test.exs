@@ -9,103 +9,103 @@ defmodule GiTF.Research.CacheTest do
     GiTF.Test.StoreHelper.stop_store()
     {:ok, _} = Store.start_link(data_dir: System.tmp_dir!() <> "/test_cache_#{:rand.uniform(10000)}")
     
-    # Create test comb
-    {:ok, comb} = Store.insert(:combs, %{
-      name: "test-comb",
+    # Create test sector
+    {:ok, sector} = Store.insert(:sectors, %{
+      name: "test-sector",
       path: System.tmp_dir!() <> "/test_repo_#{:rand.uniform(10000)}"
     })
     
     # Create git repo
-    File.mkdir_p!(comb.path)
-    System.cmd("git", ["init"], cd: comb.path)
-    System.cmd("git", ["config", "user.email", "test@example.com"], cd: comb.path)
-    System.cmd("git", ["config", "user.name", "Test User"], cd: comb.path)
-    File.write!(Path.join(comb.path, "README.md"), "# Test")
-    System.cmd("git", ["add", "."], cd: comb.path)
-    System.cmd("git", ["commit", "-m", "Initial commit"], cd: comb.path)
+    File.mkdir_p!(sector.path)
+    System.cmd("git", ["init"], cd: sector.path)
+    System.cmd("git", ["config", "user.email", "test@example.com"], cd: sector.path)
+    System.cmd("git", ["config", "user.name", "Test User"], cd: sector.path)
+    File.write!(Path.join(sector.path, "README.md"), "# Test")
+    System.cmd("git", ["add", "."], cd: sector.path)
+    System.cmd("git", ["commit", "-m", "Initial commit"], cd: sector.path)
     
-    {:ok, comb: comb}
+    {:ok, sector: sector}
   end
 
-  test "get_research returns not_found for non-existent cache", %{comb: comb} do
-    assert {:error, :not_found} = Cache.get_research(comb.id)
+  test "get_research returns not_found for non-existent cache", %{sector: sector} do
+    assert {:error, :not_found} = Cache.get_research(sector.id)
   end
 
-  test "store_research and get_research work correctly", %{comb: comb} do
+  test "store_research and get_research work correctly", %{sector: sector} do
     research = %{structure: %{total_files: 1}}
     
-    {:ok, cache} = Cache.store_research(comb.id, research)
+    {:ok, cache} = Cache.store_research(sector.id, research)
     
-    assert cache.comb_id == comb.id
+    assert cache.sector_id == sector.id
     assert cache.research == research
     assert is_binary(cache.git_hash)
     
-    {:ok, retrieved} = Cache.get_research(comb.id)
+    {:ok, retrieved} = Cache.get_research(sector.id)
     assert retrieved.research == research
   end
 
-  test "is_valid? returns true for fresh cache", %{comb: comb} do
+  test "is_valid? returns true for fresh cache", %{sector: sector} do
     research = %{structure: %{total_files: 1}}
-    Cache.store_research(comb.id, research)
+    Cache.store_research(sector.id, research)
     
-    assert Cache.is_valid?(comb.id) == true
+    assert Cache.is_valid?(sector.id) == true
   end
 
-  test "is_valid? returns false after git changes", %{comb: comb} do
+  test "is_valid? returns false after git changes", %{sector: sector} do
     research = %{structure: %{total_files: 1}}
-    Cache.store_research(comb.id, research)
+    Cache.store_research(sector.id, research)
     
     # Make a git change
-    File.write!(Path.join(comb.path, "new_file.txt"), "content")
-    System.cmd("git", ["add", "."], cd: comb.path)
-    System.cmd("git", ["commit", "-m", "Add new file"], cd: comb.path)
+    File.write!(Path.join(sector.path, "new_file.txt"), "content")
+    System.cmd("git", ["add", "."], cd: sector.path)
+    System.cmd("git", ["commit", "-m", "Add new file"], cd: sector.path)
     
-    assert Cache.is_valid?(comb.id) == false
+    assert Cache.is_valid?(sector.id) == false
   end
 
-  test "update_research merges with existing cache", %{comb: comb} do
+  test "update_research merges with existing cache", %{sector: sector} do
     initial = %{structure: %{total_files: 1}}
-    Cache.store_research(comb.id, initial)
+    Cache.store_research(sector.id, initial)
     
     update = %{patterns: %{mvc: true}}
-    {:ok, updated} = Cache.update_research(comb.id, update)
+    {:ok, updated} = Cache.update_research(sector.id, update)
     
     expected = Map.merge(initial, update)
     assert updated.research == expected
   end
 
-  test "invalidate removes cache and file index", %{comb: comb} do
+  test "invalidate removes cache and file index", %{sector: sector} do
     research = %{structure: %{total_files: 1}}
     file_index = [%{path: "test.ex", research: %{type: "module"}}]
     
-    Cache.store_research(comb.id, research, file_index)
+    Cache.store_research(sector.id, research, file_index)
     
     # Verify cache exists
-    assert {:ok, _} = Cache.get_research(comb.id)
+    assert {:ok, _} = Cache.get_research(sector.id)
     
     # Invalidate
-    Cache.invalidate(comb.id)
+    Cache.invalidate(sector.id)
     
     # Verify cache is gone
-    assert {:error, :not_found} = Cache.get_research(comb.id)
+    assert {:error, :not_found} = Cache.get_research(sector.id)
   end
 
-  test "get_file_research works with file index", %{comb: comb} do
+  test "get_file_research works with file index", %{sector: sector} do
     research = %{structure: %{total_files: 1}}
     file_research = %{type: "module", functions: 3}
     file_index = [%{path: "test.ex", research: file_research}]
     
-    Cache.store_research(comb.id, research, file_index)
+    Cache.store_research(sector.id, research, file_index)
     
-    {:ok, file_cache} = Cache.get_file_research(comb.id, "test.ex")
+    {:ok, file_cache} = Cache.get_file_research(sector.id, "test.ex")
     assert file_cache.research == file_research
     assert file_cache.file_path == "test.ex"
   end
 
-  test "get_file_research returns not_found for non-existent file", %{comb: comb} do
+  test "get_file_research returns not_found for non-existent file", %{sector: sector} do
     research = %{structure: %{total_files: 1}}
-    Cache.store_research(comb.id, research)
+    Cache.store_research(sector.id, research)
     
-    assert {:error, :not_found} = Cache.get_file_research(comb.id, "nonexistent.ex")
+    assert {:error, :not_found} = Cache.get_file_research(sector.id, "nonexistent.ex")
   end
 end

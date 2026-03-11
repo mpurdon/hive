@@ -2,13 +2,13 @@ defmodule GiTF.AgentProfile do
   @moduledoc """
   Manages expert agent profiles for ghost workers.
 
-  Before a ghost starts work, this module checks if the comb has a Claude
-  agent file matching the job's technology. If not, it generates one using
+  Before a ghost starts work, this module checks if the sector has a Claude
+  agent file matching the op's technology. If not, it generates one using
   Claude to create an expert profile.
 
-  Agent files are stored per-comb in `<comb_path>/.claude/agents/` and are
+  Agent files are stored per-sector in `<sector_path>/.claude/agents/` and are
   discovered automatically by Claude Code at runtime. Once generated, they
-  are cached (the file persists) and reused by all ghosts on that comb.
+  are cached (the file persists) and reused by all ghosts on that sector.
   """
 
   alias GiTF.AgentProfile.FailureModes
@@ -162,9 +162,9 @@ defmodule GiTF.AgentProfile do
   }
 
   @doc """
-  Ensures an expert agent file exists for the given job in the comb.
+  Ensures an expert agent file exists for the given op in the sector.
 
-  1. Detects the technology from the job title/description
+  1. Detects the technology from the op title/description
   2. If an agent file already exists, returns its path
   3. If not, generates one via Claude and returns the path
   4. If no technology is detected, returns `{:ok, :no_agent}`
@@ -174,19 +174,19 @@ defmodule GiTF.AgentProfile do
   pipeline.
   """
   @spec ensure_agent(String.t(), map()) :: {:ok, String.t()} | {:ok, :no_agent} | {:error, term()}
-  def ensure_agent(comb_path, job) do
-    title = Map.get(job, :title, "") || ""
-    description = Map.get(job, :description, "") || ""
+  def ensure_agent(sector_path, op) do
+    title = Map.get(op, :title, "") || ""
+    description = Map.get(op, :description, "") || ""
 
-    # Early exit: if any agent already exists for this comb, reuse it (one agent per comb)
-    case existing_agent(comb_path) do
+    # Early exit: if any agent already exists for this sector, reuse it (one agent per sector)
+    case existing_agent(sector_path) do
       {:ok, path} ->
         Logger.info("Agent profile already exists: #{Path.basename(path)}")
         {:ok, path}
 
       :none ->
-        # Comb-level detection first, then fall back to job-level
-        agent_key = detect_from_comb(comb_path) || detect_technology(title, description)
+        # Comb-level detection first, then fall back to op-level
+        agent_key = detect_from_comb(sector_path) || detect_technology(title, description)
 
         case agent_key do
           nil ->
@@ -194,13 +194,13 @@ defmodule GiTF.AgentProfile do
 
           key ->
             Logger.info("Generating agent profile: #{key}-expert")
-            generate_agent(comb_path, key, title, description)
+            generate_agent(sector_path, key, title, description)
         end
     end
   end
 
   @doc """
-  Detects the primary technology from job title and description.
+  Detects the primary technology from op title and description.
 
   Uses tiered keyword matching against detection rules. Rules are prioritized:
   priority 1 (multi-keyword combos) beats priority 2 (specific frameworks)
@@ -226,19 +226,19 @@ defmodule GiTF.AgentProfile do
   end
 
   @doc """
-  Detects the primary technology from the comb's project manifest files.
+  Detects the primary technology from the sector's project manifest files.
 
-  Scans `pyproject.toml`, `package.json`, and `mix.exs` at the comb root
+  Scans `pyproject.toml`, `package.json`, and `mix.exs` at the sector root
   for known dependency packages. Returns the most specific agent_key found
   (frameworks beat languages), or nil if nothing is detected.
   """
   @spec detect_from_comb(String.t()) :: String.t() | nil
-  def detect_from_comb(comb_path) do
+  def detect_from_comb(sector_path) do
     detections =
       [
-        detect_pyproject(comb_path),
-        detect_package_json(comb_path),
-        detect_mix_exs(comb_path)
+        detect_pyproject(sector_path),
+        detect_package_json(sector_path),
+        detect_mix_exs(sector_path)
       ]
       |> List.flatten()
       |> Enum.reject(&is_nil/1)
@@ -261,14 +261,14 @@ defmodule GiTF.AgentProfile do
   Generates an expert agent file for the given technology.
 
   Uses Claude headless to generate the content, then writes it to the
-  comb's `.claude/agents/` directory. The job title and description are
+  sector's `.claude/agents/` directory. The op title and description are
   included in the generation prompt so Claude can produce a specific,
   scenario-aware agent profile.
   """
   @spec generate_agent(String.t(), String.t(), String.t(), String.t()) :: {:ok, String.t()}
-  def generate_agent(comb_path, agent_key, title \\ "", description \\ "") do
+  def generate_agent(sector_path, agent_key, title \\ "", description \\ "") do
     agent_name = "#{agent_key}-expert"
-    agents_dir = Path.join(comb_path, @agents_dir)
+    agents_dir = Path.join(sector_path, @agents_dir)
     agent_path = Path.join(agents_dir, "#{agent_name}.md")
 
     # Ensure .claude/agents/ directory exists
@@ -278,7 +278,7 @@ defmodule GiTF.AgentProfile do
 
     anti_patterns = FailureModes.format_for_agent(:all)
 
-    case generate_via_model(comb_path, prompt) do
+    case generate_via_model(sector_path, prompt) do
       {:ok, content} ->
         File.write!(agent_path, content <> "\n\n" <> anti_patterns)
         Logger.info("Agent profile generated: #{agent_path}")
@@ -286,7 +286,7 @@ defmodule GiTF.AgentProfile do
 
       {:error, reason} ->
         Logger.warning("Failed to generate agent #{agent_name}: #{inspect(reason)}")
-        # Write a fallback agent file with job context
+        # Write a fallback agent file with op context
         fallback = build_fallback_agent(agent_key, agent_name, title, description)
         File.write!(agent_path, fallback <> "\n\n" <> anti_patterns)
         {:ok, agent_path}
@@ -294,15 +294,15 @@ defmodule GiTF.AgentProfile do
   end
 
   @doc """
-  Copies all agent profiles from a comb's agents directory into a worktree.
+  Copies all agent profiles from a sector's agents directory into a worktree.
 
   Claude Code discovers agents from `.claude/agents/` relative to the git root.
-  Since ghost worktrees have their own git root, agents generated at the comb level
+  Since ghost worktrees have their own git root, agents generated at the sector level
   must be copied into each worktree for Claude to discover them.
   """
   @spec install_agents(String.t(), String.t()) :: :ok
-  def install_agents(comb_path, worktree_path) do
-    src_dir = Path.join(comb_path, @agents_dir)
+  def install_agents(sector_path, worktree_path) do
+    src_dir = Path.join(sector_path, @agents_dir)
     dst_dir = Path.join(worktree_path, @agents_dir)
 
     if File.dir?(src_dir) do
@@ -325,11 +325,11 @@ defmodule GiTF.AgentProfile do
   end
 
   @doc """
-  Lists all agent profiles available in a comb's agents directory.
+  Lists all agent profiles available in a sector's agents directory.
   """
   @spec list_agents(String.t()) :: [String.t()]
-  def list_agents(comb_path) do
-    agents_dir = Path.join(comb_path, @agents_dir)
+  def list_agents(sector_path) do
+    agents_dir = Path.join(sector_path, @agents_dir)
 
     if File.dir?(agents_dir) do
       agents_dir
@@ -362,9 +362,9 @@ defmodule GiTF.AgentProfile do
     job_context =
       case {title, description} do
         {"", ""} -> ""
-        {t, ""} -> "\nThe job this agent will work on: \"#{t}\"\n"
-        {"", d} -> "\nThe job context: \"#{d}\"\n"
-        {t, d} -> "\nThe job this agent will work on: \"#{t}\"\nJob details: \"#{d}\"\n"
+        {t, ""} -> "\nThe op this agent will work on: \"#{t}\"\n"
+        {"", d} -> "\nThe op context: \"#{d}\"\n"
+        {t, d} -> "\nThe op this agent will work on: \"#{t}\"\nJob details: \"#{d}\"\n"
       end
 
     """
@@ -403,8 +403,8 @@ defmodule GiTF.AgentProfile do
     """
   end
 
-  defp generate_via_model(comb_path, prompt) do
-    GiTF.AgentProfile.Generation.generate_via_model(prompt, comb_path)
+  defp generate_via_model(sector_path, prompt) do
+    GiTF.AgentProfile.Generation.generate_via_model(prompt, sector_path)
   end
 
   defp build_fallback_agent(agent_key, agent_name, title, description) do
@@ -475,9 +475,9 @@ defmodule GiTF.AgentProfile do
     """
   end
 
-  # Returns {:ok, path} if any .md agent file exists in the comb's agents dir, :none otherwise.
-  defp existing_agent(comb_path) do
-    agents_dir = Path.join(comb_path, @agents_dir)
+  # Returns {:ok, path} if any .md agent file exists in the sector's agents dir, :none otherwise.
+  defp existing_agent(sector_path) do
+    agents_dir = Path.join(sector_path, @agents_dir)
 
     if File.dir?(agents_dir) do
       case File.ls!(agents_dir) |> Enum.filter(&String.ends_with?(&1, ".md")) |> Enum.sort() do
@@ -489,10 +489,10 @@ defmodule GiTF.AgentProfile do
     end
   end
 
-  # -- Private: comb-level detection ------------------------------------------
+  # -- Private: sector-level detection ------------------------------------------
 
-  defp detect_pyproject(comb_path) do
-    path = Path.join(comb_path, "pyproject.toml")
+  defp detect_pyproject(sector_path) do
+    path = Path.join(sector_path, "pyproject.toml")
 
     if File.exists?(path) do
       content = File.read!(path)
@@ -504,8 +504,8 @@ defmodule GiTF.AgentProfile do
     end
   end
 
-  defp detect_package_json(comb_path) do
-    path = Path.join(comb_path, "package.json")
+  defp detect_package_json(sector_path) do
+    path = Path.join(sector_path, "package.json")
 
     if File.exists?(path) do
       case File.read!(path) |> Jason.decode() do
@@ -529,8 +529,8 @@ defmodule GiTF.AgentProfile do
     end
   end
 
-  defp detect_mix_exs(comb_path) do
-    path = Path.join(comb_path, "mix.exs")
+  defp detect_mix_exs(sector_path) do
+    path = Path.join(sector_path, "mix.exs")
 
     if File.exists?(path) do
       content = File.read!(path)

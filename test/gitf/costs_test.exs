@@ -140,27 +140,27 @@ defmodule GiTF.CostsTest do
   end
 
   describe "for_quest/1" do
-    test "returns costs for ghosts working on quest jobs", %{ghost: ghost} do
-      {:ok, comb} =
-        Store.insert(:combs, %{name: "cost-quest-comb-#{:erlang.unique_integer([:positive])}"})
+    test "returns costs for ghosts working on mission ops", %{ghost: ghost} do
+      {:ok, sector} =
+        Store.insert(:sectors, %{name: "cost-mission-sector-#{:erlang.unique_integer([:positive])}"})
 
-      {:ok, quest} =
-        Store.insert(:quests, %{
-          name: "cost-quest-#{:erlang.unique_integer([:positive])}",
+      {:ok, mission} =
+        Store.insert(:missions, %{
+          name: "cost-mission-#{:erlang.unique_integer([:positive])}",
           status: "pending"
         })
 
       {:ok, _job} =
-        GiTF.Jobs.create(%{
-          title: "Quest job",
-          quest_id: quest.id,
-          comb_id: comb.id,
+        GiTF.Ops.create(%{
+          title: "Quest op",
+          mission_id: mission.id,
+          sector_id: sector.id,
           ghost_id: ghost.id
         })
 
       {:ok, _} = Costs.record(ghost.id, %{input_tokens: 300, output_tokens: 150})
 
-      costs = Costs.for_quest(quest.id)
+      costs = Costs.for_quest(mission.id)
       assert length(costs) >= 1
     end
   end
@@ -229,79 +229,79 @@ defmodule GiTF.CostsTest do
       assert cost.category == "unknown"
     end
 
-    test "phase job research maps to planning", %{ghost: ghost} do
-      {:ok, comb} =
-        Store.insert(:combs, %{name: "cat-comb-#{:erlang.unique_integer([:positive])}"})
+    test "phase op research maps to planning", %{ghost: ghost} do
+      {:ok, sector} =
+        Store.insert(:sectors, %{name: "cat-sector-#{:erlang.unique_integer([:positive])}"})
 
-      {:ok, quest} =
-        Store.insert(:quests, %{
-          name: "cat-quest-#{:erlang.unique_integer([:positive])}",
+      {:ok, mission} =
+        Store.insert(:missions, %{
+          name: "cat-mission-#{:erlang.unique_integer([:positive])}",
           status: "pending"
         })
 
-      {:ok, job} =
-        GiTF.Jobs.create(%{
+      {:ok, op} =
+        GiTF.Ops.create(%{
           title: "Research task",
-          quest_id: quest.id,
-          comb_id: comb.id,
+          mission_id: mission.id,
+          sector_id: sector.id,
           ghost_id: ghost.id,
           phase_job: true,
           phase: "research"
         })
 
-      # Update ghost with job_id
-      Store.put(:ghosts, Map.put(ghost, :job_id, job.id))
+      # Update ghost with op_id
+      Store.put(:ghosts, Map.put(ghost, :op_id, op.id))
 
       {:ok, cost} = Costs.record(ghost.id, %{input_tokens: 100, output_tokens: 50})
       assert cost.category == "planning"
     end
 
-    test "phase job validation maps to verification", %{ghost: ghost} do
-      {:ok, comb} =
-        Store.insert(:combs, %{name: "cat-comb-#{:erlang.unique_integer([:positive])}"})
+    test "phase op validation maps to verification", %{ghost: ghost} do
+      {:ok, sector} =
+        Store.insert(:sectors, %{name: "cat-sector-#{:erlang.unique_integer([:positive])}"})
 
-      {:ok, quest} =
-        Store.insert(:quests, %{
-          name: "cat-quest-#{:erlang.unique_integer([:positive])}",
+      {:ok, mission} =
+        Store.insert(:missions, %{
+          name: "cat-mission-#{:erlang.unique_integer([:positive])}",
           status: "pending"
         })
 
-      {:ok, job} =
-        GiTF.Jobs.create(%{
+      {:ok, op} =
+        GiTF.Ops.create(%{
           title: "Validation task",
-          quest_id: quest.id,
-          comb_id: comb.id,
+          mission_id: mission.id,
+          sector_id: sector.id,
           ghost_id: ghost.id,
           phase_job: true,
           phase: "validation"
         })
 
-      Store.put(:ghosts, Map.put(ghost, :job_id, job.id))
+      Store.put(:ghosts, Map.put(ghost, :op_id, op.id))
 
       {:ok, cost} = Costs.record(ghost.id, %{input_tokens: 100, output_tokens: 50})
       assert cost.category == "verification"
     end
 
-    test "non-phase job maps to implementation", %{ghost: ghost} do
-      {:ok, comb} =
-        Store.insert(:combs, %{name: "cat-comb-#{:erlang.unique_integer([:positive])}"})
+    test "non-phase op maps to implementation", %{ghost: ghost} do
+      {:ok, sector} =
+        Store.insert(:sectors, %{name: "cat-sector-#{:erlang.unique_integer([:positive])}"})
 
-      {:ok, quest} =
-        Store.insert(:quests, %{
-          name: "cat-quest-#{:erlang.unique_integer([:positive])}",
+      {:ok, mission} =
+        Store.insert(:missions, %{
+          name: "cat-mission-#{:erlang.unique_integer([:positive])}",
           status: "pending"
         })
 
-      {:ok, job} =
-        GiTF.Jobs.create(%{
+      {:ok, op} =
+        GiTF.Ops.create(%{
           title: "Implementation task",
-          quest_id: quest.id,
-          comb_id: comb.id,
+          mission_id: mission.id,
+          sector_id: sector.id,
           ghost_id: ghost.id,
           phase_job: false
         })
 
-      Store.put(:ghosts, Map.put(ghost, :job_id, job.id))
+      Store.put(:ghosts, Map.put(ghost, :op_id, op.id))
 
       {:ok, cost} = Costs.record(ghost.id, %{input_tokens: 100, output_tokens: 50})
       assert cost.category == "implementation"

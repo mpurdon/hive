@@ -44,8 +44,8 @@ defmodule GiTF.Dashboard.EndpointTest do
       assert String.contains?(conn.resp_body, "Dashboard Overview")
     end
 
-    test "serves the quests page at /quests" do
-      conn = request(:get, "/quests")
+    test "serves the missions page at /missions" do
+      conn = request(:get, "/missions")
 
       assert conn.status == 200
       assert String.contains?(conn.resp_body, "Quests")
@@ -65,11 +65,11 @@ defmodule GiTF.Dashboard.EndpointTest do
       assert String.contains?(conn.resp_body, "Cost Tracking")
     end
 
-    test "serves the waggles page at /waggles" do
-      conn = request(:get, "/waggles")
+    test "serves the links page at /links" do
+      conn = request(:get, "/links")
 
       assert conn.status == 200
-      assert String.contains?(conn.resp_body, "Waggle Messages")
+      assert String.contains?(conn.resp_body, "Link Messages")
     end
 
     test "includes CDN script tags for LiveView JS" do
@@ -100,10 +100,10 @@ defmodule GiTF.Dashboard.EndpointTest do
       paths = Enum.map(routes, & &1.path)
 
       assert "/" in paths
-      assert "/quests" in paths
+      assert "/missions" in paths
       assert "/ghosts" in paths
       assert "/costs" in paths
-      assert "/waggles" in paths
+      assert "/links" in paths
     end
 
     test "all routes are LiveView routes" do

@@ -14,36 +14,36 @@ defmodule GiTF.Ghost.WorkerTest do
     {:ok, _} = GiTF.Store.start_link(data_dir: store_dir)
     on_exit(fn -> File.rm_rf!(store_dir) end)
 
-    # Create a temp git repo to serve as a comb
+    # Create a temp git repo to serve as a sector
     repo_path = create_temp_git_repo()
     gitf_root = create_gitf_workspace()
 
-    {:ok, comb} =
-      GiTF.Comb.add(repo_path, name: "worker-test-comb-#{:erlang.unique_integer([:positive])}")
+    {:ok, sector} =
+      GiTF.Sector.add(repo_path, name: "worker-test-sector-#{:erlang.unique_integer([:positive])}")
 
-    {:ok, quest} =
-      Store.insert(:quests, %{
-        name: "worker-test-quest-#{:erlang.unique_integer([:positive])}",
+    {:ok, mission} =
+      Store.insert(:missions, %{
+        name: "worker-test-mission-#{:erlang.unique_integer([:positive])}",
         status: "pending"
       })
 
-    {:ok, job} =
-      GiTF.Jobs.create(%{
+    {:ok, op} =
+      GiTF.Ops.create(%{
         title: "Test task for ghost",
         description: "Do the work",
-        quest_id: quest.id,
-        comb_id: comb.id
+        mission_id: mission.id,
+        sector_id: sector.id
       })
 
     {:ok, ghost} = Store.insert(:ghosts, %{name: "test-worker-ghost", status: "starting"})
 
-    # Assign the job to the ghost so the transition pending->assigned works
-    {:ok, _} = GiTF.Jobs.assign(job.id, ghost.id)
+    # Assign the op to the ghost so the transition pending->assigned works
+    {:ok, _} = GiTF.Ops.assign(op.id, ghost.id)
 
     %{
-      comb: comb,
-      quest: quest,
-      job: job,
+      sector: sector,
+      mission: mission,
+      op: op,
       ghost: ghost,
       gitf_root: gitf_root,
       repo_path: repo_path
@@ -56,8 +56,8 @@ defmodule GiTF.Ghost.WorkerTest do
       {:ok, pid} =
         Worker.start_link(
           ghost_id: ctx.ghost.id,
-          job_id: ctx.job.id,
-          comb_id: ctx.comb.id,
+          op_id: ctx.op.id,
+          sector_id: ctx.sector.id,
           gitf_root: ctx.gitf_root,
           claude_executable: "/bin/echo",
           prompt: "hello"
@@ -74,26 +74,26 @@ defmodule GiTF.Ghost.WorkerTest do
       assert ghost.status in ["stopped", "crashed"]
 
       # Job should be done or failed (validation may fail in test env)
-      {:ok, job} = GiTF.Jobs.get(ctx.job.id)
-      assert job.status in ["done", "failed"]
+      {:ok, op} = GiTF.Ops.get(ctx.op.id)
+      assert op.status in ["done", "failed"]
 
-      # A waggle message should have been sent to the queen
+      # A link_msg message should have been sent to the queen
       # The worker may report job_complete or validation_failed depending on
       # whether git post-processing succeeds in the test environment
-      waggles = GiTF.Waggle.list(from: ctx.ghost.id)
-      assert length(waggles) >= 1
-      assert Enum.any?(waggles, &(&1.subject in ["job_complete", "validation_failed"]))
+      links = GiTF.Link.list(from: ctx.ghost.id)
+      assert length(links) >= 1
+      assert Enum.any?(links, &(&1.subject in ["job_complete", "validation_failed"]))
     end
   end
 
   describe "start_link/1 with failing command" do
-    test "marks ghost crashed and job failed on non-zero exit", ctx do
+    test "marks ghost crashed and op failed on non-zero exit", ctx do
       # Use /usr/bin/false which exits with status 1
       {:ok, pid} =
         Worker.start_link(
           ghost_id: ctx.ghost.id,
-          job_id: ctx.job.id,
-          comb_id: ctx.comb.id,
+          op_id: ctx.op.id,
+          sector_id: ctx.sector.id,
           gitf_root: ctx.gitf_root,
           claude_executable: "/usr/bin/false",
           prompt: "fail"
@@ -107,12 +107,12 @@ defmodule GiTF.Ghost.WorkerTest do
       assert ghost.status == "crashed"
 
       # Job should be failed
-      {:ok, job} = GiTF.Jobs.get(ctx.job.id)
-      assert job.status == "failed"
+      {:ok, op} = GiTF.Ops.get(ctx.op.id)
+      assert op.status == "failed"
 
-      # A waggle message about failure
-      waggles = GiTF.Waggle.list(from: ctx.ghost.id)
-      assert Enum.any?(waggles, &(&1.subject == "job_failed"))
+      # A link_msg message about failure
+      links = GiTF.Link.list(from: ctx.ghost.id)
+      assert Enum.any?(links, &(&1.subject == "job_failed"))
     end
   end
 
@@ -122,8 +122,8 @@ defmodule GiTF.Ghost.WorkerTest do
       {:ok, pid} =
         Worker.start_link(
           ghost_id: ctx.ghost.id,
-          job_id: ctx.job.id,
-          comb_id: ctx.comb.id,
+          op_id: ctx.op.id,
+          sector_id: ctx.sector.id,
           gitf_root: ctx.gitf_root,
           claude_executable: "/bin/sleep",
           prompt: "30"
@@ -134,7 +134,7 @@ defmodule GiTF.Ghost.WorkerTest do
 
       assert {:ok, status} = Worker.status(ctx.ghost.id)
       assert status.ghost_id == ctx.ghost.id
-      assert status.job_id == ctx.job.id
+      assert status.op_id == ctx.op.id
       assert status.status == :running
 
       on_exit(fn ->
@@ -155,8 +155,8 @@ defmodule GiTF.Ghost.WorkerTest do
       {:ok, pid} =
         Worker.start_link(
           ghost_id: ctx.ghost.id,
-          job_id: ctx.job.id,
-          comb_id: ctx.comb.id,
+          op_id: ctx.op.id,
+          sector_id: ctx.sector.id,
           gitf_root: ctx.gitf_root,
           claude_executable: "/bin/sleep",
           prompt: "30"
@@ -183,8 +183,8 @@ defmodule GiTF.Ghost.WorkerTest do
       {:ok, pid} =
         Worker.start_link(
           ghost_id: ctx.ghost.id,
-          job_id: ctx.job.id,
-          comb_id: ctx.comb.id,
+          op_id: ctx.op.id,
+          sector_id: ctx.sector.id,
           gitf_root: ctx.gitf_root,
           claude_executable: "/bin/sleep",
           prompt: "30"
@@ -209,8 +209,8 @@ defmodule GiTF.Ghost.WorkerTest do
       spec =
         Worker.child_spec(
           ghost_id: "ghost-test",
-          job_id: "job-test",
-          comb_id: "cmb-test",
+          op_id: "op-test",
+          sector_id: "cmb-test",
           gitf_root: "/tmp"
         )
 

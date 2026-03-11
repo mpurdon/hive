@@ -2,23 +2,23 @@ defmodule GiTF.Major.Research do
   @moduledoc """
   Major's codebase research capabilities.
   
-  Analyzes comb structure, patterns, and architecture to inform planning.
+  Analyzes sector structure, patterns, and architecture to inform planning.
   Uses caching to avoid redundant analysis of unchanged codebases.
   """
 
   alias GiTF.Research.Cache
 
   @doc """
-  Research a comb's codebase structure and patterns.
+  Research a sector's codebase structure and patterns.
   
   Returns cached results if available and valid, otherwise performs fresh analysis.
   """
   @spec research_comb(String.t()) :: {:ok, map()} | {:error, term()}
-  def research_comb(comb_id) do
-    if Cache.is_valid?(comb_id) do
-      Cache.get_research(comb_id)
+  def research_comb(sector_id) do
+    if Cache.is_valid?(sector_id) do
+      Cache.get_research(sector_id)
     else
-      perform_fresh_research(comb_id)
+      perform_fresh_research(sector_id)
     end
   end
 
@@ -28,9 +28,9 @@ defmodule GiTF.Major.Research do
   Basic structure analysis - will be enhanced with model-based analysis later.
   """
   @spec perform_fresh_research(String.t()) :: {:ok, map()} | {:error, term()}
-  def perform_fresh_research(comb_id) do
-    with {:ok, comb} <- GiTF.Comb.get(comb_id),
-         {:ok, structure} <- analyze_structure(comb.path) do
+  def perform_fresh_research(sector_id) do
+    with {:ok, sector} <- GiTF.Sector.get(sector_id),
+         {:ok, structure} <- analyze_structure(sector.path) do
       
       research = %{
         structure: structure,
@@ -38,7 +38,7 @@ defmodule GiTF.Major.Research do
         analysis_type: "basic_structure"
       }
       
-      Cache.store_research(comb_id, research)
+      Cache.store_research(sector_id, research)
     end
   end
 
@@ -48,8 +48,8 @@ defmodule GiTF.Major.Research do
   Returns directory tree, file types, and basic patterns.
   """
   @spec analyze_structure(String.t()) :: {:ok, map()} | {:error, term()}
-  def analyze_structure(comb_path) do
-    with {:ok, files} <- list_source_files(comb_path) do
+  def analyze_structure(sector_path) do
+    with {:ok, files} <- list_source_files(sector_path) do
       structure = %{
         total_files: length(files),
         file_types: group_by_extension(files),

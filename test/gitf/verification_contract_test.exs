@@ -158,13 +158,13 @@ defmodule GiTF.VerificationContractTest do
 
   describe "build_contract/1 risk adjustments" do
     test "high risk adds performance check and raises thresholds" do
-      job = %{
-        comb_id: "nonexistent",
+      op = %{
+        sector_id: "nonexistent",
         risk_level: :high,
         verification_contract: nil
       }
 
-      contract = VerificationContract.build_contract(job)
+      contract = VerificationContract.build_contract(op)
       assert :performance in contract.required_checks
       # Thresholds should be raised ~10%
       assert contract.thresholds.composite > 70
@@ -173,21 +173,21 @@ defmodule GiTF.VerificationContractTest do
     end
 
     test "low risk uses default thresholds" do
-      job = %{
-        comb_id: "nonexistent",
+      op = %{
+        sector_id: "nonexistent",
         risk_level: :low,
         verification_contract: nil
       }
 
-      contract = VerificationContract.build_contract(job)
+      contract = VerificationContract.build_contract(op)
       assert contract.thresholds.composite == 70
       assert contract.thresholds.security == 60
       assert contract.auto_approve_eligible == true
     end
 
-    test "job-level contract overrides are applied" do
-      job = %{
-        comb_id: "nonexistent",
+    test "op-level contract overrides are applied" do
+      op = %{
+        sector_id: "nonexistent",
         risk_level: :low,
         verification_contract: %{
           required_checks: [:performance],
@@ -195,7 +195,7 @@ defmodule GiTF.VerificationContractTest do
         }
       }
 
-      contract = VerificationContract.build_contract(job)
+      contract = VerificationContract.build_contract(op)
       assert :performance in contract.required_checks
       assert :static in contract.required_checks
       assert contract.thresholds.composite == 90

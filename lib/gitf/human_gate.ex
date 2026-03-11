@@ -2,7 +2,7 @@ defmodule GiTF.HumanGate do
   @moduledoc """
   Human-in-the-loop approval gates.
 
-  Provides mandatory human approval before merge for high-criticality quests.
+  Provides mandatory human approval before merge for high-criticality missions.
   Acts as a "liability firebreak" — ensuring a human reviews and signs off
   on high-risk changes before they land.
   """
@@ -11,31 +11,31 @@ defmodule GiTF.HumanGate do
   alias GiTF.Store
 
   @doc """
-  Returns true if a quest requires human approval before merge.
+  Returns true if a mission requires human approval before merge.
 
   Criteria:
-  - Any non-phase job has `:high` or `:critical` risk level
+  - Any non-phase op has `:high` or `:critical` risk level
   - Comb config has `require_human_approval: true`
   """
   @spec requires_approval?(map()) :: boolean()
-  def requires_approval?(quest) do
+  def requires_approval?(mission) do
     comb_requires? =
-      case Map.get(quest, :comb_id) do
+      case Map.get(mission, :sector_id) do
         nil -> false
-        comb_id ->
-          case Store.get(:combs, comb_id) do
+        sector_id ->
+          case Store.get(:sectors, sector_id) do
             nil -> false
-            comb -> Map.get(comb, :require_human_approval, false) == true
+            sector -> Map.get(sector, :require_human_approval, false) == true
           end
       end
 
-    jobs = Map.get(quest, :jobs, [])
+    ops = Map.get(mission, :ops, [])
 
     critical_risk_jobs? =
-      jobs
+      ops
       |> Enum.reject(& &1[:phase_job])
-      |> Enum.any?(fn job ->
-        risk = Map.get(job, :risk_level)
+      |> Enum.any?(fn op ->
+        risk = Map.get(op, :risk_level)
         risk in [:critical] or risk in ["critical"]
       end)
 
@@ -43,16 +43,16 @@ defmodule GiTF.HumanGate do
   end
 
   @doc """
-  Creates an approval request for a quest.
+  Creates an approval request for a mission.
 
-  Builds a summary, stores the request, sends a waggle to the queen,
+  Builds a summary, stores the request, sends a link_msg to the queen,
   and broadcasts on "section:alerts".
   """
   @spec request_approval(String.t()) :: {:ok, map()} | {:error, term()}
-  def request_approval(quest_id) do
-    with {:ok, quest} <- GiTF.Quests.get(quest_id) do
-      jobs = Map.get(quest, :jobs, [])
-      impl_jobs = Enum.reject(jobs, & &1[:phase_job])
+  def request_approval(mission_id) do
+    with {:ok, mission} <- GiTF.Missions.get(mission_id) do
+      ops = Map.get(mission, :ops, [])
+      impl_jobs = Enum.reject(ops, & &1[:phase_job])
 
       risk_levels =
         impl_jobs
@@ -65,9 +65,9 @@ defmodule GiTF.HumanGate do
         |> Enum.uniq()
 
       request = %{
-        quest_id: quest_id,
-        quest_name: quest.name,
-        goal: quest.goal,
+        mission_id: mission_id,
+        quest_name: mission.name,
+        goal: mission.goal,
         risk_levels: risk_levels,
         files_touched: files_touched,
         job_count: length(impl_jobs),
@@ -77,13 +77,13 @@ defmodule GiTF.HumanGate do
 
       {:ok, stored} = Store.insert(:approval_requests, request)
 
-      # Send waggle to queen (best-effort)
+      # Send link_msg to queen (best-effort)
       try do
-        GiTF.Waggle.send(
+        GiTF.Link.send(
           "system",
           "major",
           "human_approval_needed",
-          Jason.encode!(%{quest_id: quest_id, quest_name: quest.name})
+          Jason.encode!(%{mission_id: mission_id, quest_name: mission.name})
         )
       rescue
         _ -> :ok
@@ -94,25 +94,25 @@ defmodule GiTF.HumanGate do
         Phoenix.PubSub.broadcast(
           GiTF.PubSub,
           "section:alerts",
-          {:human_approval_needed, quest_id, quest.name}
+          {:human_approval_needed, mission_id, mission.name}
         )
       rescue
         _ -> :ok
       end
 
-      Logger.info("Human approval requested for quest #{quest_id} (#{quest.name})")
+      Logger.info("Human approval requested for mission #{mission_id} (#{mission.name})")
 
       {:ok, stored}
     end
   end
 
   @doc """
-  Approves a quest for merge.
+  Approves a mission for merge.
 
-  Stores an approval artifact on the quest and updates the approval request status.
+  Stores an approval artifact on the mission and updates the approval request status.
   """
   @spec approve(String.t(), map()) :: {:ok, map()} | {:error, term()}
-  def approve(quest_id, opts \\ %{}) do
+  def approve(mission_id, opts \\ %{}) do
     approved_by = Map.get(opts, :approved_by, "human")
     notes = Map.get(opts, :notes)
 
@@ -123,42 +123,42 @@ defmodule GiTF.HumanGate do
       "notes" => notes
     }
 
-    with {:ok, _} <- GiTF.Quests.store_artifact(quest_id, "approval", artifact) do
-      update_request_status(quest_id, "approved")
-      Logger.info("Quest #{quest_id} approved by #{approved_by}")
+    with {:ok, _} <- GiTF.Missions.store_artifact(mission_id, "approval", artifact) do
+      update_request_status(mission_id, "approved")
+      Logger.info("Quest #{mission_id} approved by #{approved_by}")
       {:ok, artifact}
     end
   end
 
   @doc """
-  Rejects a quest.
+  Rejects a mission.
 
   Stores a rejection artifact and updates the approval request status.
   """
   @spec reject(String.t(), String.t()) :: {:ok, map()} | {:error, term()}
-  def reject(quest_id, reason) do
+  def reject(mission_id, reason) do
     artifact = %{
       "approved" => false,
       "rejected_at" => DateTime.utc_now() |> DateTime.to_iso8601(),
       "reason" => reason
     }
 
-    with {:ok, _} <- GiTF.Quests.store_artifact(quest_id, "approval", artifact) do
-      update_request_status(quest_id, "rejected")
-      Logger.info("Quest #{quest_id} rejected: #{reason}")
+    with {:ok, _} <- GiTF.Missions.store_artifact(mission_id, "approval", artifact) do
+      update_request_status(mission_id, "rejected")
+      Logger.info("Quest #{mission_id} rejected: #{reason}")
       {:ok, artifact}
     end
   end
 
   @doc """
-  Returns the approval status for a quest.
+  Returns the approval status for a mission.
   """
   @spec approval_status(String.t()) :: :pending | :approved | :rejected | :not_required
-  def approval_status(quest_id) do
-    case GiTF.Quests.get_artifact(quest_id, "approval") do
+  def approval_status(mission_id) do
+    case GiTF.Missions.get_artifact(mission_id, "approval") do
       nil ->
         # Check if there's a pending request
-        case find_request(quest_id) do
+        case find_request(mission_id) do
           nil -> :not_required
           %{status: "pending"} -> :pending
           %{status: "approved"} -> :approved
@@ -183,12 +183,12 @@ defmodule GiTF.HumanGate do
 
   # -- Private ---------------------------------------------------------------
 
-  defp find_request(quest_id) do
-    Store.find_one(:approval_requests, fn r -> r.quest_id == quest_id end)
+  defp find_request(mission_id) do
+    Store.find_one(:approval_requests, fn r -> r.mission_id == mission_id end)
   end
 
-  defp update_request_status(quest_id, status) do
-    case find_request(quest_id) do
+  defp update_request_status(mission_id, status) do
+    case find_request(mission_id) do
       nil -> :ok
       request ->
         updated = Map.put(request, :status, status)

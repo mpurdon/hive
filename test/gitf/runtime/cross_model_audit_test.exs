@@ -45,17 +45,17 @@ defmodule GiTF.Runtime.CrossModelAudit.EnabledTest do
   end
 
   describe "enabled?/1" do
-    test "returns false when comb not found" do
+    test "returns false when sector not found" do
       refute CrossModelAudit.enabled?("nonexistent")
     end
 
     test "returns false when cross_model_audit not set" do
-      GiTF.Store.insert(:combs, %{id: "cmb_test", path: "/tmp", name: "test"})
+      GiTF.Store.insert(:sectors, %{id: "cmb_test", path: "/tmp", name: "test"})
       refute CrossModelAudit.enabled?("cmb_test")
     end
 
     test "returns true when cross_model_audit is true" do
-      GiTF.Store.insert(:combs, %{id: "cmb_audit", path: "/tmp", name: "audit", cross_model_audit: true})
+      GiTF.Store.insert(:sectors, %{id: "cmb_audit", path: "/tmp", name: "audit", cross_model_audit: true})
       assert CrossModelAudit.enabled?("cmb_audit")
     end
   end

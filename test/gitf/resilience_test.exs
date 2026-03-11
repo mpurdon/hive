@@ -24,18 +24,18 @@ defmodule GiTF.ResilienceTest do
       assert result.model == "claude-sonnet"
     end
 
-    test "flags job for review on verification failure" do
-      job = %{
-        id: "job-verify-fail",
+    test "flags op for review on verification failure" do
+      op = %{
+        id: "op-verify-fail",
         status: "running",
         created_at: DateTime.utc_now(),
         updated_at: DateTime.utc_now()
       }
-      Store.insert(:jobs, job)
+      Store.insert(:ops, op)
       
-      {:ok, :flagged_for_review} = Resilience.handle_failure(:verification, :failed, %{job_id: job.id})
+      {:ok, :flagged_for_review} = Resilience.handle_failure(:verification, :failed, %{op_id: op.id})
       
-      updated = Store.get(:jobs, job.id)
+      updated = Store.get(:ops, op.id)
       assert updated.needs_review == true
     end
   end
@@ -62,29 +62,29 @@ defmodule GiTF.ResilienceTest do
 
   describe "detect_deadlock/1" do
     test "detects no deadlock in linear dependencies" do
-      quest_id = "qst-linear"
+      mission_id = "qst-linear"
       
-      # Create jobs with linear dependencies
-      job1 = %{id: "job-1", quest_id: quest_id, depends_on: [], created_at: DateTime.utc_now(), updated_at: DateTime.utc_now()}
-      job2 = %{id: "job-2", quest_id: quest_id, depends_on: ["job-1"], created_at: DateTime.utc_now(), updated_at: DateTime.utc_now()}
+      # Create ops with linear dependencies
+      job1 = %{id: "op-1", mission_id: mission_id, depends_on: [], created_at: DateTime.utc_now(), updated_at: DateTime.utc_now()}
+      job2 = %{id: "op-2", mission_id: mission_id, depends_on: ["op-1"], created_at: DateTime.utc_now(), updated_at: DateTime.utc_now()}
       
-      Store.insert(:jobs, job1)
-      Store.insert(:jobs, job2)
+      Store.insert(:ops, job1)
+      Store.insert(:ops, job2)
       
-      assert {:ok, :no_deadlock} = Resilience.detect_deadlock(quest_id)
+      assert {:ok, :no_deadlock} = Resilience.detect_deadlock(mission_id)
     end
 
     test "detects circular dependency deadlock" do
-      quest_id = "qst-circular"
+      mission_id = "qst-circular"
       
-      # Create jobs with circular dependencies
-      job1 = %{id: "job-a", quest_id: quest_id, depends_on: ["job-b"], created_at: DateTime.utc_now(), updated_at: DateTime.utc_now()}
-      job2 = %{id: "job-b", quest_id: quest_id, depends_on: ["job-a"], created_at: DateTime.utc_now(), updated_at: DateTime.utc_now()}
+      # Create ops with circular dependencies
+      job1 = %{id: "op-a", mission_id: mission_id, depends_on: ["op-b"], created_at: DateTime.utc_now(), updated_at: DateTime.utc_now()}
+      job2 = %{id: "op-b", mission_id: mission_id, depends_on: ["op-a"], created_at: DateTime.utc_now(), updated_at: DateTime.utc_now()}
       
-      Store.insert(:jobs, job1)
-      Store.insert(:jobs, job2)
+      Store.insert(:ops, job1)
+      Store.insert(:ops, job2)
       
-      assert {:error, {:deadlock, cycles}} = Resilience.detect_deadlock(quest_id)
+      assert {:error, {:deadlock, cycles}} = Resilience.detect_deadlock(mission_id)
       assert length(cycles) > 0
     end
   end

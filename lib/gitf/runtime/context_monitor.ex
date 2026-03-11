@@ -98,16 +98,16 @@ defmodule GiTF.Runtime.ContextMonitor do
   @spec create_snapshot(String.t()) :: {:ok, map()} | {:error, term()}
   def create_snapshot(ghost_id) do
     with {:ok, ghost} <- Store.fetch(:ghosts, ghost_id),
-         {:ok, job} <- GiTF.Jobs.get(ghost.job_id) do
+         {:ok, op} <- GiTF.Ops.get(ghost.op_id) do
       snapshot = %{
         id: "snap-#{:erlang.unique_integer([:positive])}",
         ghost_id: ghost_id,
         snapshot_at: DateTime.utc_now(),
         tokens_used: Map.get(ghost, :context_tokens_used, 0),
         percentage: Map.get(ghost, :context_percentage, 0.0),
-        job_id: job.id,
-        job_title: job.title,
-        job_status: job.status,
+        op_id: op.id,
+        job_title: op.title,
+        op_status: op.status,
         inserted_at: DateTime.utc_now()
       }
 

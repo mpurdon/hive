@@ -1,56 +1,56 @@
 defmodule GiTF.Goals do
   @moduledoc """
-  Validates that completed work achieves quest goals.
+  Validates that completed work achieves mission goals.
   Ensures implementations are goal-focused and complete.
   """
 
   alias GiTF.Store
 
-  @doc "Validate quest completion against stated goals"
-  def validate_quest_completion(quest_id) do
-    quest = Store.get(:quests, quest_id)
-    jobs = Store.all(:jobs) |> Enum.filter(&(&1.quest_id == quest_id))
+  @doc "Validate mission completion against stated goals"
+  def validate_quest_completion(mission_id) do
+    mission = Store.get(:missions, mission_id)
+    ops = Store.all(:ops) |> Enum.filter(&(&1.mission_id == mission_id))
     
     %{
-      goal_achieved: analyze_goal_achievement(quest, jobs),
-      simplicity_score: measure_simplicity(jobs),
-      completeness: check_completeness(quest, jobs),
-      recommendation: make_recommendation(quest, jobs)
+      goal_achieved: analyze_goal_achievement(mission, ops),
+      simplicity_score: measure_simplicity(ops),
+      completeness: check_completeness(mission, ops),
+      recommendation: make_recommendation(mission, ops)
     }
   end
 
-  @doc "Check if a single job achieves its goal"
-  def validate_job(job_id) do
-    job = Store.get(:jobs, job_id)
-    quest = Store.get(:quests, job.quest_id)
+  @doc "Check if a single op achieves its goal"
+  def validate_job(op_id) do
+    op = Store.get(:ops, op_id)
+    mission = Store.get(:missions, op.mission_id)
     
     %{
-      goal_met: job_achieves_goal?(job, quest),
-      scope_violations: check_scope_violations(job, quest),
-      simplicity: measure_job_simplicity(job)
+      goal_met: job_achieves_goal?(op, mission),
+      scope_violations: check_scope_violations(op, mission),
+      simplicity: measure_job_simplicity(op)
     }
   end
 
-  defp analyze_goal_achievement(_quest, jobs) do
-    completed = Enum.filter(jobs, &(&1.status == "completed"))
+  defp analyze_goal_achievement(_quest, ops) do
+    completed = Enum.filter(ops, &(&1.status == "completed"))
     
     if Enum.empty?(completed) do
-      {:incomplete, "No completed jobs"}
+      {:incomplete, "No completed ops"}
     else
       # Check if all required functionality is present
-      all_done = Enum.all?(jobs, &(&1.status in ["completed", "verified"]))
+      all_done = Enum.all?(ops, &(&1.status in ["completed", "verified"]))
       
       if all_done do
-        {:achieved, "All jobs completed"}
+        {:achieved, "All ops completed"}
       else
-        {:partial, "Some jobs incomplete"}
+        {:partial, "Some ops incomplete"}
       end
     end
   end
 
-  defp measure_simplicity(jobs) do
+  defp measure_simplicity(ops) do
     # Simple heuristic: fewer files changed = simpler
-    total_files = jobs |> Enum.map(&(&1[:files_changed] || 1)) |> Enum.sum()
+    total_files = ops |> Enum.map(&(&1[:files_changed] || 1)) |> Enum.sum()
     
     cond do
       total_files <= 5 -> 100
@@ -60,8 +60,8 @@ defmodule GiTF.Goals do
     end
   end
 
-  defp check_completeness(_quest, jobs) do
-    required_jobs = Enum.filter(jobs, &(&1.status != "cancelled"))
+  defp check_completeness(_quest, ops) do
+    required_jobs = Enum.filter(ops, &(&1.status != "cancelled"))
     completed_jobs = Enum.filter(required_jobs, &(&1.status in ["completed", "verified"]))
     
     %{
@@ -71,9 +71,9 @@ defmodule GiTF.Goals do
     }
   end
 
-  defp make_recommendation(quest, jobs) do
-    {status, _} = analyze_goal_achievement(quest, jobs)
-    simplicity = measure_simplicity(jobs)
+  defp make_recommendation(mission, ops) do
+    {status, _} = analyze_goal_achievement(mission, ops)
+    simplicity = measure_simplicity(ops)
     
     cond do
       status == :achieved && simplicity >= 80 -> :approve
@@ -84,19 +84,19 @@ defmodule GiTF.Goals do
     end
   end
 
-  defp job_achieves_goal?(job, _quest) do
-    # Basic check: job is completed and verified
-    job.status in ["completed", "verified"] && 
-    (job.verification_status == "passed" || is_nil(job.verification_status))
+  defp job_achieves_goal?(op, _quest) do
+    # Basic check: op is completed and verified
+    op.status in ["completed", "verified"] && 
+    (op.verification_status == "passed" || is_nil(op.verification_status))
   end
 
-  defp check_scope_violations(job, _quest) do
+  defp check_scope_violations(op, _quest) do
     # Check for common scope violations
     violations = []
     
     # Too many files changed
-    violations = if (job[:files_changed] || 0) > 10 do
-      ["Too many files changed (#{job[:files_changed]})" | violations]
+    violations = if (op[:files_changed] || 0) > 10 do
+      ["Too many files changed (#{op[:files_changed]})" | violations]
     else
       violations
     end
@@ -104,8 +104,8 @@ defmodule GiTF.Goals do
     violations
   end
 
-  defp measure_job_simplicity(job) do
-    files = job[:files_changed] || 1
+  defp measure_job_simplicity(op) do
+    files = op[:files_changed] || 1
     
     cond do
       files <= 2 -> 100

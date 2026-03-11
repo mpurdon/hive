@@ -57,13 +57,13 @@ defmodule GiTF.Observability do
   defp run_checks do
     alerts = Alerts.check_alerts()
 
-    # Check for zombie state (active quests but no progress)
+    # Check for zombie state (active missions but no progress)
     alerts =
       if Health.alive?() do
         alerts
       else
         GiTF.Telemetry.emit([:gitf, :alert, :raised], %{}, %{type: :zombie_detected})
-        [{:zombie_detected, "GiTF appears unproductive: active quests but no job activity for 30+ minutes"} | alerts]
+        [{:zombie_detected, "GiTF appears unproductive: active missions but no op activity for 30+ minutes"} | alerts]
       end
 
     if alerts != [] do

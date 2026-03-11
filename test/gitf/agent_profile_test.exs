@@ -228,9 +228,9 @@ defmodule GiTF.AgentProfileTest do
       File.mkdir_p!(tmp)
       on_exit(fn -> File.rm_rf!(tmp) end)
 
-      job = %{title: "Fix the bug", description: "Something is broken"}
+      op = %{title: "Fix the bug", description: "Something is broken"}
 
-      assert {:ok, :no_agent} = AgentProfile.ensure_agent(tmp, job)
+      assert {:ok, :no_agent} = AgentProfile.ensure_agent(tmp, op)
     end
 
     test "returns existing agent when one already exists (dedup)" do
@@ -243,10 +243,10 @@ defmodule GiTF.AgentProfileTest do
 
       on_exit(fn -> File.rm_rf!(tmp) end)
 
-      # Even though the job says "Python Django", the existing elixir agent wins
-      job = %{title: "Python Django app", description: "Build a Django backend"}
+      # Even though the op says "Python Django", the existing elixir agent wins
+      op = %{title: "Python Django app", description: "Build a Django backend"}
 
-      assert {:ok, ^agent_path} = AgentProfile.ensure_agent(tmp, job)
+      assert {:ok, ^agent_path} = AgentProfile.ensure_agent(tmp, op)
     end
 
     test "returns {:ok, path} when agent file already exists" do
@@ -259,9 +259,9 @@ defmodule GiTF.AgentProfileTest do
 
       on_exit(fn -> File.rm_rf!(tmp) end)
 
-      job = %{title: "Build Elixir API", description: ""}
+      op = %{title: "Build Elixir API", description: ""}
 
-      assert {:ok, ^agent_path} = AgentProfile.ensure_agent(tmp, job)
+      assert {:ok, ^agent_path} = AgentProfile.ensure_agent(tmp, op)
     end
 
     test "returns {:ok, path} when framework-specific agent file already exists" do
@@ -274,12 +274,12 @@ defmodule GiTF.AgentProfileTest do
 
       on_exit(fn -> File.rm_rf!(tmp) end)
 
-      job = %{title: "Phoenix web app", description: ""}
+      op = %{title: "Phoenix web app", description: ""}
 
-      assert {:ok, ^agent_path} = AgentProfile.ensure_agent(tmp, job)
+      assert {:ok, ^agent_path} = AgentProfile.ensure_agent(tmp, op)
     end
 
-    test "uses comb-level detection over job-level when both match" do
+    test "uses sector-level detection over op-level when both match" do
       tmp = Path.join(System.tmp_dir!(), "gitf_agent_test_#{:erlang.unique_integer([:positive])}")
       File.mkdir_p!(tmp)
       on_exit(fn -> File.rm_rf!(tmp) end)
@@ -297,32 +297,32 @@ defmodule GiTF.AgentProfileTest do
 
       assert comb_key == "strands-sdk"
       assert job_key == "python"
-      # ensure_agent uses: detect_from_comb || detect_technology — comb wins
+      # ensure_agent uses: detect_from_comb || detect_technology — sector wins
       assert comb_key != nil
     end
   end
 
   describe "install_agents/2" do
-    test "copies agent files from comb to worktree" do
-      comb =
+    test "copies agent files from sector to worktree" do
+      sector =
         Path.join(System.tmp_dir!(), "gitf_install_agents_#{:erlang.unique_integer([:positive])}")
 
       worktree =
         Path.join(System.tmp_dir!(), "gitf_install_wt_#{:erlang.unique_integer([:positive])}")
 
-      comb_agents = Path.join(comb, ".claude/agents")
+      comb_agents = Path.join(sector, ".claude/agents")
       File.mkdir_p!(comb_agents)
       File.mkdir_p!(worktree)
 
       on_exit(fn ->
-        File.rm_rf!(comb)
+        File.rm_rf!(sector)
         File.rm_rf!(worktree)
       end)
 
       File.write!(Path.join(comb_agents, "elixir-expert.md"), "# Elixir Expert")
       File.write!(Path.join(comb_agents, "rust-expert.md"), "# Rust Expert")
 
-      assert :ok = AgentProfile.install_agents(comb, worktree)
+      assert :ok = AgentProfile.install_agents(sector, worktree)
 
       wt_agents = Path.join(worktree, ".claude/agents")
       assert File.read!(Path.join(wt_agents, "elixir-expert.md")) == "# Elixir Expert"
@@ -330,7 +330,7 @@ defmodule GiTF.AgentProfileTest do
     end
 
     test "does not overwrite existing agents in worktree" do
-      comb =
+      sector =
         Path.join(System.tmp_dir!(), "gitf_install_noover_#{:erlang.unique_integer([:positive])}")
 
       worktree =
@@ -339,26 +339,26 @@ defmodule GiTF.AgentProfileTest do
           "gitf_install_noover_wt_#{:erlang.unique_integer([:positive])}"
         )
 
-      comb_agents = Path.join(comb, ".claude/agents")
+      comb_agents = Path.join(sector, ".claude/agents")
       wt_agents = Path.join(worktree, ".claude/agents")
       File.mkdir_p!(comb_agents)
       File.mkdir_p!(wt_agents)
 
       on_exit(fn ->
-        File.rm_rf!(comb)
+        File.rm_rf!(sector)
         File.rm_rf!(worktree)
       end)
 
       File.write!(Path.join(comb_agents, "elixir-expert.md"), "# Comb Version")
       File.write!(Path.join(wt_agents, "elixir-expert.md"), "# Worktree Version")
 
-      assert :ok = AgentProfile.install_agents(comb, worktree)
+      assert :ok = AgentProfile.install_agents(sector, worktree)
 
       assert File.read!(Path.join(wt_agents, "elixir-expert.md")) == "# Worktree Version"
     end
 
-    test "is a no-op when comb has no agents dir" do
-      comb =
+    test "is a no-op when sector has no agents dir" do
+      sector =
         Path.join(System.tmp_dir!(), "gitf_install_noop_#{:erlang.unique_integer([:positive])}")
 
       worktree =
@@ -367,15 +367,15 @@ defmodule GiTF.AgentProfileTest do
           "gitf_install_noop_wt_#{:erlang.unique_integer([:positive])}"
         )
 
-      File.mkdir_p!(comb)
+      File.mkdir_p!(sector)
       File.mkdir_p!(worktree)
 
       on_exit(fn ->
-        File.rm_rf!(comb)
+        File.rm_rf!(sector)
         File.rm_rf!(worktree)
       end)
 
-      assert :ok = AgentProfile.install_agents(comb, worktree)
+      assert :ok = AgentProfile.install_agents(sector, worktree)
 
       refute File.dir?(Path.join(worktree, ".claude/agents"))
     end

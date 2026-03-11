@@ -46,37 +46,37 @@ defmodule GiTF.Resilience do
   end
 
   @doc """
-  Detect circular dependencies in a quest.
+  Detect circular dependencies in a mission.
 
-  Uses `GiTF.Jobs.has_cycle?/2` internally — this is a convenience wrapper
-  that scans all jobs in a quest and reports any cycles found.
+  Uses `GiTF.Ops.has_cycle?/2` internally — this is a convenience wrapper
+  that scans all ops in a mission and reports any cycles found.
   """
-  def detect_deadlock(quest_id) do
-    jobs = GiTF.Jobs.list(quest_id: quest_id)
+  def detect_deadlock(mission_id) do
+    ops = GiTF.Ops.list(mission_id: mission_id)
 
-    # Build edges from both job_dependencies collection AND legacy depends_on field
-    stored_deps = GiTF.Store.all(:job_dependencies)
+    # Build edges from both op_dependencies collection AND legacy depends_on field
+    stored_deps = GiTF.Store.all(:op_dependencies)
 
     stored_edges =
       Enum.flat_map(stored_deps, fn dep ->
-        [{dep.job_id, dep.depends_on_id}]
+        [{dep.op_id, dep.depends_on_id}]
       end)
 
     legacy_edges =
-      Enum.flat_map(jobs, fn job ->
-        (Map.get(job, :depends_on, []) || [])
-        |> Enum.map(fn dep_id -> {job.id, dep_id} end)
+      Enum.flat_map(ops, fn op ->
+        (Map.get(op, :depends_on, []) || [])
+        |> Enum.map(fn dep_id -> {op.id, dep_id} end)
       end)
 
     all_edges = Enum.uniq(stored_edges ++ legacy_edges)
 
     cycles =
-      Enum.flat_map(jobs, fn job ->
-        job_deps = Enum.filter(all_edges, fn {from, _to} -> from == job.id end)
+      Enum.flat_map(ops, fn op ->
+        job_deps = Enum.filter(all_edges, fn {from, _to} -> from == op.id end)
 
         Enum.flat_map(job_deps, fn {_from, dep_id} ->
-          if edge_reachable?(dep_id, job.id, all_edges, MapSet.new()) do
-            [{job.id, dep_id}]
+          if edge_reachable?(dep_id, op.id, all_edges, MapSet.new()) do
+            [{op.id, dep_id}]
           else
             []
           end
@@ -93,9 +93,9 @@ defmodule GiTF.Resilience do
   @doc """
   Resolve deadlock by breaking circular dependencies.
   """
-  def resolve_deadlock(_quest_id, cycles) do
+  def resolve_deadlock(_mission_id, cycles) do
     Enum.each(cycles, fn {from_job, to_job} ->
-      GiTF.Jobs.remove_dependency(from_job, to_job)
+      GiTF.Ops.remove_dependency(from_job, to_job)
       Logger.info("Broke deadlock by removing dependency: #{from_job} -> #{to_job}")
     end)
 
@@ -112,8 +112,8 @@ defmodule GiTF.Resilience do
         visited = MapSet.put(visited, from)
 
         edges
-        |> Enum.filter(fn {job_id, _dep} -> job_id == from end)
-        |> Enum.any?(fn {_job_id, dep_id} -> edge_reachable?(dep_id, target, edges, visited) end)
+        |> Enum.filter(fn {op_id, _dep} -> op_id == from end)
+        |> Enum.any?(fn {_op_id, dep_id} -> edge_reachable?(dep_id, target, edges, visited) end)
       end
     end
   end
@@ -145,12 +145,12 @@ defmodule GiTF.Resilience do
     end
   end
 
-  defp skip_and_flag(%{job_id: job_id}) do
-    # Mark job for manual review
-    case GiTF.Jobs.get(job_id) do
-      {:ok, job} ->
-        updated = Map.put(job, :needs_review, true)
-        GiTF.Store.put(:jobs, updated)
+  defp skip_and_flag(%{op_id: op_id}) do
+    # Mark op for manual review
+    case GiTF.Ops.get(op_id) do
+      {:ok, op} ->
+        updated = Map.put(op, :needs_review, true)
+        GiTF.Store.put(:ops, updated)
         {:ok, :flagged_for_review}
       
       error -> error
@@ -159,15 +159,15 @@ defmodule GiTF.Resilience do
 
   defp skip_and_flag(_context), do: {:ok, :skipped}
 
-  defp regenerate_research(%{comb_id: comb_id}) do
-    Logger.info("Regenerating research for comb #{comb_id}")
+  defp regenerate_research(%{sector_id: sector_id}) do
+    Logger.info("Regenerating research for sector #{sector_id}")
     {:ok, :research_regenerated}
   end
 
   defp regenerate_research(_context), do: {:ok, :skipped}
 
-  defp continue_without_quality(%{job_id: job_id}) do
-    Logger.warning("Continuing job #{job_id} without quality check")
+  defp continue_without_quality(%{op_id: op_id}) do
+    Logger.warning("Continuing op #{op_id} without quality check")
     {:ok, :quality_check_skipped}
   end
 

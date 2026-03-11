@@ -4,7 +4,7 @@ defmodule GiTF.Validator do
 
   Runs an optional custom validation command (e.g. `mix test`) and
   optionally a headless Claude assessment of the diff against the
-  job description. Pure context module.
+  op description. Pure context module.
   """
 
   require Logger
@@ -14,22 +14,22 @@ defmodule GiTF.Validator do
   @doc """
   Validates a completed ghost's work.
 
-  1. Runs `validation_command` in the cell worktree if the comb has one.
+  1. Runs `validation_command` in the shell worktree if the sector has one.
   2. Runs headless Claude validation to assess the diff.
 
   Returns `{:ok, :pass}`, `{:ok, :skip}`, or `{:error, reason, details}`.
   """
   @spec validate(String.t(), map(), String.t()) ::
           {:ok, atom()} | {:error, term()} | {:error, term(), term()}
-  def validate(_ghost_id, job, cell_id) do
-    with {:ok, cell} <- fetch_cell(cell_id),
-         {:ok, comb} <- fetch_comb(cell.comb_id) do
+  def validate(_ghost_id, op, shell_id) do
+    with {:ok, shell} <- fetch_cell(shell_id),
+         {:ok, sector} <- fetch_comb(shell.sector_id) do
       results = []
 
       # Run custom validation command if configured
       results =
-        if comb.validation_command do
-          case run_custom_validation(cell, comb.validation_command) do
+        if sector.validation_command do
+          case run_custom_validation(shell, sector.validation_command) do
             :ok -> results
             {:error, reason} -> [{:error, :custom_validation_failed, reason} | results]
           end
@@ -39,7 +39,7 @@ defmodule GiTF.Validator do
 
       # Run Claude validation
       results =
-        case run_claude_validation(job, cell) do
+        case run_claude_validation(op, shell) do
           {:ok, :pass} -> results
           {:ok, :skip} -> results
           {:error, reason, details} -> [{:error, reason, details} | results]
@@ -55,12 +55,12 @@ defmodule GiTF.Validator do
 
   @validation_timeout_ms 120_000
 
-  @doc "Runs a custom shell command in the cell worktree."
+  @doc "Runs a custom shell command in the shell worktree."
   @spec run_custom_validation(map(), String.t()) :: :ok | {:error, String.t()}
-  def run_custom_validation(cell, command) do
+  def run_custom_validation(shell, command) do
     task = Task.async(fn ->
       System.cmd("sh", ["-c", command],
-        cd: cell.worktree_path,
+        cd: shell.worktree_path,
         stderr_to_stdout: true,
         env: [{"MIX_ENV", "test"}]
       )
@@ -80,16 +80,16 @@ defmodule GiTF.Validator do
     e -> {:error, "Validation command error: #{Exception.message(e)}"}
   end
 
-  @doc "Runs model validation to assess whether the diff solves the job."
+  @doc "Runs model validation to assess whether the diff solves the op."
   @spec run_claude_validation(map(), map()) ::
           {:ok, :pass} | {:ok, :skip} | {:error, term(), term()}
-  def run_claude_validation(job, cell) do
-    case get_diff(cell) do
+  def run_claude_validation(op, shell) do
+    case get_diff(shell) do
       {:ok, ""} ->
         {:ok, :skip}
 
       {:ok, diff} ->
-        prompt = build_validation_prompt(job, diff)
+        prompt = build_validation_prompt(op, diff)
 
         if GiTF.Runtime.ModelResolver.api_mode?() do
           # API mode: use generate_text (no tools needed for validation)
@@ -99,7 +99,7 @@ defmodule GiTF.Validator do
           end
         else
           # CLI mode: spawn headless and collect
-          case GiTF.Runtime.Models.spawn_headless(prompt, cell.worktree_path) do
+          case GiTF.Runtime.Models.spawn_headless(prompt, shell.worktree_path) do
             {:ok, port} ->
               collect_validation_result(port)
 
@@ -119,14 +119,14 @@ defmodule GiTF.Validator do
 
   @doc "Builds the validation prompt for Claude."
   @spec build_validation_prompt(map(), String.t()) :: String.t()
-  def build_validation_prompt(job, diff) do
-    description = job.description || ""
+  def build_validation_prompt(op, diff) do
+    description = op.description || ""
 
     """
     You are a code reviewer. Evaluate whether the following changes solve the task.
 
     ## Task
-    Title: #{job.title}
+    Title: #{op.title}
     Description: #{description}
 
     ## Changes (git diff)
@@ -141,23 +141,23 @@ defmodule GiTF.Validator do
 
   # -- Private -----------------------------------------------------------------
 
-  defp fetch_cell(cell_id) do
-    case Store.get(:cells, cell_id) do
+  defp fetch_cell(shell_id) do
+    case Store.get(:shells, shell_id) do
       nil -> {:error, :cell_not_found}
-      cell -> {:ok, cell}
+      shell -> {:ok, shell}
     end
   end
 
-  defp fetch_comb(comb_id) do
-    case Store.get(:combs, comb_id) do
+  defp fetch_comb(sector_id) do
+    case Store.get(:sectors, sector_id) do
       nil -> {:error, :comb_not_found}
-      comb -> {:ok, comb}
+      sector -> {:ok, sector}
     end
   end
 
-  defp get_diff(cell) do
+  defp get_diff(shell) do
     case GiTF.Git.safe_cmd( ["diff", "HEAD~1..HEAD"],
-           cd: cell.worktree_path,
+           cd: shell.worktree_path,
            stderr_to_stdout: true
          ) do
       {output, 0} ->
@@ -165,7 +165,7 @@ defmodule GiTF.Validator do
 
       {_, _} ->
         # Fallback: diff against the working tree
-        case GiTF.Git.safe_cmd( ["diff"], cd: cell.worktree_path, stderr_to_stdout: true) do
+        case GiTF.Git.safe_cmd( ["diff"], cd: shell.worktree_path, stderr_to_stdout: true) do
           {output, 0} -> {:ok, output}
           {output, _} -> {:error, output}
         end

@@ -2,35 +2,35 @@ defmodule GiTF.Research.Cache do
   @moduledoc """
   Research caching system to avoid redundant codebase analysis.
   
-  Caches research results per comb with git commit hash tracking.
+  Caches research results per sector with git commit hash tracking.
   Provides file-level granular caching for incremental updates.
   """
 
   alias GiTF.Store
 
   @doc """
-  Get cached research for a comb.
+  Get cached research for a sector.
   
   Returns {:ok, research} if valid cache exists, {:error, :not_found} otherwise.
   """
   @spec get_research(String.t()) :: {:ok, map()} | {:error, :not_found}
-  def get_research(comb_id) do
-    case Store.get(:comb_research_cache, comb_id) do
+  def get_research(sector_id) do
+    case Store.get(:sector_research_cache, sector_id) do
       nil -> {:error, :not_found}
       cache -> {:ok, cache}
     end
   end
 
   @doc """
-  Check if cached research is still valid for a comb.
+  Check if cached research is still valid for a sector.
   
   Compares cached git hash with current HEAD commit.
   """
   @spec is_valid?(String.t()) :: boolean()
-  def is_valid?(comb_id) do
-    with {:ok, cache} <- get_research(comb_id),
-         {:ok, comb} <- GiTF.Comb.get(comb_id),
-         {:ok, current_hash} <- get_git_hash(comb.path) do
+  def is_valid?(sector_id) do
+    with {:ok, cache} <- get_research(sector_id),
+         {:ok, sector} <- GiTF.Sector.get(sector_id),
+         {:ok, current_hash} <- get_git_hash(sector.path) do
       cache.git_hash == current_hash
     else
       _ -> false
@@ -38,29 +38,29 @@ defmodule GiTF.Research.Cache do
   end
 
   @doc """
-  Store research results for a comb.
+  Store research results for a sector.
   
   Saves research with current git hash and file index.
   """
   @spec store_research(String.t(), map(), [map()]) :: {:ok, map()}
-  def store_research(comb_id, research, file_index \\ []) do
-    with {:ok, comb} <- GiTF.Comb.get(comb_id),
-         {:ok, git_hash} <- get_git_hash(comb.path) do
+  def store_research(sector_id, research, file_index \\ []) do
+    with {:ok, sector} <- GiTF.Sector.get(sector_id),
+         {:ok, git_hash} <- get_git_hash(sector.path) do
       
       cache_record = %{
-        id: comb_id,
-        comb_id: comb_id,
+        id: sector_id,
+        sector_id: sector_id,
         research: research,
         git_hash: git_hash,
         cached_at: DateTime.utc_now()
       }
 
-      {:ok, cache} = Store.put(:comb_research_cache, cache_record)
+      {:ok, cache} = Store.put(:sector_research_cache, cache_record)
       
       # Store file-level research
       Enum.each(file_index, fn file_data ->
         file_record = %{
-          comb_id: comb_id,
+          sector_id: sector_id,
           file_path: file_data.path,
           research: file_data.research,
           git_hash: git_hash
@@ -78,26 +78,26 @@ defmodule GiTF.Research.Cache do
   Merges new research with existing cache.
   """
   @spec update_research(String.t(), map()) :: {:ok, map()} | {:error, term()}
-  def update_research(comb_id, new_research) do
-    case get_research(comb_id) do
+  def update_research(sector_id, new_research) do
+    case get_research(sector_id) do
       {:ok, cache} ->
         updated_research = Map.merge(cache.research, new_research)
-        store_research(comb_id, updated_research)
+        store_research(sector_id, updated_research)
       
       {:error, :not_found} ->
-        store_research(comb_id, new_research)
+        store_research(sector_id, new_research)
     end
   end
 
   @doc """
-  Invalidate cached research for a comb.
+  Invalidate cached research for a sector.
   """
   @spec invalidate(String.t()) :: :ok
-  def invalidate(comb_id) do
-    Store.delete(:comb_research_cache, comb_id)
+  def invalidate(sector_id) do
+    Store.delete(:sector_research_cache, sector_id)
     
     # Delete file-level cache
-    Store.filter(:research_file_index, fn f -> f.comb_id == comb_id end)
+    Store.filter(:research_file_index, fn f -> f.sector_id == sector_id end)
     |> Enum.each(fn file -> Store.delete(:research_file_index, file.id) end)
     
     :ok
@@ -107,9 +107,9 @@ defmodule GiTF.Research.Cache do
   Get cached research for a specific file.
   """
   @spec get_file_research(String.t(), String.t()) :: {:ok, map()} | {:error, :not_found}
-  def get_file_research(comb_id, file_path) do
+  def get_file_research(sector_id, file_path) do
     case Store.find_one(:research_file_index, fn f -> 
-      f.comb_id == comb_id and f.file_path == file_path 
+      f.sector_id == sector_id and f.file_path == file_path 
     end) do
       nil -> {:error, :not_found}
       file_cache -> {:ok, file_cache}

@@ -35,39 +35,39 @@ defmodule GiTF.Plugin.Builtin.ToolProviders.WorkspaceTest do
   end
 
   describe "list_combs tool" do
-    test "returns message when no combs" do
+    test "returns message when no sectors" do
       tool = find_tool("list_combs")
       {:ok, result} = tool.callback.(%{})
 
-      assert result =~ "No combs"
+      assert result =~ "No sectors"
     end
 
-    test "lists registered combs" do
-      Store.insert(:combs, %{id: "comb-ws-1", name: "test-comb", path: "/tmp/test"})
+    test "lists registered sectors" do
+      Store.insert(:sectors, %{id: "sector-ws-1", name: "test-sector", path: "/tmp/test"})
 
       tool = find_tool("list_combs")
       {:ok, result} = tool.callback.(%{})
 
-      assert result =~ "test-comb"
-      assert result =~ "comb-ws-1"
+      assert result =~ "test-sector"
+      assert result =~ "sector-ws-1"
     end
   end
 
   describe "list_cells tool" do
-    test "returns message when no cells" do
+    test "returns message when no shells" do
       tool = find_tool("list_cells")
       {:ok, result} = tool.callback.(%{})
 
-      assert result =~ "No active cells"
+      assert result =~ "No active shells"
     end
 
-    test "lists cells with ghost assignments" do
-      Store.insert(:cells, %{id: "cell-1", ghost_id: "ghost-abc", path: "/tmp/cell1"})
+    test "lists shells with ghost assignments" do
+      Store.insert(:shells, %{id: "shell-1", ghost_id: "ghost-abc", path: "/tmp/cell1"})
 
       tool = find_tool("list_cells")
       {:ok, result} = tool.callback.(%{})
 
-      assert result =~ "cell-1"
+      assert result =~ "shell-1"
       assert result =~ "ghost-abc"
     end
   end

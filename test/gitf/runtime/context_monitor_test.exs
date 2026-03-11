@@ -20,7 +20,7 @@ defmodule GiTF.Runtime.ContextMonitorTest do
     {:ok, ghost} = Store.insert(:ghosts, %{
       name: "test-ghost",
       status: "working",
-      job_id: "job-123",
+      op_id: "op-123",
       assigned_model: "claude-sonnet",
       context_tokens_used: 0,
       context_tokens_limit: nil,
@@ -122,17 +122,17 @@ defmodule GiTF.Runtime.ContextMonitorTest do
 
   describe "create_snapshot/1" do
     test "creates a context snapshot", %{ghost_id: ghost_id} do
-      # Create a job for the ghost
-      {:ok, job} = Store.insert(:jobs, %{
-        title: "Test job",
+      # Create a op for the ghost
+      {:ok, op} = Store.insert(:ops, %{
+        title: "Test op",
         status: "running",
-        quest_id: "quest-123",
-        comb_id: "comb-456"
+        mission_id: "mission-123",
+        sector_id: "sector-456"
       })
       
-      # Update ghost with job
+      # Update ghost with op
       ghost = Store.get(:ghosts, ghost_id)
-      Store.put(:ghosts, %{ghost | job_id: job.id})
+      Store.put(:ghosts, %{ghost | op_id: op.id})
       
       # Record some usage
       ContextMonitor.record_usage(ghost_id, 40_000, 40_000)
@@ -142,22 +142,22 @@ defmodule GiTF.Runtime.ContextMonitorTest do
       assert snapshot.ghost_id == ghost_id
       assert snapshot.tokens_used == 80_000
       assert snapshot.percentage == 0.4
-      assert snapshot.job_id == job.id
+      assert snapshot.op_id == op.id
     end
   end
 
   describe "get_latest_snapshot/1" do
     test "returns most recent snapshot", %{ghost_id: ghost_id} do
-      # Create job
-      {:ok, job} = Store.insert(:jobs, %{
-        title: "Test job",
+      # Create op
+      {:ok, op} = Store.insert(:ops, %{
+        title: "Test op",
         status: "running",
-        quest_id: "quest-123",
-        comb_id: "comb-456"
+        mission_id: "mission-123",
+        sector_id: "sector-456"
       })
       
       ghost = Store.get(:ghosts, ghost_id)
-      Store.put(:ghosts, %{ghost | job_id: job.id})
+      Store.put(:ghosts, %{ghost | op_id: op.id})
       
       # Create multiple snapshots
       ContextMonitor.record_usage(ghost_id, 20_000, 20_000)

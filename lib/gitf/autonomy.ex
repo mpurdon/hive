@@ -54,9 +54,9 @@ defmodule GiTF.Autonomy do
   @doc """
   Predict likely issues before they occur.
   """
-  def predict_issues(comb_id) do
-    patterns = GiTF.Intelligence.FailureAnalysis.get_failure_patterns(comb_id)
-    insights = GiTF.Intelligence.get_insights(comb_id)
+  def predict_issues(sector_id) do
+    patterns = GiTF.Intelligence.FailureAnalysis.get_failure_patterns(sector_id)
+    insights = GiTF.Intelligence.get_insights(sector_id)
     
     predictions = []
     
@@ -85,10 +85,10 @@ defmodule GiTF.Autonomy do
   @doc """
   Automatically approve low-risk changes.
   """
-  def auto_approve?(job_id) do
-    with {:ok, job} <- GiTF.Jobs.get(job_id),
-         quality_score when not is_nil(quality_score) <- Map.get(job, :quality_score),
-         verification when verification == "passed" <- Map.get(job, :verification_status) do
+  def auto_approve?(op_id) do
+    with {:ok, op} <- GiTF.Ops.get(op_id),
+         quality_score when not is_nil(quality_score) <- Map.get(op, :quality_score),
+         verification when verification == "passed" <- Map.get(op, :verification_status) do
       
       # Auto-approve if high quality and verified
       quality_score >= 85 and verification == "passed"
@@ -114,7 +114,7 @@ defmodule GiTF.Autonomy do
   # Private functions
 
   defp cleanup_orphaned_processes do
-    # Check for ghosts without active jobs
+    # Check for ghosts without active ops
     ghosts = Store.all(:ghosts)
     
     orphaned = Enum.filter(ghosts, fn ghost ->
@@ -136,19 +136,19 @@ defmodule GiTF.Autonomy do
 
   defp reconcile_state do
     # Check for inconsistent state
-    jobs = Store.all(:jobs)
+    ops = Store.all(:ops)
     
-    inconsistent = Enum.filter(jobs, fn job ->
-      job.status == "running" and
-      not has_active_bee?(job.ghost_id)
+    inconsistent = Enum.filter(ops, fn op ->
+      op.status == "running" and
+      not has_active_bee?(op.ghost_id)
     end)
     
     if length(inconsistent) > 0 do
-      Enum.each(inconsistent, fn job ->
-        Logger.warning("Reconciling inconsistent job state: #{job.id}")
-        updated = Map.put(job, :status, "failed")
+      Enum.each(inconsistent, fn op ->
+        Logger.warning("Reconciling inconsistent op state: #{op.id}")
+        updated = Map.put(op, :status, "failed")
         |> Map.put(:error_message, "Bee disappeared, marked as failed")
-        Store.put(:jobs, updated)
+        Store.put(:ops, updated)
       end)
       
       {:reconciled_jobs, length(inconsistent)}
@@ -159,16 +159,16 @@ defmodule GiTF.Autonomy do
 
   defp cleanup_stale_worktrees do
     # Check for worktrees older than 7 days
-    cells = Store.all(:cells)
+    shells = Store.all(:shells)
     cutoff = DateTime.add(DateTime.utc_now(), -7, :day)
     
-    stale = Enum.filter(cells, fn cell ->
-      DateTime.compare(cell.created_at, cutoff) == :lt
+    stale = Enum.filter(shells, fn shell ->
+      DateTime.compare(shell.created_at, cutoff) == :lt
     end)
     
     if length(stale) > 0 do
-      Enum.each(stale, fn cell ->
-        Logger.info("Cleaning up stale worktree: #{cell.id}")
+      Enum.each(stale, fn shell ->
+        Logger.info("Cleaning up stale worktree: #{shell.id}")
         # Would actually clean up the worktree here
       end)
       
@@ -179,20 +179,20 @@ defmodule GiTF.Autonomy do
   end
 
   defp recover_stuck_jobs do
-    # Check for jobs stuck in running state for > 1 hour
-    jobs = Store.all(:jobs)
+    # Check for ops stuck in running state for > 1 hour
+    ops = Store.all(:ops)
     cutoff = DateTime.add(DateTime.utc_now(), -1, :hour)
     
-    stuck = Enum.filter(jobs, fn job ->
-      job.status == "running" and
-      DateTime.compare(job.updated_at, cutoff) == :lt
+    stuck = Enum.filter(ops, fn op ->
+      op.status == "running" and
+      DateTime.compare(op.updated_at, cutoff) == :lt
     end)
     
     if length(stuck) > 0 do
-      Enum.each(stuck, fn job ->
-        Logger.warning("Recovering stuck job: #{job.id}")
+      Enum.each(stuck, fn op ->
+        Logger.warning("Recovering stuck op: #{op.id}")
         # Attempt intelligent retry
-        GiTF.Intelligence.Retry.retry_with_strategy(job.id)
+        GiTF.Intelligence.Retry.retry_with_strategy(op.id)
       end)
       
       {:recovered_stuck_jobs, length(stuck)}
@@ -202,9 +202,9 @@ defmodule GiTF.Autonomy do
   end
 
   defp has_active_job?(ghost_id) do
-    Store.all(:jobs)
-    |> Enum.any?(fn job ->
-      job.ghost_id == ghost_id and job.status in ["pending", "running"]
+    Store.all(:ops)
+    |> Enum.any?(fn op ->
+      op.ghost_id == ghost_id and op.status in ["pending", "running"]
     end)
   end
 
@@ -217,14 +217,14 @@ defmodule GiTF.Autonomy do
 
   defp collect_metrics do
     ghosts = Store.all(:ghosts)
-    jobs = Store.all(:jobs)
+    ops = Store.all(:ops)
     
     active_ghosts = Enum.count(ghosts, &(&1.status == "active"))
-    pending_jobs = Enum.count(jobs, &(&1.status == "pending"))
+    pending_jobs = Enum.count(ops, &(&1.status == "pending"))
     
     # Simple utilization calculation
     bee_utilization = if active_ghosts > 0 do
-      running_jobs = Enum.count(jobs, &(&1.status == "running"))
+      running_jobs = Enum.count(ops, &(&1.status == "running"))
       running_jobs / active_ghosts
     else
       0

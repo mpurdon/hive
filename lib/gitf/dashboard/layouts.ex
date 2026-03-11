@@ -137,15 +137,15 @@ defmodule GiTF.Dashboard.Layouts do
           .badge-red    { background: #f8514933; color: #f85149; }
           .badge-yellow { background: #d2992233; color: #d29922; }
 
-          /* -- Waggle list --------------------------------------------------- */
-          .waggle-item {
+          /* -- Link list --------------------------------------------------- */
+          .link_msg-item {
             padding: 0.75rem 0;
             border-bottom: 1px solid #21262d;
           }
-          .waggle-item:last-child { border-bottom: none; }
-          .waggle-meta { font-size: 0.8rem; color: #8b949e; }
-          .waggle-subject { font-weight: 500; color: #c9d1d9; }
-          .waggle-unread .waggle-subject { color: #f0f6fc; font-weight: 600; }
+          .link_msg-item:last-child { border-bottom: none; }
+          .link_msg-meta { font-size: 0.8rem; color: #8b949e; }
+          .link_msg-subject { font-weight: 500; color: #c9d1d9; }
+          .link_msg-unread .link_msg-subject { color: #f0f6fc; font-weight: 600; }
 
           /* -- Pulse animation for working ghosts ------------------------------ */
           @keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.5; } }
@@ -197,10 +197,10 @@ defmodule GiTF.Dashboard.Layouts do
       <div class="nav-brand">The <span>GiTF</span></div>
       <div class="nav-links">
         <a href="/" class={if @current_path == "/", do: "active"}>Overview</a>
-        <a href="/quests" class={if @current_path == "/quests", do: "active"}>Quests</a>
+        <a href="/missions" class={if @current_path == "/missions", do: "active"}>Quests</a>
         <a href="/ghosts" class={if @current_path == "/ghosts", do: "active"}>Bees</a>
         <a href="/costs" class={if @current_path == "/costs", do: "active"}>Costs</a>
-        <a href="/waggles" class={if @current_path == "/waggles", do: "active"}>Waggles</a>
+        <a href="/links" class={if @current_path == "/links", do: "active"}>Links</a>
       </div>
     </nav>
     <main class="main">

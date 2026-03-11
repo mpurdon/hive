@@ -1,13 +1,13 @@
 defmodule GiTF.TUI.Views.Pipeline do
-  @moduledoc "Renders the pipeline stages view for all jobs."
+  @moduledoc "Renders the pipeline stages view for all ops."
   import Ratatouille.View
 
   def render(model) do
-    jobs = model[:jobs] || []
+    ops = model[:ops] || []
     merge_queue = model[:merge_queue] || %{pending: [], active: nil, completed: []}
 
     visible =
-      jobs
+      ops
       |> Enum.reject(&(&1[:status] == "done" && &1[:merged_at]))
       |> Enum.sort_by(&(&1[:status] || ""), :asc)
       |> then(fn js ->
@@ -18,7 +18,7 @@ defmodule GiTF.TUI.Views.Pipeline do
 
     panel title: "Pipeline [F2]", height: :fill do
       if Enum.empty?(visible) do
-        label(content: "No jobs in pipeline", color: :white)
+        label(content: "No ops in pipeline", color: :white)
       else
         # Header
         [
@@ -31,9 +31,9 @@ defmodule GiTF.TUI.Views.Pipeline do
             text(content: "Mg", color: :white, attributes: [:bold])
           end
         ] ++
-          Enum.map(visible, fn job ->
-            {sc, tr, be, dr, mg} = stages(job, merge_queue)
-            title = String.slice(job[:title] || "untitled", 0, 26) |> String.pad_trailing(27)
+          Enum.map(visible, fn op ->
+            {sc, tr, be, dr, mg} = stages(op, merge_queue)
+            title = String.slice(op[:title] || "untitled", 0, 26) |> String.pad_trailing(27)
 
             label do
               text(content: title <> " ", color: :white)
@@ -59,18 +59,18 @@ defmodule GiTF.TUI.Views.Pipeline do
   defp stage_text(:skip), do: text(content: "--", color: :white)
   defp stage_text(_), do: text(content: "--", color: :white)
 
-  defp stages(job, mq) do
-    scout =
+  defp stages(op, mq) do
+    recon =
       cond do
-        job[:skip_scout] == true -> :skip
-        job[:scout_findings] != nil -> :done
+        op[:skip_scout] == true -> :skip
+        op[:scout_findings] != nil -> :done
         true -> :skip
       end
 
-    triage = if job[:complexity], do: :done, else: :skip
+    triage = if op[:complexity], do: :done, else: :skip
 
     ghost =
-      case job[:status] do
+      case op[:status] do
         "running" -> :active
         "done" -> :done
         "failed" -> :failed
@@ -78,31 +78,31 @@ defmodule GiTF.TUI.Views.Pipeline do
         _ -> :pending
       end
 
-    drone =
+    tachikoma =
       cond do
-        job[:skip_verification] == true -> :skip
-        job[:verification_status] == "passed" -> :done
-        job[:verification_status] == "failed" -> :failed
-        job[:verification_status] == "pending" -> :pending
-        job[:status] in ["done", "failed"] && !job[:skip_verification] -> :pending
+        op[:skip_verification] == true -> :skip
+        op[:verification_status] == "passed" -> :done
+        op[:verification_status] == "failed" -> :failed
+        op[:verification_status] == "pending" -> :pending
+        op[:status] in ["done", "failed"] && !op[:skip_verification] -> :pending
         true -> :skip
       end
 
     merge =
       cond do
-        job[:merged_at] != nil -> :done
-        in_active?(mq, job[:id]) -> :active
-        in_pending?(mq, job[:id]) -> :pending
-        in_completed?(mq, job[:id]) -> :done
-        ghost == :done && drone in [:done, :skip] -> :pending
+        op[:merged_at] != nil -> :done
+        in_active?(mq, op[:id]) -> :active
+        in_pending?(mq, op[:id]) -> :pending
+        in_completed?(mq, op[:id]) -> :done
+        ghost == :done && tachikoma in [:done, :skip] -> :pending
         true -> :skip
       end
 
-    {scout, triage, ghost, drone, merge}
+    {recon, triage, ghost, tachikoma, merge}
   end
 
   defp in_active?(%{active: nil}, _), do: false
-  defp in_active?(%{active: a}, id), do: (a[:job_id] || a.job_id) == id
+  defp in_active?(%{active: a}, id), do: (a[:op_id] || a.op_id) == id
   defp in_active?(_, _), do: false
 
   defp in_pending?(%{pending: p}, id), do: Enum.any?(p, fn {jid, _} -> jid == id end)

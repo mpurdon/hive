@@ -13,8 +13,8 @@ defmodule GiTF.Major.PhasePrompts do
   Instructs the ghost to analyze the codebase and output structured findings.
   """
   @spec research_prompt(map(), map() | nil) :: String.t()
-  def research_prompt(quest, comb) do
-    comb_path = if comb, do: comb.path, else: "."
+  def research_prompt(mission, sector) do
+    sector_path = if sector, do: sector.path, else: "."
 
     """
     # Research Phase
@@ -22,9 +22,9 @@ defmodule GiTF.Major.PhasePrompts do
     You are a codebase analyst. Your task is to thoroughly research and understand the
     codebase to inform the implementation of the following goal:
 
-    **Goal**: #{quest.goal}
+    **Goal**: #{mission.goal}
 
-    **Codebase location**: #{comb_path}
+    **Codebase location**: #{sector_path}
 
     ## Instructions
 
@@ -61,7 +61,7 @@ defmodule GiTF.Major.PhasePrompts do
   the goal and research findings.
   """
   @spec requirements_prompt(map(), map()) :: String.t()
-  def requirements_prompt(quest, research_artifact) do
+  def requirements_prompt(mission, research_artifact) do
     research_json = Jason.encode!(research_artifact, pretty: true)
 
     """
@@ -70,7 +70,7 @@ defmodule GiTF.Major.PhasePrompts do
     You are a requirements analyst. From the goal and codebase research below,
     produce structured requirements with testable acceptance criteria.
 
-    **Goal**: #{quest.goal}
+    **Goal**: #{mission.goal}
 
     ## Codebase Research
 
@@ -122,7 +122,7 @@ defmodule GiTF.Major.PhasePrompts do
   Maps requirements to implementation approach with specific file changes.
   """
   @spec design_prompt(map(), map(), map(), String.t()) :: String.t()
-  def design_prompt(quest, requirements, research, extra_instructions \\ "") do
+  def design_prompt(mission, requirements, research, extra_instructions \\ "") do
     requirements_json = Jason.encode!(requirements, pretty: true)
     research_json = Jason.encode!(research, pretty: true)
 
@@ -143,7 +143,7 @@ defmodule GiTF.Major.PhasePrompts do
     You are a software architect. Design the implementation approach for
     the following requirements, given the codebase research.
 
-    **Goal**: #{quest.goal}
+    **Goal**: #{mission.goal}
 
     ## Codebase Research
 
@@ -197,8 +197,8 @@ defmodule GiTF.Major.PhasePrompts do
   Builds the design prompt with review feedback for redesign iterations.
   """
   @spec design_prompt_with_feedback(map(), map(), map(), map(), String.t()) :: String.t()
-  def design_prompt_with_feedback(quest, requirements, research, review, extra_instructions \\ "") do
-    base = design_prompt(quest, requirements, research, extra_instructions)
+  def design_prompt_with_feedback(mission, requirements, research, review, extra_instructions \\ "") do
+    base = design_prompt(mission, requirements, research, extra_instructions)
     review_json = Jason.encode!(review, pretty: true)
 
     base <>
@@ -223,7 +223,7 @@ defmodule GiTF.Major.PhasePrompts do
   Cross-validates design against requirements.
   """
   @spec review_prompt(map(), map(), map(), map()) :: String.t()
-  def review_prompt(quest, design, requirements, research) do
+  def review_prompt(mission, design, requirements, research) do
     design_json = Jason.encode!(design, pretty: true)
     requirements_json = Jason.encode!(requirements, pretty: true)
     research_json = Jason.encode!(research, pretty: true)
@@ -234,7 +234,7 @@ defmodule GiTF.Major.PhasePrompts do
     You are a technical reviewer. Cross-validate the design against the
     requirements. Check for coverage gaps, feasibility issues, and risks.
 
-    **Goal**: #{quest.goal}
+    **Goal**: #{mission.goal}
 
     ## Codebase Research
 
@@ -295,10 +295,10 @@ defmodule GiTF.Major.PhasePrompts do
   @doc """
   Builds the planning phase prompt.
 
-  Generates ordered jobs with dependencies from the validated design.
+  Generates ordered ops with dependencies from the validated design.
   """
   @spec planning_prompt(map(), map(), map(), map()) :: String.t()
-  def planning_prompt(quest, design, requirements, review) do
+  def planning_prompt(mission, design, requirements, review) do
     design_json = Jason.encode!(design, pretty: true)
     requirements_json = Jason.encode!(requirements, pretty: true)
     review_json = Jason.encode!(review, pretty: true)
@@ -307,9 +307,9 @@ defmodule GiTF.Major.PhasePrompts do
     # Planning Phase
 
     You are a project planner. From the validated design, produce an ordered
-    list of implementation jobs with dependencies.
+    list of implementation ops with dependencies.
 
-    **Goal**: #{quest.goal}
+    **Goal**: #{mission.goal}
 
     ## Requirements
 
@@ -331,11 +331,11 @@ defmodule GiTF.Major.PhasePrompts do
 
     ## Instructions
 
-    1. Break the design into discrete, parallelizable jobs
-    2. Each job should be completable by a single developer in one session
+    1. Break the design into discrete, parallelizable ops
+    2. Each op should be completable by a single developer in one session
     3. Define clear acceptance criteria derived from requirements
     4. Specify target files from the design
-    5. Set up dependencies (job indices, 0-based)
+    5. Set up dependencies (op indices, 0-based)
     6. Recommend model complexity (sonnet for simple, opus for complex)
 
     ## Output Format
@@ -355,7 +355,7 @@ defmodule GiTF.Major.PhasePrompts do
     ]
     ```
 
-    Keep the number of jobs minimal. Prefer fewer, larger jobs over many small ones.
+    Keep the number of ops minimal. Prefer fewer, larger ops over many small ones.
     """
   end
 
@@ -365,7 +365,7 @@ defmodule GiTF.Major.PhasePrompts do
   Reviews all implementation against original requirements.
   """
   @spec validation_prompt(map(), map()) :: String.t()
-  def validation_prompt(quest, all_artifacts) do
+  def validation_prompt(mission, all_artifacts) do
     artifacts_json = Jason.encode!(all_artifacts, pretty: true)
 
     """
@@ -374,7 +374,7 @@ defmodule GiTF.Major.PhasePrompts do
     You are a QA validator. Review all implementation work against the
     original requirements and design.
 
-    **Goal**: #{quest.goal}
+    **Goal**: #{mission.goal}
 
     ## All Phase Artifacts
 

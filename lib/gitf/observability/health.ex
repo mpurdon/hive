@@ -13,7 +13,7 @@ defmodule GiTF.Observability.Health do
       {:store, check_store()},
       {:disk, check_disk()},
       {:memory, check_memory()},
-      {:quests, check_quests()},
+      {:missions, check_quests()},
       {:model_api, check_model_api()},
       {:git, check_git()},
       {:major, check_major()},
@@ -43,17 +43,17 @@ defmodule GiTF.Observability.Health do
     if not queen_alive or not store_ok do
       false
     else
-      # Check for zombie: active quests exist but no job activity for 30+ minutes
-      active_quests = Store.filter(:quests, fn q ->
+      # Check for zombie: active missions exist but no op activity for 30+ minutes
+      active_quests = Store.filter(:missions, fn q ->
         q[:status] not in [nil, "completed", "failed", "cancelled", "paused", "paused_budget"]
       end)
 
       if active_quests == [] do
         true
       else
-        # Any job activity in last 30 minutes?
+        # Any op activity in last 30 minutes?
         thirty_min_ago = DateTime.add(DateTime.utc_now(), -1800, :second)
-        recent_activity = Store.filter(:jobs, fn j ->
+        recent_activity = Store.filter(:ops, fn j ->
           updated = j[:updated_at] || j[:created_at]
           updated != nil and DateTime.compare(updated, thirty_min_ago) == :gt
         end)
@@ -66,7 +66,7 @@ defmodule GiTF.Observability.Health do
   end
 
   defp check_store do
-    Store.all(:quests)
+    Store.all(:missions)
     :ok
   rescue
     _ -> :error
@@ -120,10 +120,10 @@ defmodule GiTF.Observability.Health do
   end
 
   defp check_quests do
-    quests = Store.all(:quests)
+    missions = Store.all(:missions)
 
     stuck =
-      Enum.count(quests, fn q ->
+      Enum.count(missions, fn q ->
         q.status == "active" &&
           DateTime.diff(DateTime.utc_now(), q.updated_at) > 1800
       end)

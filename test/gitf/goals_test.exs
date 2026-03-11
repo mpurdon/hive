@@ -16,57 +16,57 @@ defmodule GiTF.GoalsTest do
   end
 
   describe "validate_quest_completion/1" do
-    test "validates completed quest" do
-      quest = %{
+    test "validates completed mission" do
+      mission = %{
         id: "qst-test",
-        description: "Test quest",
+        description: "Test mission",
         status: "active",
         created_at: DateTime.utc_now(),
         updated_at: DateTime.utc_now()
       }
-      Store.insert(:quests, quest)
+      Store.insert(:missions, mission)
       
-      job = %{
-        id: "job-test",
-        quest_id: "qst-test",
+      op = %{
+        id: "op-test",
+        mission_id: "qst-test",
         status: "completed",
         verification_status: "passed",
         created_at: DateTime.utc_now(),
         updated_at: DateTime.utc_now()
       }
-      Store.insert(:jobs, job)
+      Store.insert(:ops, op)
       
       result = Goals.validate_quest_completion("qst-test")
       
-      assert result.goal_achieved == {:achieved, "All jobs completed"}
+      assert result.goal_achieved == {:achieved, "All ops completed"}
       assert result.simplicity_score > 0
       assert result.completeness.completed == 1
     end
   end
 
   describe "validate_job/1" do
-    test "validates completed job" do
-      quest = %{
-        id: "qst-job",
+    test "validates completed op" do
+      mission = %{
+        id: "qst-op",
         description: "Test",
         created_at: DateTime.utc_now(),
         updated_at: DateTime.utc_now()
       }
-      Store.insert(:quests, quest)
+      Store.insert(:missions, mission)
       
-      job = %{
-        id: "job-valid",
-        quest_id: "qst-job",
-        title: "Test job",
+      op = %{
+        id: "op-valid",
+        mission_id: "qst-op",
+        title: "Test op",
         status: "completed",
         verification_status: "passed",
         files_changed: 2,
         created_at: DateTime.utc_now(),
         updated_at: DateTime.utc_now()
       }
-      Store.insert(:jobs, job)
+      Store.insert(:ops, op)
       
-      result = Goals.validate_job("job-valid")
+      result = Goals.validate_job("op-valid")
       
       assert result.goal_met == true
       assert result.simplicity == 100

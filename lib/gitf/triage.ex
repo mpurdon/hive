@@ -1,15 +1,15 @@
 defmodule GiTF.Triage do
   @moduledoc """
-  Categorizes jobs by complexity and determines what pipeline they need.
+  Categorizes ops by complexity and determines what pipeline they need.
 
-  Every job flows through triage before a ghost is spawned. The triage result
-  determines whether the job needs scouting (read-only codebase analysis),
-  drone verification, and which model tier to use.
+  Every op flows through triage before a ghost is spawned. The triage result
+  determines whether the op needs scouting (read-only codebase analysis),
+  tachikoma verification, and which model tier to use.
 
   Complexity signals are checked in priority order -- the first match wins.
   """
 
-  alias GiTF.Jobs
+  alias GiTF.Ops
 
   @type complexity :: :simple | :moderate | :complex
 
@@ -25,7 +25,7 @@ defmodule GiTF.Triage do
   # -- Public API --------------------------------------------------------------
 
   @doc """
-  Triages a job map, returning `{complexity, pipeline}`.
+  Triages a op map, returning `{complexity, pipeline}`.
 
   Checks complexity signals in priority order:
   1. Target file count (5+ files => complex)
@@ -36,8 +36,8 @@ defmodule GiTF.Triage do
   6. Default: moderate
   """
   @spec triage(map()) :: {complexity(), pipeline()}
-  def triage(job) do
-    complexity = determine_complexity(job)
+  def triage(op) do
+    complexity = determine_complexity(op)
     {complexity, pipeline_for(complexity)}
   end
 
@@ -59,47 +59,47 @@ defmodule GiTF.Triage do
 
   # -- Private: complexity determination ---------------------------------------
 
-  defp determine_complexity(job) do
+  defp determine_complexity(op) do
     cond do
-      many_target_files?(job) -> :complex
-      has_dependencies?(job) -> at_least_moderate(job)
-      has_architectural_keywords?(job) -> :complex
-      has_simple_keywords?(job) -> :simple
-      true -> from_classifier(job)
+      many_target_files?(op) -> :complex
+      has_dependencies?(op) -> at_least_moderate(op)
+      has_architectural_keywords?(op) -> :complex
+      has_simple_keywords?(op) -> :simple
+      true -> from_classifier(op)
     end
   end
 
-  defp many_target_files?(job) do
-    files = Map.get(job, :target_files, [])
+  defp many_target_files?(op) do
+    files = Map.get(op, :target_files, [])
     is_list(files) and length(files) >= 5
   end
 
-  defp has_dependencies?(job) do
-    job_id = Map.get(job, :id)
-    job_id != nil and Jobs.dependencies(job_id) != []
+  defp has_dependencies?(op) do
+    op_id = Map.get(op, :id)
+    op_id != nil and Jobs.dependencies(op_id) != []
   rescue
     _ -> false
   end
 
-  defp at_least_moderate(job) do
-    case from_classifier(job) do
+  defp at_least_moderate(op) do
+    case from_classifier(op) do
       :simple -> :moderate
       other -> other
     end
   end
 
-  defp has_architectural_keywords?(job) do
-    text = job_text(job)
+  defp has_architectural_keywords?(op) do
+    text = job_text(op)
     Enum.any?(@complex_keywords, &String.contains?(text, &1))
   end
 
-  defp has_simple_keywords?(job) do
-    text = job_text(job)
+  defp has_simple_keywords?(op) do
+    text = job_text(op)
     Enum.any?(@simple_keywords, &String.contains?(text, &1))
   end
 
-  defp from_classifier(job) do
-    case Map.get(job, :complexity) do
+  defp from_classifier(op) do
+    case Map.get(op, :complexity) do
       c when c in ["trivial", "low"] -> :simple
       "moderate" -> :moderate
       c when c in ["high", "critical"] -> :complex
@@ -107,9 +107,9 @@ defmodule GiTF.Triage do
     end
   end
 
-  defp job_text(job) do
-    title = Map.get(job, :title, "") || ""
-    description = Map.get(job, :description, "") || ""
+  defp job_text(op) do
+    title = Map.get(op, :title, "") || ""
+    description = Map.get(op, :description, "") || ""
     String.downcase(title <> " " <> description)
   end
 end

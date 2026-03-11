@@ -3,7 +3,7 @@ defmodule GiTF.AgentProfile.FailureModes do
   Named anti-patterns (failure modes) injected into agent profile `.md` files.
 
   Bees receive these as explicit "DO NOT" instructions so they avoid common
-  mistakes. When a ghost fails, the Drone uses `learn_from_failure/2` to
+  mistakes. When a ghost fails, the Tachikoma uses `learn_from_failure/2` to
   produce a new, structured anti-pattern from the failure analysis, which
   gets appended to the agent profile for future runs.
 
@@ -92,7 +92,7 @@ defmodule GiTF.AgentProfile.FailureModes do
   }
 
   # Job types mapped to additional relevant failure mode keys beyond :critical
-  @job_type_modes %{
+  @op_type_modes %{
     "implementation" => [:skip_tests, :incomplete_implementation, :yak_shaving],
     "bugfix" => [:break_existing, :incomplete_implementation],
     "refactor" => [:break_existing, :over_engineer, :yak_shaving],
@@ -135,10 +135,10 @@ defmodule GiTF.AgentProfile.FailureModes do
   end
 
   @doc """
-  Selects relevant failure mode keys for a job type, augmented by past failures.
+  Selects relevant failure mode keys for a op type, augmented by past failures.
 
   Always includes all `:critical` severity modes. Adds modes specific to the
-  `job_type` (e.g. "implementation" gets `:skip_tests`), plus any keys from
+  `op_type` (e.g. "implementation" gets `:skip_tests`), plus any keys from
   `past_failure_keys` that exist in the defaults.
 
   ## Examples
@@ -150,9 +150,9 @@ defmodule GiTF.AgentProfile.FailureModes do
       true
   """
   @spec select_relevant(String.t(), [atom()]) :: [atom()]
-  def select_relevant(job_type, past_failure_keys \\ []) do
+  def select_relevant(op_type, past_failure_keys \\ []) do
     critical_keys = critical_mode_keys()
-    job_keys = Map.get(@job_type_modes, job_type, [])
+    job_keys = Map.get(@op_type_modes, op_type, [])
     past_keys = Enum.filter(past_failure_keys, &Map.has_key?(@default_modes, &1))
 
     (critical_keys ++ job_keys ++ past_keys)

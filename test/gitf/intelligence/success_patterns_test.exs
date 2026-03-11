@@ -16,83 +16,83 @@ defmodule GiTF.Intelligence.SuccessPatternsTest do
   end
 
   describe "analyze_success/1" do
-    test "analyzes a successful job" do
-      job = %{
-        id: "job-success",
-        comb_id: "comb-test",
+    test "analyzes a successful op" do
+      op = %{
+        id: "op-success",
+        sector_id: "sector-test",
         status: "done",
         model: "claude-sonnet",
         verification_status: "passed",
         created_at: DateTime.utc_now(),
         updated_at: DateTime.utc_now()
       }
-      Store.insert(:jobs, job)
+      Store.insert(:ops, op)
       
-      {:ok, pattern} = SuccessPatterns.analyze_success(job.id)
+      {:ok, pattern} = SuccessPatterns.analyze_success(op.id)
       
-      assert pattern.job_id == job.id
-      assert pattern.comb_id == job.comb_id
+      assert pattern.op_id == op.id
+      assert pattern.sector_id == op.sector_id
       assert is_list(pattern.success_factors)
       assert pattern.model_used == "claude-sonnet"
     end
 
     test "identifies success factors" do
-      job = %{
-        id: "job-factors",
-        comb_id: "comb-test",
+      op = %{
+        id: "op-factors",
+        sector_id: "sector-test",
         status: "done",
         model: "claude-opus",
         verification_status: "passed",
         created_at: DateTime.utc_now(),
         updated_at: DateTime.utc_now()
       }
-      Store.insert(:jobs, job)
+      Store.insert(:ops, op)
       
-      {:ok, pattern} = SuccessPatterns.analyze_success(job.id)
+      {:ok, pattern} = SuccessPatterns.analyze_success(op.id)
       
       assert "verification_passed" in pattern.success_factors
       assert "first_attempt_success" in pattern.success_factors
     end
 
-    test "returns error for non-successful job" do
-      job = %{
-        id: "job-failed",
+    test "returns error for non-successful op" do
+      op = %{
+        id: "op-failed",
         status: "failed",
         created_at: DateTime.utc_now(),
         updated_at: DateTime.utc_now()
       }
-      Store.insert(:jobs, job)
+      Store.insert(:ops, op)
       
-      assert {:error, :not_successful_job} = SuccessPatterns.analyze_success(job.id)
+      assert {:error, :not_successful_job} = SuccessPatterns.analyze_success(op.id)
     end
   end
 
   describe "get_best_practices/1" do
-    test "returns empty for comb with no successes" do
+    test "returns empty for sector with no successes" do
       practices = SuccessPatterns.get_best_practices("nonexistent")
       
       assert practices == []
     end
 
     test "identifies common success factors" do
-      comb_id = "comb-practices"
+      sector_id = "sector-practices"
       
-      # Create multiple successful jobs
+      # Create multiple successful ops
       for i <- 1..3 do
-        job = %{
-          id: "job-#{i}",
-          comb_id: comb_id,
+        op = %{
+          id: "op-#{i}",
+          sector_id: sector_id,
           status: "done",
           model: "claude-sonnet",
           verification_status: "passed",
           created_at: DateTime.utc_now(),
           updated_at: DateTime.utc_now()
         }
-        Store.insert(:jobs, job)
-        SuccessPatterns.analyze_success(job.id)
+        Store.insert(:ops, op)
+        SuccessPatterns.analyze_success(op.id)
       end
       
-      practices = SuccessPatterns.get_best_practices(comb_id)
+      practices = SuccessPatterns.get_best_practices(sector_id)
       
       assert is_list(practices.common_factors)
       assert length(practices.common_factors) > 0
@@ -101,23 +101,23 @@ defmodule GiTF.Intelligence.SuccessPatternsTest do
 
   describe "recommend_approach/2" do
     test "provides recommendations based on patterns" do
-      comb_id = "comb-recommend"
+      sector_id = "sector-recommend"
       
-      # Create multiple successful jobs to establish pattern
+      # Create multiple successful ops to establish pattern
       for i <- 1..3 do
-        job = %{
-          id: "job-recommend-#{i}",
-          comb_id: comb_id,
+        op = %{
+          id: "op-recommend-#{i}",
+          sector_id: sector_id,
           status: "done",
           model: "claude-opus",
           created_at: DateTime.utc_now(),
           updated_at: DateTime.utc_now()
         }
-        Store.insert(:jobs, job)
-        SuccessPatterns.analyze_success(job.id)
+        Store.insert(:ops, op)
+        SuccessPatterns.analyze_success(op.id)
       end
       
-      recommendation = SuccessPatterns.recommend_approach(comb_id, "test task")
+      recommendation = SuccessPatterns.recommend_approach(sector_id, "test task")
       
       # Should recommend the model that was used successfully
       assert is_binary(recommendation.model)

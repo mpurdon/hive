@@ -31,22 +31,22 @@ defmodule GiTF.Runtime.CrossModelAudit do
   end
 
   @doc """
-  Audits a completed job by having a different model review the diff.
+  Audits a completed op by having a different model review the diff.
 
-  Fetches the job's cell, gets the git diff, builds a review prompt,
+  Fetches the op's shell, gets the git diff, builds a review prompt,
   and calls the audit model. Returns a structured audit report.
   """
   @spec audit_job(String.t(), keyword()) :: {:ok, map()} | {:error, term()}
-  def audit_job(job_id, opts \\ []) do
-    with {:ok, job} <- GiTF.Jobs.get(job_id),
-         {:ok, cell} <- find_cell(job),
-         {:ok, diff} <- get_diff(cell) do
+  def audit_job(op_id, opts \\ []) do
+    with {:ok, op} <- GiTF.Ops.get(op_id),
+         {:ok, shell} <- find_cell(op),
+         {:ok, diff} <- get_diff(shell) do
 
       if String.trim(diff) == "" do
         {:ok, %{score: 100, issues: [], severity: :none, model: "none", skipped: true}}
       else
-        audit_model = Keyword.get(opts, :model) || select_audit_model(job[:assigned_model])
-        prompt = build_review_prompt(job, diff)
+        audit_model = Keyword.get(opts, :model) || select_audit_model(op[:assigned_model])
+        prompt = build_review_prompt(op, diff)
 
         case GiTF.Runtime.Models.generate_text(prompt, model: audit_model) do
           {:ok, response} ->
@@ -54,7 +54,7 @@ defmodule GiTF.Runtime.CrossModelAudit do
             {:ok, report}
 
           {:error, reason} ->
-            Logger.warning("Cross-model audit failed for job #{job_id}: #{inspect(reason)}")
+            Logger.warning("Cross-model audit failed for op #{op_id}: #{inspect(reason)}")
             {:error, reason}
         end
       end
@@ -62,33 +62,33 @@ defmodule GiTF.Runtime.CrossModelAudit do
   end
 
   @doc """
-  Returns whether cross-model auditing is enabled for a comb.
+  Returns whether cross-model auditing is enabled for a sector.
   """
   @spec enabled?(String.t()) :: boolean()
-  def enabled?(comb_id) do
-    case GiTF.Store.get(:combs, comb_id) do
+  def enabled?(sector_id) do
+    case GiTF.Store.get(:sectors, sector_id) do
       nil -> false
-      comb -> Map.get(comb, :cross_model_audit, false) == true
+      sector -> Map.get(sector, :cross_model_audit, false) == true
     end
   end
 
   # -- Private ---------------------------------------------------------------
 
-  defp find_cell(job) do
-    case GiTF.Store.find_one(:cells, fn c ->
-      c.ghost_id == job.ghost_id and c.status == "active"
+  defp find_cell(op) do
+    case GiTF.Store.find_one(:shells, fn c ->
+      c.ghost_id == op.ghost_id and c.status == "active"
     end) do
       nil -> {:error, :no_cell}
-      cell -> {:ok, cell}
+      shell -> {:ok, shell}
     end
   end
 
-  defp get_diff(cell) do
-    case GiTF.Git.safe_cmd( ["diff", "HEAD~1"], cd: cell.worktree_path, stderr_to_stdout: true) do
+  defp get_diff(shell) do
+    case GiTF.Git.safe_cmd( ["diff", "HEAD~1"], cd: shell.worktree_path, stderr_to_stdout: true) do
       {output, 0} -> {:ok, output}
       {_, _} ->
         # Fallback: diff against main
-        case GiTF.Git.safe_cmd( ["diff", "main"], cd: cell.worktree_path, stderr_to_stdout: true) do
+        case GiTF.Git.safe_cmd( ["diff", "main"], cd: shell.worktree_path, stderr_to_stdout: true) do
           {output, 0} -> {:ok, output}
           {output, _} -> {:error, {:diff_failed, output}}
         end
@@ -97,13 +97,13 @@ defmodule GiTF.Runtime.CrossModelAudit do
     e -> {:error, {:diff_error, Exception.message(e)}}
   end
 
-  defp build_review_prompt(job, diff) do
+  defp build_review_prompt(op, diff) do
     """
     You are a code reviewer. Review the following git diff for quality, correctness, and security issues.
 
     ## Job Context
-    Title: #{job.title}
-    Description: #{job.description || "N/A"}
+    Title: #{op.title}
+    Description: #{op.description || "N/A"}
 
     ## Git Diff
     ```diff

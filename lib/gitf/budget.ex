@@ -1,22 +1,22 @@
 defmodule GiTF.Budget do
   @moduledoc """
-  Cost budget tracking and circuit-breaking for quests.
+  Cost budget tracking and circuit-breaking for missions.
 
-  Reads the per-quest budget from config and compares against
+  Reads the per-mission budget from config and compares against
   actual spending tracked in `GiTF.Costs`. Pure context module.
   """
 
   @default_budget_usd 10.0
 
   @doc """
-  Checks whether a quest is within budget.
+  Checks whether a mission is within budget.
 
   Returns `{:ok, remaining}` or `{:error, :budget_exceeded, spent}`.
   """
   @spec check(String.t()) :: {:ok, float()} | {:error, :budget_exceeded, float()}
-  def check(quest_id) do
-    budget = budget_for(quest_id)
-    spent = spent_for(quest_id)
+  def check(mission_id) do
+    budget = budget_for(mission_id)
+    spent = spent_for(mission_id)
     remaining = Float.round(budget - spent, 6)
 
     if remaining >= 0 do
@@ -26,11 +26,11 @@ defmodule GiTF.Budget do
     end
   end
 
-  @doc "Returns the effective budget for a quest (override > config > default)."
+  @doc "Returns the effective budget for a mission (override > config > default)."
   @spec budget_for(String.t()) :: float()
-  def budget_for(quest_id) do
-    # Check for watchdog-escalated budget override on the quest record first
-    case GiTF.Store.get(:quests, quest_id) do
+  def budget_for(mission_id) do
+    # Check for watchdog-escalated budget override on the mission record first
+    case GiTF.Store.get(:missions, mission_id) do
       %{budget_override: override} when is_number(override) and override > 0 ->
         override * 1.0
 
@@ -39,7 +39,7 @@ defmodule GiTF.Budget do
     end
   end
 
-  @doc "Returns the base budget from config (ignoring quest overrides)."
+  @doc "Returns the base budget from config (ignoring mission overrides)."
   @spec config_budget() :: float()
   def config_budget do
     case GiTF.gitf_dir() do
@@ -59,23 +59,23 @@ defmodule GiTF.Budget do
     end
   end
 
-  @doc "Returns total USD spent for all ghosts in a quest."
+  @doc "Returns total USD spent for all ghosts in a mission."
   @spec spent_for(String.t()) :: float()
-  def spent_for(quest_id) do
-    quest_id
+  def spent_for(mission_id) do
+    mission_id
     |> GiTF.Costs.for_quest()
     |> GiTF.Costs.total()
   end
 
-  @doc "Returns remaining budget for a quest."
+  @doc "Returns remaining budget for a mission."
   @spec remaining(String.t()) :: float()
-  def remaining(quest_id) do
-    Float.round(budget_for(quest_id) - spent_for(quest_id), 6)
+  def remaining(mission_id) do
+    Float.round(budget_for(mission_id) - spent_for(mission_id), 6)
   end
 
-  @doc "Returns true if the quest has exceeded its budget."
+  @doc "Returns true if the mission has exceeded its budget."
   @spec exceeded?(String.t()) :: boolean()
-  def exceeded?(quest_id) do
-    spent_for(quest_id) > budget_for(quest_id)
+  def exceeded?(mission_id) do
+    spent_for(mission_id) > budget_for(mission_id)
   end
 end

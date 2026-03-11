@@ -31,7 +31,7 @@ defmodule GiTF.Doctor do
     :database_ok,
     :config_valid,
     :settings_valid,
-    :orphan_cells,
+    :orphan_shells,
     :stale_ghosts,
     :major_workspace,
     :disk_space
@@ -72,7 +72,7 @@ defmodule GiTF.Doctor do
   def check(:database_ok), do: check_database_ok()
   def check(:config_valid), do: check_config_valid()
   def check(:settings_valid), do: check_settings_valid()
-  def check(:orphan_cells), do: check_orphan_cells()
+  def check(:orphan_shells), do: check_orphan_cells()
   def check(:stale_ghosts), do: check_stale_ghosts()
   def check(:major_workspace), do: check_major_workspace()
   def check(:disk_space), do: check_disk_space()
@@ -84,7 +84,7 @@ defmodule GiTF.Doctor do
   the fix.
   """
   @spec fix(atom()) :: check_result()
-  def fix(:orphan_cells), do: fix_orphan_cells()
+  def fix(:orphan_shells), do: fix_orphan_cells()
   def fix(:stale_ghosts), do: fix_stale_ghosts()
   def fix(:major_workspace), do: fix_major_workspace()
   def fix(:config_valid), do: fix_config_valid()
@@ -252,10 +252,10 @@ defmodule GiTF.Doctor do
 
     case count do
       0 ->
-        result(:orphan_cells, :ok, "No orphan cells", false)
+        result(:orphan_shells, :ok, "No orphan shells", false)
 
       n ->
-        result(:orphan_cells, :warn, "#{n} orphan cell(s) found", true)
+        result(:orphan_shells, :warn, "#{n} orphan shell(s) found", true)
     end
   end
 
@@ -314,12 +314,12 @@ defmodule GiTF.Doctor do
   # -- Fix implementations ---------------------------------------------------
 
   defp fix_orphan_cells do
-    case GiTF.Cell.cleanup_orphans() do
+    case GiTF.Shell.cleanup_orphans() do
       {:ok, 0} ->
-        result(:orphan_cells, :ok, "No orphan cells to fix", false)
+        result(:orphan_shells, :ok, "No orphan shells to fix", false)
 
       {:ok, count} ->
-        result(:orphan_cells, :ok, "Fixed #{count} orphan cell(s)", false)
+        result(:orphan_shells, :ok, "Fixed #{count} orphan shell(s)", false)
     end
   end
 
@@ -397,18 +397,18 @@ defmodule GiTF.Doctor do
             regenerated
           end
 
-        # Regenerate active cell settings
+        # Regenerate active shell settings
         active_cells =
           try do
-            Store.filter(:cells, fn c -> c.status == "active" end)
+            Store.filter(:shells, fn c -> c.status == "active" end)
           rescue
             _ -> []
           end
 
         regenerated =
-          Enum.reduce(active_cells, regenerated, fn cell, acc ->
-            ghost_id = cell.ghost_id
-            worktree = cell.worktree_path
+          Enum.reduce(active_cells, regenerated, fn shell, acc ->
+            ghost_id = shell.ghost_id
+            worktree = shell.worktree_path
 
             if ghost_id && worktree && File.dir?(worktree) do
               case GiTF.Runtime.Settings.generate(ghost_id, path, worktree) do
@@ -440,10 +440,10 @@ defmodule GiTF.Doctor do
   # -- Query helpers ---------------------------------------------------------
 
   defp count_orphan_cells do
-    active_cells = Store.filter(:cells, fn c -> c.status == "active" end)
+    active_cells = Store.filter(:shells, fn c -> c.status == "active" end)
 
-    Enum.count(active_cells, fn cell ->
-      case Store.get(:ghosts, cell.ghost_id) do
+    Enum.count(active_cells, fn shell ->
+      case Store.get(:ghosts, shell.ghost_id) do
         nil -> true
         ghost -> ghost.status in ["stopped", "crashed"]
       end
@@ -494,9 +494,9 @@ defmodule GiTF.Doctor do
 
     cell_settings =
       try do
-        Store.filter(:cells, fn c -> c.status == "active" end)
-        |> Enum.map(fn cell ->
-          Path.join([cell.worktree_path, ".claude", "settings.json"])
+        Store.filter(:shells, fn c -> c.status == "active" end)
+        |> Enum.map(fn shell ->
+          Path.join([shell.worktree_path, ".claude", "settings.json"])
         end)
       rescue
         _ -> []

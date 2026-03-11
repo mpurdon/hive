@@ -1,9 +1,9 @@
-defmodule GiTF.Waggle do
+defmodule GiTF.Link do
   @moduledoc """
-  Context module for the waggle messaging system.
+  Context module for the link_msg messaging system.
 
-  Waggles are inter-agent messages that flow between the Major and her ghosts.
-  Each waggle is persisted to the store for auditability and also broadcast
+  Links are inter-agent messages that flow between the Major and her ghosts.
+  Each link_msg is persisted to the store for auditability and also broadcast
   via PubSub for real-time subscribers.
   """
 
@@ -14,10 +14,10 @@ defmodule GiTF.Waggle do
   # -- Public API ------------------------------------------------------------
 
   @doc """
-  Sends a waggle message, persisting it to the store and broadcasting
+  Sends a link_msg message, persisting it to the store and broadcasting
   via PubSub.
 
-  Returns `{:ok, waggle}` or `{:error, reason}`.
+  Returns `{:ok, link_msg}` or `{:error, reason}`.
   """
   @spec send(String.t(), String.t(), String.t(), String.t(), String.t() | nil) ::
           {:ok, map()} | {:error, term()}
@@ -31,20 +31,20 @@ defmodule GiTF.Waggle do
       metadata: metadata
     }
 
-    {:ok, waggle} = Store.insert(:waggles, record)
-    broadcast(to, {:waggle_received, waggle})
+    {:ok, link_msg} = Store.insert(:links, record)
+    broadcast(to, {:waggle_received, link_msg})
 
-    GiTF.Telemetry.emit([:gitf, :waggle, :sent], %{}, %{
+    GiTF.Telemetry.emit([:gitf, :link_msg, :sent], %{}, %{
       from: from,
       to: to,
       subject: subject
     })
 
-    {:ok, waggle}
+    {:ok, link_msg}
   end
 
   @doc """
-  Lists waggle messages with optional filters.
+  Lists link_msg messages with optional filters.
 
   ## Options
 
@@ -57,33 +57,33 @@ defmodule GiTF.Waggle do
   def list(opts \\ []) do
     limit = Keyword.get(opts, :limit, 50)
 
-    waggles = Store.all(:waggles)
+    links = Store.all(:links)
 
-    waggles =
+    links =
       case Keyword.get(opts, :to) do
-        nil -> waggles
-        v -> Enum.filter(waggles, &(&1.to == v))
+        nil -> links
+        v -> Enum.filter(links, &(&1.to == v))
       end
 
-    waggles =
+    links =
       case Keyword.get(opts, :from) do
-        nil -> waggles
-        v -> Enum.filter(waggles, &(&1.from == v))
+        nil -> links
+        v -> Enum.filter(links, &(&1.from == v))
       end
 
-    waggles =
+    links =
       case Keyword.get(opts, :read) do
-        nil -> waggles
-        v -> Enum.filter(waggles, &(&1.read == v))
+        nil -> links
+        v -> Enum.filter(links, &(&1.read == v))
       end
 
-    waggles
+    links
     |> Enum.sort_by(& &1.inserted_at, {:desc, DateTime})
     |> Enum.take(limit)
   end
 
   @doc """
-  Lists unread waggle messages for a given recipient.
+  Lists unread link_msg messages for a given recipient.
   """
   @spec list_unread(String.t()) :: [map()]
   def list_unread(recipient) do
@@ -91,24 +91,24 @@ defmodule GiTF.Waggle do
   end
 
   @doc """
-  Marks a waggle message as read.
+  Marks a link_msg message as read.
 
-  Returns `{:ok, waggle}` or `{:error, :not_found}`.
+  Returns `{:ok, link_msg}` or `{:error, :not_found}`.
   """
   @spec mark_read(String.t()) :: {:ok, map()} | {:error, :not_found}
   def mark_read(waggle_id) do
-    case Store.get(:waggles, waggle_id) do
+    case Store.get(:links, waggle_id) do
       nil ->
         {:error, :not_found}
 
-      waggle ->
-        updated = %{waggle | read: true}
-        Store.put(:waggles, updated)
+      link_msg ->
+        updated = %{link_msg | read: true}
+        Store.put(:links, updated)
     end
   end
 
   @doc """
-  Sends a checkpoint waggle from a ghost, reporting progress.
+  Sends a checkpoint link_msg from a ghost, reporting progress.
 
   The body contains checkpoint data: phase, files_changed, progress_pct.
   """
@@ -119,7 +119,7 @@ defmodule GiTF.Waggle do
   end
 
   @doc """
-  Sends a resource warning waggle from a ghost.
+  Sends a resource warning link_msg from a ghost.
 
   The body contains: type (e.g. :context_tokens, :time), current value, limit.
   """
@@ -130,7 +130,7 @@ defmodule GiTF.Waggle do
   end
 
   @doc """
-  Sends a clarification request waggle from a ghost to the queen.
+  Sends a clarification request link_msg from a ghost to the queen.
 
   Used by ghosts operating under high cognitive friction that encounter
   ambiguous instructions.
@@ -151,15 +151,15 @@ defmodule GiTF.Waggle do
   @doc """
   Builds a canonical topic string for a given entity type and identifier.
   """
-  @spec topic(:major | :ghost | :comb, String.t() | nil) :: String.t()
+  @spec topic(:major | :ghost | :sector, String.t() | nil) :: String.t()
   def topic(:major, _), do: "link:major"
-  def topic(:ghost, id), do: "waggle:ghost:#{id}"
-  def topic(:comb, name), do: "waggle:comb:#{name}"
+  def topic(:ghost, id), do: "link_msg:ghost:#{id}"
+  def topic(:sector, name), do: "link_msg:sector:#{name}"
 
   # -- Private helpers -------------------------------------------------------
 
   defp broadcast(to, message) do
-    Phoenix.PubSub.broadcast(@pubsub, "waggle:#{to}", message)
+    Phoenix.PubSub.broadcast(@pubsub, "link_msg:#{to}", message)
   rescue
     e in ArgumentError ->
       # No subscribers — safe to ignore
@@ -168,8 +168,8 @@ defmodule GiTF.Waggle do
 
     e ->
       require Logger
-      Logger.error("Waggle broadcast failed for #{to}: #{Exception.message(e)}")
-      :telemetry.execute([:gitf, :waggle, :broadcast_error], %{}, %{to: to, error: e})
+      Logger.error("Link broadcast failed for #{to}: #{Exception.message(e)}")
+      :telemetry.execute([:gitf, :link_msg, :broadcast_error], %{}, %{to: to, error: e})
       :ok
   end
 end

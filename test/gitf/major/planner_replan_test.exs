@@ -13,52 +13,52 @@ defmodule GiTF.Major.PlannerReplanTest do
 
     on_exit(fn -> File.rm_rf!(tmp_dir) end)
 
-    # Create a quest
-    {:ok, quest} =
-      Store.insert(:quests, %{
+    # Create a mission
+    {:ok, mission} =
+      Store.insert(:missions, %{
         name: "Test Quest",
         goal: "Build a widget",
         status: "implementation",
-        comb_id: "comb-1",
+        sector_id: "sector-1",
         current_phase: "implementation",
         artifacts: %{},
         phase_jobs: %{}
       })
 
-    # Create a comb
+    # Create a sector
     {:ok, _comb} =
-      Store.insert(:combs, %{id: "comb-1", name: "test", path: "/tmp/test"})
+      Store.insert(:sectors, %{id: "sector-1", name: "test", path: "/tmp/test"})
 
-    {:ok, quest: quest}
+    {:ok, mission: mission}
   end
 
   describe "replan_from_failures/2" do
-    test "returns :no_failures when quest has no failed jobs", %{quest: quest} do
-      assert {:error, :no_failures} = Planner.replan_from_failures(quest.id)
+    test "returns :no_failures when mission has no failed ops", %{mission: mission} do
+      assert {:error, :no_failures} = Planner.replan_from_failures(mission.id)
     end
 
-    test "collects failures and attempts replan", %{quest: quest} do
-      # Create a failed job
-      {:ok, job} =
-        GiTF.Jobs.create(%{
+    test "collects failures and attempts replan", %{mission: mission} do
+      # Create a failed op
+      {:ok, op} =
+        GiTF.Ops.create(%{
           title: "Implement feature",
           description: "Build the thing",
-          quest_id: quest.id,
-          comb_id: "comb-1"
+          mission_id: mission.id,
+          sector_id: "sector-1"
         })
 
       # Manually set status to failed
-      job_record = Store.get(:jobs, job.id)
-      Store.put(:jobs, %{job_record | status: "failed"})
+      job_record = Store.get(:ops, op.id)
+      Store.put(:ops, %{job_record | status: "failed"})
 
       # Replan will fail because there's no LLM in test, but it should
       # attempt the analysis and return :replan_failed
-      result = Planner.replan_from_failures(quest.id)
+      result = Planner.replan_from_failures(mission.id)
 
       # Either succeeds with a plan or fails gracefully
       case result do
         {:ok, plan} ->
-          assert plan.quest_id == quest.id
+          assert plan.mission_id == mission.id
           assert plan.replan == true
 
         {:error, reason} ->
@@ -68,22 +68,22 @@ defmodule GiTF.Major.PlannerReplanTest do
   end
 
   describe "replan with multiple failures" do
-    test "handles multiple failed jobs gracefully", %{quest: quest} do
-      # Create two failed jobs
+    test "handles multiple failed ops gracefully", %{mission: mission} do
+      # Create two failed ops
       for title <- ["Setup DB", "Run migrations"] do
-        {:ok, job} =
-          GiTF.Jobs.create(%{
+        {:ok, op} =
+          GiTF.Ops.create(%{
             title: title,
             description: "Do the thing",
-            quest_id: quest.id,
-            comb_id: "comb-1"
+            mission_id: mission.id,
+            sector_id: "sector-1"
           })
 
-        job_record = Store.get(:jobs, job.id)
-        Store.put(:jobs, %{job_record | status: "failed"})
+        job_record = Store.get(:ops, op.id)
+        Store.put(:ops, %{job_record | status: "failed"})
       end
 
-      result = Planner.replan_from_failures(quest.id)
+      result = Planner.replan_from_failures(mission.id)
 
       # Should not crash — either succeeds or fails gracefully
       assert match?({:ok, _}, result) or match?({:error, _}, result)

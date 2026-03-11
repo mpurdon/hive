@@ -13,20 +13,20 @@ defmodule GiTF.Major.PlannerMultiPlanTest do
 
     on_exit(fn -> File.rm_rf!(tmp_dir) end)
 
-    {:ok, comb} = Store.insert(:combs, %{name: "test-comb", path: "/tmp/test"})
+    {:ok, sector} = Store.insert(:sectors, %{name: "test-sector", path: "/tmp/test"})
 
-    {:ok, quest} =
-      Store.insert(:quests, %{
-        name: "test-quest",
+    {:ok, mission} =
+      Store.insert(:missions, %{
+        name: "test-mission",
         goal: "Build a feature",
-        comb_id: comb.id,
+        sector_id: sector.id,
         status: "active",
         current_phase: "planning",
         artifacts: %{},
         phase_jobs: %{}
       })
 
-    %{quest: quest, comb: comb}
+    %{mission: mission, sector: sector}
   end
 
   describe "score_plan/1" do
@@ -142,13 +142,13 @@ defmodule GiTF.Major.PlannerMultiPlanTest do
   end
 
   describe "select_fallback_plan/1" do
-    test "returns error when no candidates exist", %{quest: quest} do
-      assert {:error, :no_fallback} == Planner.select_fallback_plan(quest.id)
+    test "returns error when no candidates exist", %{mission: mission} do
+      assert {:error, :no_fallback} == Planner.select_fallback_plan(mission.id)
     end
 
-    test "returns next untried candidate", %{quest: quest} do
-      # Store plan candidates on quest
-      quest_record = Store.get(:quests, quest.id)
+    test "returns next untried candidate", %{mission: mission} do
+      # Store plan candidates on mission
+      quest_record = Store.get(:missions, mission.id)
 
       candidates = [
         %{strategy: "minimal", score: 0.6, tasks: [%{"title" => "Minimal task"}]},
@@ -161,15 +161,15 @@ defmodule GiTF.Major.PlannerMultiPlanTest do
         |> Map.put(:plan_candidates, candidates)
         |> Map.put(:tried_plans, [%{strategy: "normal"}])
 
-      Store.put(:quests, updated)
+      Store.put(:missions, updated)
 
-      {:ok, fallback} = Planner.select_fallback_plan(quest.id)
+      {:ok, fallback} = Planner.select_fallback_plan(mission.id)
       # Should return complex (0.7) since normal was tried
       assert fallback.strategy == "complex"
     end
 
-    test "returns error when all candidates tried", %{quest: quest} do
-      quest_record = Store.get(:quests, quest.id)
+    test "returns error when all candidates tried", %{mission: mission} do
+      quest_record = Store.get(:missions, mission.id)
 
       candidates = [
         %{strategy: "minimal", score: 0.6, tasks: []},
@@ -184,9 +184,9 @@ defmodule GiTF.Major.PlannerMultiPlanTest do
           %{strategy: "normal"}
         ])
 
-      Store.put(:quests, updated)
+      Store.put(:missions, updated)
 
-      assert {:error, :no_fallback} == Planner.select_fallback_plan(quest.id)
+      assert {:error, :no_fallback} == Planner.select_fallback_plan(mission.id)
     end
   end
 
@@ -214,31 +214,31 @@ defmodule GiTF.Major.PlannerMultiPlanTest do
   end
 
   describe "orchestrator fallback integration" do
-    test "stays in implementation when less than 50% failed", %{quest: quest, comb: comb} do
+    test "stays in implementation when less than 50% failed", %{mission: mission, sector: sector} do
       # 1 done, 1 failed = 50% (not >50%)
       {:ok, _} =
-        GiTF.Jobs.create(%{
-          title: "Done job",
-          quest_id: quest.id,
-          comb_id: comb.id,
+        GiTF.Ops.create(%{
+          title: "Done op",
+          mission_id: mission.id,
+          sector_id: sector.id,
           status: "done",
           phase_job: false
         })
 
       {:ok, _} =
-        GiTF.Jobs.create(%{
-          title: "Failed job",
-          quest_id: quest.id,
-          comb_id: comb.id,
+        GiTF.Ops.create(%{
+          title: "Failed op",
+          mission_id: mission.id,
+          sector_id: sector.id,
           status: "failed",
           phase_job: false
         })
 
-      quest_record = Store.get(:quests, quest.id)
+      quest_record = Store.get(:missions, mission.id)
       updated = Map.put(quest_record, :current_phase, "implementation")
-      Store.put(:quests, updated)
+      Store.put(:missions, updated)
 
-      {:ok, phase} = GiTF.Major.Orchestrator.advance_quest(quest.id)
+      {:ok, phase} = GiTF.Major.Orchestrator.advance_quest(mission.id)
       assert phase == "implementation"
     end
   end

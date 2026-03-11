@@ -82,7 +82,7 @@ defmodule GiTF.Observability.Metrics do
       [:gitf, :ghost, :spawned],
       [:gitf, :ghost, :completed],
       [:gitf, :ghost, :failed],
-      [:gitf, :job, :completed],
+      [:gitf, :op, :completed],
       [:gitf, :token, :consumed]
     ]
 
@@ -103,7 +103,7 @@ defmodule GiTF.Observability.Metrics do
     record(:bees_failed, 1)
   end
 
-  def handle_telemetry([:gitf, :job, :completed], _measurements, _meta, _config) do
+  def handle_telemetry([:gitf, :op, :completed], _measurements, _meta, _config) do
     record(:jobs_completed, 1)
   end
 
@@ -120,8 +120,8 @@ defmodule GiTF.Observability.Metrics do
   def collect_metrics do
     %{
       system: system_metrics(),
-      quests: quest_metrics(),
-      jobs: job_metrics(),
+      missions: quest_metrics(),
+      ops: job_metrics(),
       ghosts: bee_metrics(),
       quality: quality_metrics(),
       costs: cost_metrics()
@@ -133,10 +133,10 @@ defmodule GiTF.Observability.Metrics do
     metrics = collect_metrics()
 
     [
-      "gitf_quests_total #{metrics.quests.total}",
-      "gitf_quests_active #{metrics.quests.active}",
-      "gitf_quests_completed #{metrics.quests.completed}",
-      "gitf_quests_failed #{metrics.quests.failed}",
+      "gitf_quests_total #{metrics.missions.total}",
+      "gitf_quests_active #{metrics.missions.active}",
+      "gitf_quests_completed #{metrics.missions.completed}",
+      "gitf_quests_failed #{metrics.missions.failed}",
       "gitf_bees_active #{metrics.ghosts.active}",
       "gitf_bees_idle #{metrics.ghosts.idle}",
       "gitf_quality_score_avg #{metrics.quality.average}",
@@ -174,25 +174,25 @@ defmodule GiTF.Observability.Metrics do
   end
 
   defp quest_metrics do
-    quests = Store.all(:quests)
+    missions = Store.all(:missions)
 
     %{
-      total: length(quests),
-      active: Enum.count(quests, &(Map.get(&1, :status) in ["active", "pending"])),
-      completed: Enum.count(quests, &(Map.get(&1, :status) == "completed")),
-      failed: Enum.count(quests, &(Map.get(&1, :status) == "failed"))
+      total: length(missions),
+      active: Enum.count(missions, &(Map.get(&1, :status) in ["active", "pending"])),
+      completed: Enum.count(missions, &(Map.get(&1, :status) == "completed")),
+      failed: Enum.count(missions, &(Map.get(&1, :status) == "failed"))
     }
   end
 
   defp job_metrics do
-    jobs = Store.all(:jobs)
+    ops = Store.all(:ops)
 
     %{
-      total: length(jobs),
-      pending: Enum.count(jobs, &(Map.get(&1, :status) == "pending")),
-      running: Enum.count(jobs, &(Map.get(&1, :status) == "running")),
-      done: Enum.count(jobs, &(Map.get(&1, :status) == "done")),
-      failed: Enum.count(jobs, &(Map.get(&1, :status) == "failed"))
+      total: length(ops),
+      pending: Enum.count(ops, &(Map.get(&1, :status) == "pending")),
+      running: Enum.count(ops, &(Map.get(&1, :status) == "running")),
+      done: Enum.count(ops, &(Map.get(&1, :status) == "done")),
+      failed: Enum.count(ops, &(Map.get(&1, :status) == "failed"))
     }
   end
 
@@ -208,8 +208,8 @@ defmodule GiTF.Observability.Metrics do
   end
 
   defp quality_metrics do
-    jobs = Store.all(:jobs)
-    scores = Enum.map(jobs, & &1[:quality_score]) |> Enum.reject(&is_nil/1)
+    ops = Store.all(:ops)
+    scores = Enum.map(ops, & &1[:quality_score]) |> Enum.reject(&is_nil/1)
 
     %{
       average: if(Enum.empty?(scores), do: 0, else: Enum.sum(scores) / length(scores)),

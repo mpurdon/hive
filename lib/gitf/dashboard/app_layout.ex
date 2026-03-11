@@ -16,10 +16,10 @@ defmodule GiTF.Dashboard.AppLayout do
         <div class="nav-brand">The <span>GiTF</span></div>
         <div class="nav-links">
           <a href="/" class={if @current_path == "/", do: "active"}>Overview</a>
-          <a href="/quests" class={if @current_path == "/quests", do: "active"}>Quests</a>
+          <a href="/missions" class={if @current_path == "/missions", do: "active"}>Quests</a>
           <a href="/ghosts" class={if @current_path == "/ghosts", do: "active"}>Bees</a>
           <a href="/costs" class={if @current_path == "/costs", do: "active"}>Costs</a>
-          <a href="/waggles" class={if @current_path == "/waggles", do: "active"}>Waggles</a>
+          <a href="/links" class={if @current_path == "/links", do: "active"}>Links</a>
         </div>
       </nav>
       <main class="main">

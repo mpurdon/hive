@@ -4,14 +4,14 @@ defmodule GiTF.AuthorityTest do
   alias GiTF.Authority
 
   describe "verification_level/1" do
-    test "returns :standard for jobs with no reputation data" do
-      job = %{assigned_model: "sonnet", job_type: :implementation}
-      assert Authority.verification_level(job) == :standard
+    test "returns :standard for ops with no reputation data" do
+      op = %{assigned_model: "sonnet", op_type: :implementation}
+      assert Authority.verification_level(op) == :standard
     end
 
     test "returns :standard for nil model" do
-      job = %{assigned_model: nil, job_type: nil}
-      assert Authority.verification_level(job) == :standard
+      op = %{assigned_model: nil, op_type: nil}
+      assert Authority.verification_level(op) == :standard
     end
   end
 
@@ -53,20 +53,20 @@ defmodule GiTF.AuthorityTest do
   end
 
   describe "should_auto_merge?/1" do
-    test "returns false for standard authority jobs" do
+    test "returns false for standard authority ops" do
       # No reputation data → :standard → false
-      job = %{assigned_model: "sonnet", job_type: :implementation, risk_level: :low}
-      refute Authority.should_auto_merge?(job)
+      op = %{assigned_model: "sonnet", op_type: :implementation, risk_level: :low}
+      refute Authority.should_auto_merge?(op)
     end
 
     test "returns false when risk_level is not :low" do
-      job = %{assigned_model: "sonnet", job_type: :implementation, risk_level: :high}
-      refute Authority.should_auto_merge?(job)
+      op = %{assigned_model: "sonnet", op_type: :implementation, risk_level: :high}
+      refute Authority.should_auto_merge?(op)
     end
 
     test "returns false for nil model" do
-      job = %{assigned_model: nil, job_type: nil, risk_level: :low}
-      refute Authority.should_auto_merge?(job)
+      op = %{assigned_model: nil, op_type: nil, risk_level: :low}
+      refute Authority.should_auto_merge?(op)
     end
   end
 end

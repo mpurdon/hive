@@ -4,7 +4,7 @@ defmodule GiTF.Ghosts do
 
   Provides the public API for spawning, listing, and stopping ghosts. This
   module coordinates between the Ghost.Worker GenServer (runtime lifecycle),
-  the Store (persistence), and the CombSupervisor (process supervision).
+  the Store (persistence), and the SectorSupervisor (process supervision).
 
   This is a context module: thin orchestration layer over store records
   and supervised processes.
@@ -15,35 +15,35 @@ defmodule GiTF.Ghosts do
   # -- Public API --------------------------------------------------------------
 
   @doc """
-  Spawns a new ghost to work on a job.
+  Spawns a new ghost to work on a op.
 
   1. Creates a ghost record in the store
-  2. Assigns the job to the ghost
-  3. Starts a Ghost.Worker under CombSupervisor
+  2. Assigns the op to the ghost
+  3. Starts a Ghost.Worker under SectorSupervisor
 
   ## Options
 
     * `:name` - human-friendly name (default: auto-generated)
-    * `:prompt` - explicit prompt (overrides job description)
+    * `:prompt` - explicit prompt (overrides op description)
     * `:claude_executable` - path to executable (for testing)
 
   Returns `{:ok, ghost}` or `{:error, reason}`.
   """
   @spec spawn(String.t(), String.t(), String.t(), keyword()) ::
           {:ok, map()} | {:error, term()}
-  def spawn(job_id, comb_id, gitf_root, opts \\ []) do
+  def spawn(op_id, sector_id, gitf_root, opts \\ []) do
     name = Keyword.get(opts, :name, generate_ghost_name())
 
-    # Atomic check: reject if job already has a ghost assigned (prevents duplicate spawning)
-    with :ok <- check_not_already_assigned(job_id),
-         :ok <- check_job_ready(job_id),
-         {:ok, ghost} <- create_ghost_record(name, job_id),
-         :ok <- assign_job(job_id, ghost.id),
-         {:ok, _pid} <- start_worker(ghost.id, job_id, comb_id, gitf_root, opts) do
+    # Atomic check: reject if op already has a ghost assigned (prevents duplicate spawning)
+    with :ok <- check_not_already_assigned(op_id),
+         :ok <- check_job_ready(op_id),
+         {:ok, ghost} <- create_ghost_record(name, op_id),
+         :ok <- assign_job(op_id, ghost.id),
+         {:ok, _pid} <- start_worker(ghost.id, op_id, sector_id, gitf_root, opts) do
       GiTF.Telemetry.emit([:gitf, :ghost, :spawned], %{}, %{
         ghost_id: ghost.id,
-        job_id: job_id,
-        comb_id: comb_id
+        op_id: op_id,
+        sector_id: sector_id
       })
 
       {:ok, ghost}
@@ -56,41 +56,41 @@ defmodule GiTF.Ghosts do
   Spawns a ghost as a detached OS process (for CLI use).
 
   Unlike `spawn/4`, this does NOT start a Worker GenServer. Instead it:
-  1. Creates a ghost record and assigns the job
-  2. Creates a cell (git worktree) directly
+  1. Creates a ghost record and assigns the op
+  2. Creates a shell (git worktree) directly
   3. Updates ghost status to "working"
   4. Generates settings for the ghost
   5. Spawns Claude as a detached OS process via a wrapper script
 
   The wrapper script runs Claude headless, then calls `gitf` CLI to
-  update the ghost/job status when Claude exits. This avoids keeping
+  update the ghost/op status when Claude exits. This avoids keeping
   the escript alive (which would block the store file).
 
   Returns `{:ok, ghost}` or `{:error, reason}`.
   """
   @spec spawn_detached(String.t(), String.t(), String.t(), keyword()) ::
           {:ok, map()} | {:error, term()}
-  def spawn_detached(job_id, comb_id, gitf_root, opts \\ []) do
+  def spawn_detached(op_id, sector_id, gitf_root, opts \\ []) do
     # In API mode, there's no process to detach from — use supervised Worker
     if GiTF.Runtime.ModelResolver.api_mode?() do
-      spawn(job_id, comb_id, gitf_root, opts)
+      spawn(op_id, sector_id, gitf_root, opts)
     else
-      spawn_detached_cli(job_id, comb_id, gitf_root, opts)
+      spawn_detached_cli(op_id, sector_id, gitf_root, opts)
     end
   end
 
-  defp spawn_detached_cli(job_id, comb_id, gitf_root, opts) do
+  defp spawn_detached_cli(op_id, sector_id, gitf_root, opts) do
     name = Keyword.get(opts, :name, generate_ghost_name())
 
-    with :ok <- check_job_ready(job_id),
-         {:ok, ghost} <- create_ghost_record(name, job_id),
-         :ok <- assign_job(job_id, ghost.id),
-         {:ok, cell} <- GiTF.Cell.create(comb_id, ghost.id, gitf_root: gitf_root),
-         :ok <- update_bee_working(ghost.id, cell),
-         :ok <- maybe_transition_job(job_id),
-         :ok <- maybe_ensure_agent(job_id, comb_id, cell),
-         :ok <- write_pre_dispatch(cell.worktree_path, job_id),
-         {:ok, _os_pid} <- spawn_model_detached(ghost.id, job_id, cell, gitf_root) do
+    with :ok <- check_job_ready(op_id),
+         {:ok, ghost} <- create_ghost_record(name, op_id),
+         :ok <- assign_job(op_id, ghost.id),
+         {:ok, shell} <- GiTF.Shell.create(sector_id, ghost.id, gitf_root: gitf_root),
+         :ok <- update_bee_working(ghost.id, shell),
+         :ok <- maybe_transition_job(op_id),
+         :ok <- maybe_ensure_agent(op_id, sector_id, shell),
+         :ok <- write_pre_dispatch(shell.worktree_path, op_id),
+         {:ok, _os_pid} <- spawn_model_detached(ghost.id, op_id, shell, gitf_root) do
       {:ok, ghost}
     else
       {:error, reason} -> {:error, reason}
@@ -100,7 +100,7 @@ defmodule GiTF.Ghosts do
   @doc """
   Revives a dead ghost by spawning a new ghost into its existing worktree.
 
-  The dead ghost must be "stopped" or "crashed". Its cell and worktree are
+  The dead ghost must be "stopped" or "crashed". Its shell and worktree are
   reassigned to the new ghost, which receives a prompt instructing it to
   finalize the existing work rather than starting over.
 
@@ -110,21 +110,21 @@ defmodule GiTF.Ghosts do
   def revive(dead_ghost_id, gitf_root, opts \\ []) do
     with {:ok, dead_bee} <- get(dead_ghost_id),
          :ok <- validate_dead(dead_bee),
-         {:ok, cell} <- find_active_cell(dead_ghost_id),
-         :ok <- validate_worktree_exists(cell),
-         {:ok, job} <- GiTF.Jobs.get(dead_bee.job_id),
+         {:ok, shell} <- find_active_cell(dead_ghost_id),
+         :ok <- validate_worktree_exists(shell),
+         {:ok, op} <- GiTF.Ops.get(dead_bee.op_id),
          {:ok, new_ghost} <-
-           create_ghost_record(Keyword.get(opts, :name, generate_ghost_name()), dead_bee.job_id),
-         {:ok, _cell} <- GiTF.Cell.adopt(cell.id, new_ghost.id),
-         :ok <- revive_job(job, new_ghost.id),
-         prompt = build_revive_prompt(job),
+           create_ghost_record(Keyword.get(opts, :name, generate_ghost_name()), dead_bee.op_id),
+         {:ok, _cell} <- GiTF.Shell.adopt(shell.id, new_ghost.id),
+         :ok <- revive_job(op, new_ghost.id),
+         prompt = build_revive_prompt(op),
          {:ok, _pid} <-
            start_worker(
              new_ghost.id,
-             job.id,
-             cell.comb_id,
+             op.id,
+             shell.sector_id,
              gitf_root,
-             Keyword.merge(opts, revive: true, cell_id: cell.id, prompt: prompt)
+             Keyword.merge(opts, revive: true, shell_id: shell.id, prompt: prompt)
            ) do
       {:ok, new_ghost}
     end
@@ -172,8 +172,8 @@ defmodule GiTF.Ghosts do
 
   # -- Private helpers ---------------------------------------------------------
 
-  defp check_not_already_assigned(job_id) do
-    case GiTF.Jobs.get(job_id) do
+  defp check_not_already_assigned(op_id) do
+    case GiTF.Ops.get(op_id) do
       {:ok, %{ghost_id: ghost_id}} when is_binary(ghost_id) and ghost_id != "" ->
         {:error, :already_assigned}
 
@@ -182,16 +182,16 @@ defmodule GiTF.Ghosts do
     end
   end
 
-  defp check_job_ready(job_id) do
-    if GiTF.Jobs.ready?(job_id), do: :ok, else: {:error, :blocked}
+  defp check_job_ready(op_id) do
+    if GiTF.Ops.ready?(op_id), do: :ok, else: {:error, :blocked}
   end
 
-  defp create_ghost_record(name, job_id) do
-    # Get job to determine model assignment
+  defp create_ghost_record(name, op_id) do
+    # Get op to determine model assignment
     model =
-      case GiTF.Jobs.get(job_id) do
-        {:ok, job} ->
-          job.assigned_model || job.recommended_model || "claude-sonnet"
+      case GiTF.Ops.get(op_id) do
+        {:ok, op} ->
+          op.assigned_model || op.recommended_model || "claude-sonnet"
 
         _ ->
           "claude-sonnet"
@@ -200,8 +200,8 @@ defmodule GiTF.Ghosts do
     record = %{
       name: name,
       status: "starting",
-      job_id: job_id,
-      cell_path: nil,
+      op_id: op_id,
+      shell_path: nil,
       pid: nil,
       assigned_model: model,
       context_tokens_used: 0,
@@ -212,28 +212,28 @@ defmodule GiTF.Ghosts do
     Store.insert(:ghosts, record)
   end
 
-  defp assign_job(job_id, ghost_id) do
-    case GiTF.Jobs.assign(job_id, ghost_id) do
+  defp assign_job(op_id, ghost_id) do
+    case GiTF.Ops.assign(op_id, ghost_id) do
       {:ok, _job} -> :ok
       {:error, reason} -> {:error, reason}
     end
   end
 
-  defp start_worker(ghost_id, job_id, comb_id, gitf_root, opts) do
+  defp start_worker(ghost_id, op_id, sector_id, gitf_root, opts) do
     child_opts =
       [
         ghost_id: ghost_id,
-        job_id: job_id,
-        comb_id: comb_id,
+        op_id: op_id,
+        sector_id: sector_id,
         gitf_root: gitf_root
       ] ++ Keyword.take(opts, [:prompt, :claude_executable])
 
-    GiTF.CombSupervisor.start_child({GiTF.Ghost.Worker, child_opts})
+    GiTF.SectorSupervisor.start_child({GiTF.Ghost.Worker, child_opts})
   end
 
   defp generate_ghost_name do
     adjectives = ~w(swift bright keen bold calm sharp)
-    nouns = ~w(scout worker forager builder dancer)
+    nouns = ~w(recon worker forager builder dancer)
 
     adj = Enum.random(adjectives)
     noun = Enum.random(nouns)
@@ -242,22 +242,22 @@ defmodule GiTF.Ghosts do
     "#{adj}-#{noun}-#{suffix}"
   end
 
-  defp update_bee_working(ghost_id, cell) do
+  defp update_bee_working(ghost_id, shell) do
     case Store.get(:ghosts, ghost_id) do
       nil ->
         {:error, :bee_not_found}
 
       ghost ->
-        updated = Map.merge(ghost, %{status: "working", cell_path: cell.worktree_path, pid: nil})
+        updated = Map.merge(ghost, %{status: "working", shell_path: shell.worktree_path, pid: nil})
         Store.put(:ghosts, updated)
         :ok
     end
   end
 
-  defp maybe_transition_job(job_id) do
-    case GiTF.Jobs.get(job_id) do
+  defp maybe_transition_job(op_id) do
+    case GiTF.Ops.get(op_id) do
       {:ok, %{status: "assigned"}} ->
-        case GiTF.Jobs.start(job_id) do
+        case GiTF.Ops.start(op_id) do
           {:ok, _} -> :ok
           {:error, reason} -> {:error, reason}
         end
@@ -270,23 +270,23 @@ defmodule GiTF.Ghosts do
     end
   end
 
-  defp maybe_ensure_agent(job_id, _comb_id, cell) do
+  defp maybe_ensure_agent(op_id, _comb_id, shell) do
     # Best-effort, don't block spawn on agent generation
     try do
-      case GiTF.Jobs.get(job_id) do
-        {:ok, job} ->
-          # Standard comb-level agent
-          case Store.get(:combs, cell.comb_id) do
+      case GiTF.Ops.get(op_id) do
+        {:ok, op} ->
+          # Standard sector-level agent
+          case Store.get(:sectors, shell.sector_id) do
             nil ->
               :ok
 
-            comb when comb.path != nil ->
-              GiTF.AgentProfile.ensure_agent(comb.path, %{
-                title: job.title,
-                description: job.description
+            sector when sector.path != nil ->
+              GiTF.AgentProfile.ensure_agent(sector.path, %{
+                title: op.title,
+                description: op.description
               })
 
-              GiTF.AgentProfile.install_agents(comb.path, cell.worktree_path)
+              GiTF.AgentProfile.install_agents(sector.path, shell.worktree_path)
               :ok
 
             _comb ->
@@ -299,24 +299,24 @@ defmodule GiTF.Ghosts do
     rescue
       e ->
         require Logger
-        Logger.debug("Agent setup failed for job #{job_id}: #{inspect(e)}")
+        Logger.debug("Agent setup failed for op #{op_id}: #{inspect(e)}")
         :ok
     catch
       _, reason ->
         require Logger
-        Logger.debug("Agent setup error for job #{job_id}: #{inspect(reason)}")
+        Logger.debug("Agent setup error for op #{op_id}: #{inspect(reason)}")
         :ok
     end
   end
 
-  defp spawn_model_detached(ghost_id, job_id, cell, gitf_root) do
+  defp spawn_model_detached(ghost_id, op_id, shell, gitf_root) do
     with {:ok, model_path} <- GiTF.Runtime.Models.find_executable(),
-         {:ok, prompt} <- build_job_prompt(job_id),
+         {:ok, prompt} <- build_job_prompt(op_id),
          {:ok, plugin} <- GiTF.Runtime.Models.resolve_plugin() do
       cmd_line = build_detached_command(plugin, model_path, prompt)
 
-      # Read risk_level from job for sandbox configuration
-      risk_level = job_risk_level(job_id)
+      # Read risk_level from op for sandbox configuration
+      risk_level = job_risk_level(op_id)
 
       # Apply sandbox if available
       # We wrap the command execution in a shell inside the sandbox
@@ -324,7 +324,7 @@ defmodule GiTF.Ghosts do
         if GiTF.Sandbox.available?() and GiTF.Sandbox.name() != "local" do
           {sandbox_cmd, sandbox_args, _opts} =
             GiTF.Sandbox.wrap_command("sh", ["-c", cmd_line],
-              cd: cell.worktree_path, risk_level: risk_level)
+              cd: shell.worktree_path, risk_level: risk_level)
 
           GiTF.Sandbox.to_shell_string(sandbox_cmd, sandbox_args)
         else
@@ -354,7 +354,7 @@ defmodule GiTF.Ghosts do
       script_content = """
       #!/bin/bash
       unset CLAUDECODE
-      #{server_export}cd #{escape_shell(cell.worktree_path)}
+      #{server_export}cd #{escape_shell(shell.worktree_path)}
       #{sandboxed_cmd_line} > #{escape_shell(log_path)} 2>&1
       EXIT_CODE=$?
       if [ $EXIT_CODE -eq 0 ]; then
@@ -413,17 +413,17 @@ defmodule GiTF.Ghosts do
     end
   end
 
-  defp job_risk_level(job_id) do
-    case GiTF.Jobs.get(job_id) do
-      {:ok, job} -> Map.get(job, :risk_level, :low)
+  defp job_risk_level(op_id) do
+    case GiTF.Ops.get(op_id) do
+      {:ok, op} -> Map.get(op, :risk_level, :low)
       _ -> :low
     end
   end
 
-  defp build_job_prompt(job_id) do
-    case GiTF.Jobs.get(job_id) do
-      {:ok, job} ->
-        prompt = if job.description, do: "#{job.title}\n\n#{job.description}", else: job.title
+  defp build_job_prompt(op_id) do
+    case GiTF.Ops.get(op_id) do
+      {:ok, op} ->
+        prompt = if op.description, do: "#{op.title}\n\n#{op.description}", else: op.title
         {:ok, prompt}
 
       {:error, reason} ->
@@ -450,9 +450,9 @@ defmodule GiTF.Ghosts do
   defp validate_dead(_bee), do: {:error, :bee_still_active}
 
   defp find_active_cell(ghost_id) do
-    case Store.find_one(:cells, fn c -> c.ghost_id == ghost_id and c.status == "active" end) do
+    case Store.find_one(:shells, fn c -> c.ghost_id == ghost_id and c.status == "active" end) do
       nil -> {:error, :no_active_cell}
-      cell -> {:ok, cell}
+      shell -> {:ok, shell}
     end
   end
 
@@ -460,8 +460,8 @@ defmodule GiTF.Ghosts do
     if File.dir?(path), do: :ok, else: {:error, :worktree_not_found}
   end
 
-  defp revive_job(%{status: "failed"} = job, new_ghost_id) do
-    case GiTF.Jobs.revive(job.id, new_ghost_id) do
+  defp revive_job(%{status: "failed"} = op, new_ghost_id) do
+    case GiTF.Ops.revive(op.id, new_ghost_id) do
       {:ok, _} -> :ok
       {:error, reason} -> {:error, reason}
     end
@@ -469,17 +469,17 @@ defmodule GiTF.Ghosts do
 
   defp revive_job(%{status: "done"}, _new_ghost_id), do: :ok
 
-  defp revive_job(job, new_ghost_id) do
+  defp revive_job(op, new_ghost_id) do
     # running or assigned — just update the ghost_id
-    Store.put(:jobs, %{job | ghost_id: new_ghost_id})
+    Store.put(:ops, %{op | ghost_id: new_ghost_id})
     :ok
   end
 
-  defp build_revive_prompt(job) do
-    description = if job.description, do: "\n\n#{job.description}", else: ""
+  defp build_revive_prompt(op) do
+    description = if op.description, do: "\n\n#{op.description}", else: ""
 
     """
-    You are continuing work on: "#{job.title}"#{description}
+    You are continuing work on: "#{op.title}"#{description}
 
     IMPORTANT: There is existing work in this worktree from a previous session.
     Your task is to FINALIZE this work, not start over:
@@ -496,10 +496,10 @@ defmodule GiTF.Ghosts do
 
   # -- Pre-dispatch helpers ----------------------------------------------------
 
-  defp write_pre_dispatch(worktree_path, job_id) do
-    case GiTF.Jobs.get(job_id) do
-      {:ok, job} ->
-        content = build_instructions_content(job)
+  defp write_pre_dispatch(worktree_path, op_id) do
+    case GiTF.Ops.get(op_id) do
+      {:ok, op} ->
+        content = build_instructions_content(op)
         instructions_path = Path.join([worktree_path, ".claude", "instructions.md"])
         File.mkdir_p(Path.dirname(instructions_path))
         File.write(instructions_path, content)
@@ -512,30 +512,30 @@ defmodule GiTF.Ghosts do
     _ -> :ok
   end
 
-  defp build_instructions_content(job) do
+  defp build_instructions_content(op) do
     sections = [
       "# Job Instructions\n",
-      "## #{job.title}\n"
+      "## #{op.title}\n"
     ]
 
     sections =
-      if job.description && job.description != "" do
-        sections ++ ["### Description\n\n#{job.description}\n"]
+      if op.description && op.description != "" do
+        sections ++ ["### Description\n\n#{op.description}\n"]
       else
         sections
       end
 
     sections =
-      case Map.get(job, :scout_findings) do
+      case Map.get(op, :scout_findings) do
         findings when is_binary(findings) and findings != "" ->
-          sections ++ ["### Scout Findings\n\n#{findings}\n"]
+          sections ++ ["### Recon Findings\n\n#{findings}\n"]
 
         _ ->
           sections
       end
 
     sections =
-      case Map.get(job, :acceptance_criteria) do
+      case Map.get(op, :acceptance_criteria) do
         criteria when is_binary(criteria) and criteria != "" ->
           sections ++ ["### Acceptance Criteria\n\n#{criteria}\n"]
 
@@ -544,7 +544,7 @@ defmodule GiTF.Ghosts do
       end
 
     sections =
-      case Map.get(job, :target_files) do
+      case Map.get(op, :target_files) do
         files when is_list(files) and files != [] ->
           file_list = Enum.map_join(files, "\n", &"- `#{&1}`")
           sections ++ ["### Target Files\n\n#{file_list}\n"]

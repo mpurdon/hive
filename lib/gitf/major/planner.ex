@@ -3,58 +3,58 @@ defmodule GiTF.Major.Planner do
   Major's planning capabilities for Phase 2.3.
   
   Takes research summary and generates structured implementation plans
-  with jobs, verification criteria, and context estimates.
+  with ops, verification criteria, and context estimates.
   """
 
   alias GiTF.Store
-  alias GiTF.Jobs.Classifier
+  alias GiTF.Ops.Classifier
 
   @doc """
   Generate implementation plan from research summary.
   
-  Creates structured plan with jobs, dependencies, and verification criteria.
+  Creates structured plan with ops, dependencies, and verification criteria.
   Focuses on MINIMAL implementation to achieve stated goal.
   """
   @spec generate_plan(String.t(), map()) :: {:ok, map()} | {:error, term()}
-  def generate_plan(quest_id, research_summary) do
-    with {:ok, quest} <- GiTF.Quests.get(quest_id),
-         {:ok, plan} <- create_implementation_plan(quest, research_summary) do
+  def generate_plan(mission_id, research_summary) do
+    with {:ok, mission} <- GiTF.Missions.get(mission_id),
+         {:ok, plan} <- create_implementation_plan(mission, research_summary) do
       
       # Add acceptance criteria and scope boundaries
       enhanced_plan = Map.merge(plan, %{
-        acceptance_criteria: define_acceptance_criteria(quest),
-        scope_boundaries: define_scope_boundaries(quest),
+        acceptance_criteria: define_acceptance_criteria(mission),
+        scope_boundaries: define_scope_boundaries(mission),
         simplicity_target: calculate_simplicity_target(plan)
       })
       
-      # Store plan in quest
-      quest_record = Store.get(:quests, quest_id)
+      # Store plan in mission
+      quest_record = Store.get(:missions, mission_id)
       updated = Map.put(quest_record, :implementation_plan, enhanced_plan)
-      Store.put(:quests, updated)
+      Store.put(:missions, updated)
       
       {:ok, enhanced_plan}
     end
   end
 
   @doc """
-  Create jobs from implementation plan.
+  Create ops from implementation plan.
   
-  Converts plan structure into actual job records with dependencies.
+  Converts plan structure into actual op records with dependencies.
   """
   @spec create_jobs_from_plan(String.t(), map()) :: {:ok, [map()]} | {:error, term()}
-  def create_jobs_from_plan(quest_id, plan) do
-    with {:ok, quest} <- GiTF.Quests.get(quest_id) do
-      jobs = 
+  def create_jobs_from_plan(mission_id, plan) do
+    with {:ok, mission} <- GiTF.Missions.get(mission_id) do
+      ops = 
         plan.tasks
         |> Enum.with_index()
         |> Enum.map(fn {task, index} ->
-          create_job_from_task(quest_id, quest.comb_id, task, index)
+          create_job_from_task(mission_id, mission.sector_id, task, index)
         end)
       
-      # Create job records
-      created_jobs = Enum.map(jobs, fn job_attrs ->
-        {:ok, job} = GiTF.Jobs.create(job_attrs)
-        job
+      # Create op records
+      created_jobs = Enum.map(ops, fn job_attrs ->
+        {:ok, op} = GiTF.Ops.create(job_attrs)
+        op
       end)
       
       # Add dependencies
@@ -66,13 +66,13 @@ defmodule GiTF.Major.Planner do
 
   # Private helpers
 
-  defp create_implementation_plan(quest, research_summary) do
+  defp create_implementation_plan(mission, research_summary) do
     # Basic plan structure - would be enhanced with model-based planning
     plan = %{
-      quest_id: quest.id,
-      goal: quest.goal,
+      mission_id: mission.id,
+      goal: mission.goal,
       research_input: research_summary,
-      tasks: generate_basic_tasks(quest, research_summary),
+      tasks: generate_basic_tasks(mission, research_summary),
       dependencies: [],
       verification_strategy: "automated_testing",
       estimated_duration: "2-4 hours",
@@ -82,8 +82,8 @@ defmodule GiTF.Major.Planner do
     {:ok, plan}
   end
 
-  defp generate_basic_tasks(quest, research_summary) do
-    # Generate basic task structure based on quest goal and research
+  defp generate_basic_tasks(mission, research_summary) do
+    # Generate basic task structure based on mission goal and research
     main_language = research_summary[:structure][:main_language] || "unknown"
     
     base_tasks = [
@@ -97,7 +97,7 @@ defmodule GiTF.Major.Planner do
       },
       %{
         title: "Core implementation",
-        description: "Implement main functionality for: #{quest.goal}",
+        description: "Implement main functionality for: #{mission.goal}",
         type: :implementation,
         complexity: :moderate,
         estimated_tokens: 15000,
@@ -142,15 +142,15 @@ defmodule GiTF.Major.Planner do
     base_tasks ++ language_tasks
   end
 
-  defp create_job_from_task(quest_id, comb_id, task, _index) do
+  defp create_job_from_task(mission_id, sector_id, task, _index) do
     classification = Classifier.classify_and_recommend(task.title, task.description)
     
     %{
       title: task.title,
       description: task.description,
-      quest_id: quest_id,
-      comb_id: comb_id,
-      job_type: classification.job_type,
+      mission_id: mission_id,
+      sector_id: sector_id,
+      op_type: classification.op_type,
       complexity: classification.complexity,
       recommended_model: classification.recommended_model,
       verification_criteria: task.verification_criteria,
@@ -158,45 +158,45 @@ defmodule GiTF.Major.Planner do
     }
   end
 
-  defp add_job_dependencies(jobs, dependencies) do
+  defp add_job_dependencies(ops, dependencies) do
     # Add dependencies based on task order (sequential by default)
-    jobs
+    ops
     |> Enum.with_index()
-    |> Enum.each(fn {job, index} ->
+    |> Enum.each(fn {op, index} ->
       if index > 0 do
-        prev_job = Enum.at(jobs, index - 1)
-        GiTF.Jobs.add_dependency(job.id, prev_job.id)
+        prev_job = Enum.at(ops, index - 1)
+        GiTF.Ops.add_dependency(op.id, prev_job.id)
       end
     end)
     
     # Add any custom dependencies from plan
     Enum.each(dependencies, fn {from_idx, to_idx} ->
-      from_job = Enum.at(jobs, from_idx)
-      to_job = Enum.at(jobs, to_idx)
+      from_job = Enum.at(ops, from_idx)
+      to_job = Enum.at(ops, to_idx)
       
       if from_job && to_job do
-        GiTF.Jobs.add_dependency(to_job.id, from_job.id)
+        GiTF.Ops.add_dependency(to_job.id, from_job.id)
       end
     end)
   end
 
   @doc """
-  Generate an LLM-driven plan for a quest.
+  Generate an LLM-driven plan for a mission.
 
   Loads existing artifacts (research, requirements, design, review) and builds
   a prompt for the LLM. Returns a plan structure with tasks but does NOT create
-  job records — that happens on confirmation.
+  op records — that happens on confirmation.
   """
   @spec generate_llm_plan(String.t(), map()) :: {:ok, map()} | {:error, term()}
-  def generate_llm_plan(quest_id, opts \\ %{}) do
-    with {:ok, quest} <- GiTF.Quests.get(quest_id) do
+  def generate_llm_plan(mission_id, opts \\ %{}) do
+    with {:ok, mission} <- GiTF.Missions.get(mission_id) do
       # Gather existing artifacts
-      research = GiTF.Quests.get_artifact(quest_id, "research")
-      requirements = GiTF.Quests.get_artifact(quest_id, "requirements")
-      design = GiTF.Quests.get_artifact(quest_id, "design")
-      review = GiTF.Quests.get_artifact(quest_id, "review")
+      research = GiTF.Missions.get_artifact(mission_id, "research")
+      requirements = GiTF.Missions.get_artifact(mission_id, "requirements")
+      design = GiTF.Missions.get_artifact(mission_id, "design")
+      review = GiTF.Missions.get_artifact(mission_id, "review")
 
-      prompt = build_llm_plan_prompt(quest, research, requirements, design, review, opts)
+      prompt = build_llm_plan_prompt(mission, research, requirements, design, review, opts)
 
       case GiTF.Runtime.Models.generate_text(prompt, model: "sonnet") do
         {:ok, response} ->
@@ -205,19 +205,19 @@ defmodule GiTF.Major.Planner do
           case parse_plan_json(text) do
             {:ok, tasks} ->
               plan = %{
-                quest_id: quest_id,
-                goal: quest.goal,
+                mission_id: mission_id,
+                goal: mission.goal,
                 tasks: tasks,
                 estimated_duration: estimate_duration(tasks),
                 created_at: DateTime.utc_now()
               }
 
-              # Store as draft on the quest
-              quest_record = Store.get(:quests, quest_id)
+              # Store as draft on the mission
+              quest_record = Store.get(:missions, mission_id)
 
               if quest_record do
                 updated = Map.put(quest_record, :draft_plan, plan)
-                Store.put(:quests, updated)
+                Store.put(:missions, updated)
               end
 
               {:ok, plan}
@@ -225,8 +225,8 @@ defmodule GiTF.Major.Planner do
             {:error, :parse_failed} ->
               # Fallback: return raw text as a single-task plan
               {:ok, %{
-                quest_id: quest_id,
-                goal: quest.goal,
+                mission_id: mission_id,
+                goal: mission.goal,
                 tasks: [%{
                   "title" => "Implementation",
                   "description" => text,
@@ -244,7 +244,7 @@ defmodule GiTF.Major.Planner do
     end
   end
 
-  defp build_llm_plan_prompt(quest, research, requirements, design, review, opts) do
+  defp build_llm_plan_prompt(mission, research, requirements, design, review, opts) do
     feedback = Map.get(opts, :feedback)
     strategy = Map.get(opts, :strategy)
     strategy_hint = Map.get(opts, :strategy_hint)
@@ -254,15 +254,15 @@ defmodule GiTF.Major.Planner do
     cond do
       # Full artifacts available — use the detailed planning prompt
       design && requirements && review ->
-        base = GiTF.Major.PhasePrompts.planning_prompt(quest, design, requirements, review)
+        base = GiTF.Major.PhasePrompts.planning_prompt(mission, design, requirements, review)
         if strategy_section == "", do: base, else: base <> "\n" <> strategy_section <> "\n"
 
       # Some artifacts — build a simpler prompt with what we have
       true ->
-        comb_path =
-          if quest[:comb_id] do
-            case GiTF.Comb.get(quest.comb_id) do
-              {:ok, comb} -> comb[:path] || "unknown"
+        sector_path =
+          if mission[:sector_id] do
+            case GiTF.Sector.get(mission.sector_id) do
+              {:ok, sector} -> sector[:path] || "unknown"
               _ -> "unknown"
             end
           else
@@ -284,10 +284,10 @@ defmodule GiTF.Major.Planner do
         """
         # Planning Phase
 
-        You are a project planner. Produce an ordered list of implementation jobs.
+        You are a project planner. Produce an ordered list of implementation ops.
 
-        **Goal**: #{quest.goal}
-        **Project path**: #{comb_path}
+        **Goal**: #{mission.goal}
+        **Project path**: #{sector_path}
 
         #{artifacts_section}
         #{feedback_section}
@@ -295,11 +295,11 @@ defmodule GiTF.Major.Planner do
 
         ## Instructions
 
-        1. Break the work into discrete, parallelizable jobs
-        2. Each job should be completable by a single developer in one session
+        1. Break the work into discrete, parallelizable ops
+        2. Each op should be completable by a single developer in one session
         3. Define clear acceptance criteria
         4. Specify target files where possible
-        5. Set up dependencies (job indices, 0-based)
+        5. Set up dependencies (op indices, 0-based)
         6. Recommend model complexity (sonnet for simple, opus for complex)
 
         ## Output Format
@@ -319,7 +319,7 @@ defmodule GiTF.Major.Planner do
         ]
         ```
 
-        Keep the number of jobs minimal. Prefer fewer, larger jobs over many small ones.
+        Keep the number of ops minimal. Prefer fewer, larger ops over many small ones.
         """
     end
   end
@@ -360,27 +360,27 @@ defmodule GiTF.Major.Planner do
   end
 
   @doc """
-  Creates implementation jobs from phase-generated specs.
+  Creates implementation ops from phase-generated specs.
 
-  Takes a list of job spec maps (from the planning phase ghost output) and
-  creates real job records with dependencies.
+  Takes a list of op spec maps (from the planning phase ghost output) and
+  creates real op records with dependencies.
 
-  Returns `{:ok, [job]}`.
+  Returns `{:ok, [op]}`.
   """
   @spec create_jobs_from_specs(String.t(), [map()]) :: {:ok, [map()]}
-  def create_jobs_from_specs(quest_id, job_specs) do
-    quest = Store.get(:quests, quest_id)
-    comb_id = if quest, do: quest.comb_id
+  def create_jobs_from_specs(mission_id, job_specs) do
+    mission = Store.get(:missions, mission_id)
+    sector_id = if mission, do: mission.sector_id
 
-    {jobs, _id_map} =
+    {ops, _id_map} =
       job_specs
       |> Enum.with_index()
       |> Enum.reduce({[], %{}}, fn {spec, idx}, {acc, id_map} ->
         job_attrs = %{
           title: spec["title"] || "Job #{idx + 1}",
           description: spec["description"],
-          quest_id: quest_id,
-          comb_id: comb_id,
+          mission_id: mission_id,
+          sector_id: sector_id,
           acceptance_criteria: spec["acceptance_criteria"] || [],
           target_files: spec["target_files"] || [],
           phase_job: false,
@@ -388,26 +388,26 @@ defmodule GiTF.Major.Planner do
           verification_contract: spec["verification_contract"]
         }
 
-        case GiTF.Jobs.create(job_attrs) do
-          {:ok, job} ->
+        case GiTF.Ops.create(job_attrs) do
+          {:ok, op} ->
             # Resolve dependencies by index
             for dep_idx <- (spec["depends_on_indices"] || []) do
               case Map.get(id_map, dep_idx) do
                 nil -> :ok
-                dep_id -> GiTF.Jobs.add_dependency(job.id, dep_id)
+                dep_id -> GiTF.Ops.add_dependency(op.id, dep_id)
               end
             end
 
-            {[job | acc], Map.put(id_map, idx, job.id)}
+            {[op | acc], Map.put(id_map, idx, op.id)}
 
           {:error, reason} ->
             require Logger
-            Logger.warning("Failed to create job from spec #{idx}: #{inspect(reason)}")
+            Logger.warning("Failed to create op from spec #{idx}: #{inspect(reason)}")
             {acc, id_map}
         end
       end)
 
-    {:ok, Enum.reverse(jobs)}
+    {:ok, Enum.reverse(ops)}
   end
 
   defp resolve_model("opus"), do: "claude-opus-4-6"
@@ -424,7 +424,7 @@ defmodule GiTF.Major.Planner do
   ]
 
   @doc """
-  Discover whether a quest goal involves fundamentally different approaches.
+  Discover whether a mission goal involves fundamentally different approaches.
 
   Calls haiku to classify the goal. If the goal involves a technology or
   approach choice (e.g., native vs cross-platform), returns up to 3 named
@@ -432,7 +432,7 @@ defmodule GiTF.Major.Planner do
   minimal / normal / complex.
   """
   @spec discover_strategies(map(), map()) :: [%{name: String.t(), hint: String.t()}]
-  def discover_strategies(quest, artifacts \\ %{}) do
+  def discover_strategies(mission, artifacts \\ %{}) do
     artifacts_context =
       artifacts
       |> Enum.reject(fn {_k, v} -> is_nil(v) end)
@@ -444,7 +444,7 @@ defmodule GiTF.Major.Planner do
     prompt = """
     You are classifying a project goal.
 
-    Goal: #{quest.goal}
+    Goal: #{mission.goal}
     #{artifacts_section}
     Does this goal involve a fundamental technology or approach choice (e.g., native vs cross-platform,
     different languages, different frameworks/SDKs)?
@@ -509,16 +509,16 @@ defmodule GiTF.Major.Planner do
   Falls back to `generate_llm_plan/1` single plan on failure.
   """
   @spec generate_candidate_plans(String.t(), map()) :: {:ok, map()} | {:error, term()}
-  def generate_candidate_plans(quest_id, opts \\ %{}) do
-    with {:ok, quest} <- GiTF.Quests.get(quest_id) do
+  def generate_candidate_plans(mission_id, opts \\ %{}) do
+    with {:ok, mission} <- GiTF.Missions.get(mission_id) do
       # Phase 1: Discover strategies
       artifacts = %{
-        research: GiTF.Quests.get_artifact(quest_id, "research"),
-        requirements: GiTF.Quests.get_artifact(quest_id, "requirements"),
-        design: GiTF.Quests.get_artifact(quest_id, "design")
+        research: GiTF.Missions.get_artifact(mission_id, "research"),
+        requirements: GiTF.Missions.get_artifact(mission_id, "requirements"),
+        design: GiTF.Missions.get_artifact(mission_id, "design")
       }
 
-      strategies = discover_strategies(quest, artifacts)
+      strategies = discover_strategies(mission, artifacts)
 
       # Phase 2: Generate a plan for each strategy
       candidates =
@@ -526,7 +526,7 @@ defmodule GiTF.Major.Planner do
         |> Enum.map(fn %{name: name, hint: hint} ->
           plan_opts = opts |> Map.put(:strategy, name) |> Map.put(:strategy_hint, hint)
 
-          case generate_llm_plan(quest_id, plan_opts) do
+          case generate_llm_plan(mission_id, plan_opts) do
             {:ok, plan} ->
               plan
               |> Map.put(:score, score_plan(plan))
@@ -540,10 +540,10 @@ defmodule GiTF.Major.Planner do
 
       if candidates == [] do
         # Fall back to single plan
-        generate_llm_plan(quest_id, opts)
+        generate_llm_plan(mission_id, opts)
       else
         # Store all candidates
-        GiTF.Quests.store_artifact(quest_id, "plan_candidates", %{
+        GiTF.Missions.store_artifact(mission_id, "plan_candidates", %{
           "candidates" => Enum.map(candidates, fn c ->
             %{
               "strategy" => c.strategy,
@@ -559,7 +559,7 @@ defmodule GiTF.Major.Planner do
         best = Enum.max_by(candidates, & &1.score)
 
         # Store best plan as draft
-        quest_record = Store.get(:quests, quest_id)
+        quest_record = Store.get(:missions, mission_id)
 
         if quest_record do
           updated =
@@ -567,7 +567,7 @@ defmodule GiTF.Major.Planner do
             |> Map.put(:draft_plan, best)
             |> Map.put(:plan_candidates, candidates)
 
-          Store.put(:quests, updated)
+          Store.put(:missions, updated)
         end
 
         {:ok, best}
@@ -607,15 +607,15 @@ defmodule GiTF.Major.Planner do
   end
 
   @doc """
-  Returns the next untried candidate plan for a quest.
+  Returns the next untried candidate plan for a mission.
 
-  Reads `:tried_plans` from quest, returns next candidate not yet tried.
+  Reads `:tried_plans` from mission, returns next candidate not yet tried.
   """
   @spec select_fallback_plan(String.t()) :: {:ok, map()} | {:error, :no_fallback}
-  def select_fallback_plan(quest_id) do
-    quest = Store.get(:quests, quest_id)
-    candidates = Map.get(quest || %{}, :plan_candidates, [])
-    tried = Map.get(quest || %{}, :tried_plans, [])
+  def select_fallback_plan(mission_id) do
+    mission = Store.get(:missions, mission_id)
+    candidates = Map.get(mission || %{}, :plan_candidates, [])
+    tried = Map.get(mission || %{}, :tried_plans, [])
     tried_strategies = Enum.map(tried, & &1[:strategy])
 
     untried =
@@ -689,8 +689,8 @@ defmodule GiTF.Major.Planner do
     scores =
       Enum.map(tasks, fn t ->
         model = t["model_recommendation"] || "sonnet"
-        job_type = infer_job_type(t)
-        rep = GiTF.Reputation.model_reputation(model, job_type)
+        op_type = infer_op_type(t)
+        rep = GiTF.Reputation.model_reputation(model, op_type)
         if rep, do: rep.success_rate, else: 0.5
       end)
 
@@ -701,7 +701,7 @@ defmodule GiTF.Major.Planner do
     _ -> 0.5
   end
 
-  defp infer_job_type(task) do
+  defp infer_op_type(task) do
     title = (task["title"] || "") |> String.downcase()
 
     cond do
@@ -715,12 +715,12 @@ defmodule GiTF.Major.Planner do
   # -- Adaptive Re-decomposition -----------------------------------------------
 
   @doc """
-  Re-plan a quest from failure context.
+  Re-plan a mission from failure context.
 
   When all fallback plans are exhausted, analyzes what went wrong and
   generates a new plan that avoids the failed approaches.
 
-  1. Collects failed job IDs from quest
+  1. Collects failed op IDs from mission
   2. Runs FailureAnalysis on each
   3. Builds replan prompt with failure summaries
   4. Generates a new LLM plan with failure avoidance context
@@ -728,11 +728,11 @@ defmodule GiTF.Major.Planner do
   Returns `{:ok, replan}` or `{:error, :replan_failed}`.
   """
   @spec replan_from_failures(String.t(), map()) :: {:ok, map()} | {:error, term()}
-  def replan_from_failures(quest_id, opts \\ %{}) do
-    with {:ok, _quest} <- GiTF.Quests.get(quest_id) do
-      # Collect failed jobs
+  def replan_from_failures(mission_id, opts \\ %{}) do
+    with {:ok, _quest} <- GiTF.Missions.get(mission_id) do
+      # Collect failed ops
       failed_jobs =
-        GiTF.Jobs.list(quest_id: quest_id, status: "failed")
+        GiTF.Ops.list(mission_id: mission_id, status: "failed")
 
       if failed_jobs == [] do
         {:error, :no_failures}
@@ -740,8 +740,8 @@ defmodule GiTF.Major.Planner do
         # Analyze each failure
         analyses =
           failed_jobs
-          |> Enum.map(fn job ->
-            case GiTF.Intelligence.FailureAnalysis.analyze_failure(job.id) do
+          |> Enum.map(fn op ->
+            case GiTF.Intelligence.FailureAnalysis.analyze_failure(op.id) do
               {:ok, analysis} -> analysis
               {:error, _} -> nil
             end
@@ -757,7 +757,7 @@ defmodule GiTF.Major.Planner do
           |> Map.put(:failure_context, failure_context)
           |> Map.put(:feedback, failure_context)
 
-        case generate_llm_plan(quest_id, replan_opts) do
+        case generate_llm_plan(mission_id, replan_opts) do
           {:ok, plan} ->
             plan = Map.put(plan, :replan, true)
             {:ok, plan}
@@ -770,28 +770,28 @@ defmodule GiTF.Major.Planner do
   rescue
     e ->
       require Logger
-      Logger.warning("Replan failed for quest: #{inspect(e)}")
+      Logger.warning("Replan failed for mission: #{inspect(e)}")
       {:error, :replan_failed}
   end
 
   defp build_failure_context(failed_jobs, analyses) do
     job_summaries =
       failed_jobs
-      |> Enum.map(fn job ->
-        analysis = Enum.find(analyses, fn a -> a.job_id == job.id end)
+      |> Enum.map(fn op ->
+        analysis = Enum.find(analyses, fn a -> a.op_id == op.id end)
 
         failure_type = if analysis, do: analysis.failure_type, else: :unknown
         root_cause = if analysis, do: analysis.root_cause, else: "Unknown"
         suggestions = if analysis, do: Enum.join(analysis.suggestions, "; "), else: ""
 
-        "- Job \"#{job.title}\" failed (#{failure_type}): #{root_cause}. Suggestions: #{suggestions}"
+        "- Job \"#{op.title}\" failed (#{failure_type}): #{root_cause}. Suggestions: #{suggestions}"
       end)
       |> Enum.join("\n")
 
     """
     ## Previous Failures (AVOID THESE APPROACHES)
 
-    The following jobs failed in previous attempts. Your new plan MUST take
+    The following ops failed in previous attempts. Your new plan MUST take
     a different approach and avoid the patterns that caused these failures:
 
     #{job_summaries}
@@ -802,8 +802,8 @@ defmodule GiTF.Major.Planner do
 
   # Goal-focused planning helpers
   
-  defp define_acceptance_criteria(quest) do
-    goal = Map.get(quest, :goal, Map.get(quest, :description, ""))
+  defp define_acceptance_criteria(mission) do
+    goal = Map.get(mission, :goal, Map.get(mission, :description, ""))
 
     [
       "Implementation achieves: #{goal}",
@@ -814,8 +814,8 @@ defmodule GiTF.Major.Planner do
     ]
   end
 
-  defp define_scope_boundaries(quest) do
-    goal = Map.get(quest, :goal, Map.get(quest, :description, ""))
+  defp define_scope_boundaries(mission) do
+    goal = Map.get(mission, :goal, Map.get(mission, :description, ""))
 
     %{
       must_do: ["Implement #{goal}"],

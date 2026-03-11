@@ -12,12 +12,12 @@ defmodule GiTF.Major.PlannerTest do
     start_supervised!({GiTF.Store, data_dir: tmp_dir})
     on_exit(fn -> File.rm_rf!(tmp_dir) end)
     
-    # Create test quest and comb
-    {:ok, comb} = Store.insert(:combs, %{name: "test-comb", path: "/tmp/test"})
-    {:ok, quest} = Store.insert(:quests, %{
-      name: "test-quest", 
+    # Create test mission and sector
+    {:ok, sector} = Store.insert(:sectors, %{name: "test-sector", path: "/tmp/test"})
+    {:ok, mission} = Store.insert(:missions, %{
+      name: "test-mission", 
       goal: "Build a test feature",
-      comb_id: comb.id
+      sector_id: sector.id
     })
     
     research_summary = %{
@@ -28,15 +28,15 @@ defmodule GiTF.Major.PlannerTest do
       }
     }
     
-    %{quest: quest, comb: comb, research_summary: research_summary}
+    %{mission: mission, sector: sector, research_summary: research_summary}
   end
 
   describe "generate_plan/2" do
-    test "creates implementation plan from research summary", %{quest: quest, research_summary: research} do
-      {:ok, plan} = Planner.generate_plan(quest.id, research)
+    test "creates implementation plan from research summary", %{mission: mission, research_summary: research} do
+      {:ok, plan} = Planner.generate_plan(mission.id, research)
       
-      assert plan.quest_id == quest.id
-      assert plan.goal == quest.goal
+      assert plan.mission_id == mission.id
+      assert plan.goal == mission.goal
       assert plan.research_input == research
       assert is_list(plan.tasks)
       assert length(plan.tasks) >= 2
@@ -44,124 +44,124 @@ defmodule GiTF.Major.PlannerTest do
       assert %DateTime{} = plan.created_at
     end
 
-    test "stores plan in quest record", %{quest: quest, research_summary: research} do
-      {:ok, _plan} = Planner.generate_plan(quest.id, research)
+    test "stores plan in mission record", %{mission: mission, research_summary: research} do
+      {:ok, _plan} = Planner.generate_plan(mission.id, research)
       
-      updated_quest = Store.get(:quests, quest.id)
+      updated_quest = Store.get(:missions, mission.id)
       assert updated_quest.implementation_plan != nil
-      assert updated_quest.implementation_plan.quest_id == quest.id
+      assert updated_quest.implementation_plan.mission_id == mission.id
     end
 
-    test "generates language-specific tasks for elixir", %{quest: quest, research_summary: research} do
-      {:ok, plan} = Planner.generate_plan(quest.id, research)
+    test "generates language-specific tasks for elixir", %{mission: mission, research_summary: research} do
+      {:ok, plan} = Planner.generate_plan(mission.id, research)
       
       task_titles = Enum.map(plan.tasks, & &1.title)
       assert "Add tests" in task_titles
     end
 
-    test "generates language-specific tasks for javascript", %{quest: quest} do
+    test "generates language-specific tasks for javascript", %{mission: mission} do
       research = %{structure: %{main_language: "javascript"}}
-      {:ok, plan} = Planner.generate_plan(quest.id, research)
+      {:ok, plan} = Planner.generate_plan(mission.id, research)
       
       task_titles = Enum.map(plan.tasks, & &1.title)
       assert "Add tests" in task_titles
     end
 
-    test "generates generic tasks for unknown language", %{quest: quest} do
+    test "generates generic tasks for unknown language", %{mission: mission} do
       research = %{structure: %{main_language: "unknown"}}
-      {:ok, plan} = Planner.generate_plan(quest.id, research)
+      {:ok, plan} = Planner.generate_plan(mission.id, research)
       
       task_titles = Enum.map(plan.tasks, & &1.title)
       assert "Add validation" in task_titles
     end
 
-    test "returns error for non-existent quest" do
+    test "returns error for non-existent mission" do
       {:error, :not_found} = Planner.generate_plan("non-existent", %{})
     end
   end
 
   describe "create_jobs_from_plan/2" do
-    test "creates job records from plan tasks", %{quest: quest, research_summary: research} do
-      {:ok, plan} = Planner.generate_plan(quest.id, research)
-      {:ok, jobs} = Planner.create_jobs_from_plan(quest.id, plan)
+    test "creates op records from plan tasks", %{mission: mission, research_summary: research} do
+      {:ok, plan} = Planner.generate_plan(mission.id, research)
+      {:ok, ops} = Planner.create_jobs_from_plan(mission.id, plan)
       
-      assert length(jobs) == length(plan.tasks)
+      assert length(ops) == length(plan.tasks)
       
-      Enum.each(jobs, fn job ->
-        assert job.quest_id == quest.id
-        assert job.comb_id == quest.comb_id
-        assert job.job_type != nil
-        assert job.complexity != nil
-        assert job.recommended_model != nil
-        assert is_list(job.verification_criteria)
-        assert is_integer(job.estimated_context_tokens)
+      Enum.each(ops, fn op ->
+        assert op.mission_id == mission.id
+        assert op.sector_id == mission.sector_id
+        assert op.op_type != nil
+        assert op.complexity != nil
+        assert op.recommended_model != nil
+        assert is_list(op.verification_criteria)
+        assert is_integer(op.estimated_context_tokens)
       end)
     end
 
-    test "assigns correct job types based on task type", %{quest: quest, research_summary: research} do
-      {:ok, plan} = Planner.generate_plan(quest.id, research)
-      {:ok, jobs} = Planner.create_jobs_from_plan(quest.id, plan)
+    test "assigns correct op types based on task type", %{mission: mission, research_summary: research} do
+      {:ok, plan} = Planner.generate_plan(mission.id, research)
+      {:ok, ops} = Planner.create_jobs_from_plan(mission.id, plan)
       
       # Jobs are classified by the Classifier based on title keywords
-      setup_job = Enum.find(jobs, &(&1.title == "Setup and preparation"))
-      assert setup_job.job_type in [:implementation, :simple_fix]  # Could be either based on classification
+      setup_job = Enum.find(ops, &(&1.title == "Setup and preparation"))
+      assert setup_job.op_type in [:implementation, :simple_fix]  # Could be either based on classification
       
-      # Find the "Add tests" job which should be verification
-      test_job = Enum.find(jobs, &String.contains?(&1.title, "tests"))
+      # Find the "Add tests" op which should be verification
+      test_job = Enum.find(ops, &String.contains?(&1.title, "tests"))
       if test_job do
-        assert test_job.job_type == :verification
+        assert test_job.op_type == :verification
       end
     end
 
-    test "creates jobs with verification criteria", %{quest: quest, research_summary: research} do
-      {:ok, plan} = Planner.generate_plan(quest.id, research)
-      {:ok, jobs} = Planner.create_jobs_from_plan(quest.id, plan)
+    test "creates ops with verification criteria", %{mission: mission, research_summary: research} do
+      {:ok, plan} = Planner.generate_plan(mission.id, research)
+      {:ok, ops} = Planner.create_jobs_from_plan(mission.id, plan)
       
-      Enum.each(jobs, fn job ->
-        assert is_list(job.verification_criteria)
-        assert length(job.verification_criteria) > 0
+      Enum.each(ops, fn op ->
+        assert is_list(op.verification_criteria)
+        assert length(op.verification_criteria) > 0
       end)
     end
 
-    test "creates sequential dependencies between jobs", %{quest: quest, research_summary: research} do
-      {:ok, plan} = Planner.generate_plan(quest.id, research)
-      {:ok, jobs} = Planner.create_jobs_from_plan(quest.id, plan)
+    test "creates sequential dependencies between ops", %{mission: mission, research_summary: research} do
+      {:ok, plan} = Planner.generate_plan(mission.id, research)
+      {:ok, ops} = Planner.create_jobs_from_plan(mission.id, plan)
       
-      # Check that jobs have dependencies (except the first one)
-      [first_job | rest_jobs] = jobs
+      # Check that ops have dependencies (except the first one)
+      [first_job | rest_jobs] = ops
       
-      # First job should have no dependencies
-      assert GiTF.Jobs.dependencies(first_job.id) == []
+      # First op should have no dependencies
+      assert GiTF.Ops.dependencies(first_job.id) == []
       
-      # Each subsequent job should depend on the previous one
-      Enum.reduce(jobs, nil, fn job, prev_job ->
+      # Each subsequent op should depend on the previous one
+      Enum.reduce(ops, nil, fn op, prev_job ->
         if prev_job do
-          deps = GiTF.Jobs.dependencies(job.id)
+          deps = GiTF.Ops.dependencies(op.id)
           assert length(deps) >= 1
           assert Enum.any?(deps, &(&1.id == prev_job.id))
         end
-        job
+        op
       end)
     end
 
-    test "returns error for non-existent quest" do
+    test "returns error for non-existent mission" do
       plan = %{tasks: []}
       {:error, :not_found} = Planner.create_jobs_from_plan("non-existent", plan)
     end
   end
 
   describe "task generation" do
-    test "always includes setup and core implementation tasks", %{quest: quest} do
+    test "always includes setup and core implementation tasks", %{mission: mission} do
       research = %{structure: %{main_language: "unknown"}}
-      {:ok, plan} = Planner.generate_plan(quest.id, research)
+      {:ok, plan} = Planner.generate_plan(mission.id, research)
       
       task_titles = Enum.map(plan.tasks, & &1.title)
       assert "Setup and preparation" in task_titles
       assert "Core implementation" in task_titles
     end
 
-    test "includes verification criteria for all tasks", %{quest: quest, research_summary: research} do
-      {:ok, plan} = Planner.generate_plan(quest.id, research)
+    test "includes verification criteria for all tasks", %{mission: mission, research_summary: research} do
+      {:ok, plan} = Planner.generate_plan(mission.id, research)
       
       Enum.each(plan.tasks, fn task ->
         assert is_list(task.verification_criteria)
@@ -169,8 +169,8 @@ defmodule GiTF.Major.PlannerTest do
       end)
     end
 
-    test "includes token estimates for all tasks", %{quest: quest, research_summary: research} do
-      {:ok, plan} = Planner.generate_plan(quest.id, research)
+    test "includes token estimates for all tasks", %{mission: mission, research_summary: research} do
+      {:ok, plan} = Planner.generate_plan(mission.id, research)
       
       Enum.each(plan.tasks, fn task ->
         assert is_integer(task.estimated_tokens)

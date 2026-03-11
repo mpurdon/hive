@@ -1,11 +1,11 @@
 defmodule GiTF.Onboarding do
   @moduledoc """
   Automated onboarding for brownfield projects.
-  Detects project type, generates codebase map, and configures the comb.
+  Detects project type, generates codebase map, and configures the sector.
   """
 
   alias GiTF.Onboarding.{Detector, Mapper}
-  alias GiTF.Comb
+  alias GiTF.Sector
 
   @doc """
   Onboard a project with automatic detection and configuration.
@@ -19,9 +19,9 @@ defmodule GiTF.Onboarding do
     with {:ok, full_path} <- validate_path(path),
          {:ok, project_info} <- detect_project(full_path),
          {:ok, codebase_map} <- map_codebase(full_path, project_info),
-         {:ok, comb} <- create_comb(full_path, project_info, codebase_map, opts),
-         {:ok, _} <- maybe_generate_research(comb, opts) do
-      {:ok, %{comb: comb, project_info: project_info, codebase_map: codebase_map}}
+         {:ok, sector} <- create_comb(full_path, project_info, codebase_map, opts),
+         {:ok, _} <- maybe_generate_research(sector, opts) do
+      {:ok, %{sector: sector, project_info: project_info, codebase_map: codebase_map}}
     end
   end
 
@@ -81,8 +81,8 @@ defmodule GiTF.Onboarding do
     ]
     
     case Comb.add(path, comb_opts) do
-      {:ok, comb} -> {:ok, comb}
-      {:error, reason} -> {:error, "Failed to create comb: #{inspect(reason)}"}
+      {:ok, sector} -> {:ok, sector}
+      {:error, reason} -> {:error, "Failed to create sector: #{inspect(reason)}"}
     end
   end
 
@@ -95,7 +95,7 @@ defmodule GiTF.Onboarding do
   end
 
   @doc """
-  Get onboarding suggestions for a path without creating a comb.
+  Get onboarding suggestions for a path without creating a sector.
   """
   def preview(path) do
     with {:ok, full_path} <- validate_path(path),

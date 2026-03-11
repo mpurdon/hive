@@ -7,7 +7,7 @@ defmodule GiTF.Runtime.MultiObjectiveSelector do
   - Cost score (weight 0.3): inverted cost tier (haiku cheapest)
   - Budget score (weight 0.2): penalizes expensive models when budget is low
 
-  Risk adjustment shifts weight from cost to quality for high/critical jobs.
+  Risk adjustment shifts weight from cost to quality for high/critical ops.
   """
 
   @candidates ["opus", "sonnet", "haiku"]
@@ -25,25 +25,25 @@ defmodule GiTF.Runtime.MultiObjectiveSelector do
   }
 
   @doc """
-  Selects the optimal model for a job using multi-objective scoring.
+  Selects the optimal model for a op using multi-objective scoring.
 
   Returns `{model, score_breakdown}` where score_breakdown contains
   individual scores and the weighted total.
   """
   @spec select_optimal(map(), keyword()) :: {String.t(), map()}
-  def select_optimal(job, _opts \\ []) do
-    quest_id = job[:quest_id]
-    job_type = job[:job_type] || :implementation
-    risk_level = job[:risk_level] || :low
+  def select_optimal(op, _opts \\ []) do
+    mission_id = op[:mission_id]
+    op_type = op[:op_type] || :implementation
+    risk_level = op[:risk_level] || :low
 
     {quality_weight, cost_weight, budget_weight} = weights_for_risk(risk_level)
 
     scored =
       @candidates
       |> Enum.map(fn model ->
-        quality = quality_score(model, job_type)
+        quality = quality_score(model, op_type)
         cost = cost_score(model)
-        budget = budget_score(model, quest_id)
+        budget = budget_score(model, mission_id)
 
         total =
           quality * quality_weight +
@@ -73,20 +73,20 @@ defmodule GiTF.Runtime.MultiObjectiveSelector do
   Returns score breakdowns for all candidates (for debugging/display).
   """
   @spec score_breakdown(map()) :: map()
-  def score_breakdown(job) do
-    {_best, _} = select_optimal(job)
+  def score_breakdown(op) do
+    {_best, _} = select_optimal(op)
 
-    quest_id = job[:quest_id]
-    job_type = job[:job_type] || :implementation
-    risk_level = job[:risk_level] || :low
+    mission_id = op[:mission_id]
+    op_type = op[:op_type] || :implementation
+    risk_level = op[:risk_level] || :low
     {quality_weight, cost_weight, budget_weight} = weights_for_risk(risk_level)
 
     candidates =
       @candidates
       |> Enum.map(fn model ->
-        quality = quality_score(model, job_type)
+        quality = quality_score(model, op_type)
         cost = cost_score(model)
-        budget = budget_score(model, quest_id)
+        budget = budget_score(model, mission_id)
 
         total =
           quality * quality_weight +
@@ -113,7 +113,7 @@ defmodule GiTF.Runtime.MultiObjectiveSelector do
   # -- Private ---------------------------------------------------------------
 
   defp weights_for_risk(risk) when risk in [:high, :critical] do
-    # Shift weight from cost to quality for risky jobs
+    # Shift weight from cost to quality for risky ops
     {0.65, 0.15, 0.20}
   end
 
@@ -121,8 +121,8 @@ defmodule GiTF.Runtime.MultiObjectiveSelector do
     {0.50, 0.30, 0.20}
   end
 
-  defp quality_score(model, job_type) do
-    case GiTF.Reputation.model_reputation(model, job_type) do
+  defp quality_score(model, op_type) do
+    case GiTF.Reputation.model_reputation(model, op_type) do
       %{success_rate: rate} when is_number(rate) -> rate
       _ -> 0.5
     end
@@ -136,9 +136,9 @@ defmodule GiTF.Runtime.MultiObjectiveSelector do
 
   defp budget_score(_model, nil), do: 1.0
 
-  defp budget_score(model, quest_id) do
-    remaining = GiTF.Budget.remaining(quest_id)
-    total = GiTF.Budget.budget_for(quest_id)
+  defp budget_score(model, mission_id) do
+    remaining = GiTF.Budget.remaining(mission_id)
+    total = GiTF.Budget.budget_for(mission_id)
 
     budget_ratio = if total > 0, do: remaining / total, else: 1.0
 

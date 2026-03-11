@@ -18,9 +18,9 @@ defmodule GiTF.Runtime.MultiObjectiveSelectorTest do
 
   describe "select_optimal/1" do
     test "returns a model and score breakdown" do
-      job = %{job_type: :implementation, risk_level: :low}
+      op = %{op_type: :implementation, risk_level: :low}
 
-      {model, breakdown} = MultiObjectiveSelector.select_optimal(job)
+      {model, breakdown} = MultiObjectiveSelector.select_optimal(op)
 
       assert model in ["opus", "sonnet", "haiku"]
       assert is_map(breakdown)
@@ -31,46 +31,46 @@ defmodule GiTF.Runtime.MultiObjectiveSelectorTest do
     end
 
     test "without reputation data, prefers cheaper models" do
-      job = %{job_type: :implementation, risk_level: :low}
+      op = %{op_type: :implementation, risk_level: :low}
 
-      {model, _} = MultiObjectiveSelector.select_optimal(job)
+      {model, _} = MultiObjectiveSelector.select_optimal(op)
 
       # With equal quality (0.5 each), haiku wins on cost
       assert model == "haiku"
     end
 
     test "high risk shifts weight toward quality" do
-      job = %{job_type: :implementation, risk_level: :high}
+      op = %{op_type: :implementation, risk_level: :high}
 
-      {_model, breakdown} = MultiObjectiveSelector.select_optimal(job)
+      {_model, breakdown} = MultiObjectiveSelector.select_optimal(op)
 
       assert breakdown.weights.quality == 0.65
       assert breakdown.weights.cost == 0.15
     end
 
     test "critical risk shifts weight toward quality" do
-      job = %{job_type: :planning, risk_level: :critical}
+      op = %{op_type: :planning, risk_level: :critical}
 
-      {_model, breakdown} = MultiObjectiveSelector.select_optimal(job)
+      {_model, breakdown} = MultiObjectiveSelector.select_optimal(op)
 
       assert breakdown.weights.quality == 0.65
       assert breakdown.weights.cost == 0.15
     end
 
     test "low risk uses default weights" do
-      job = %{job_type: :implementation, risk_level: :low}
+      op = %{op_type: :implementation, risk_level: :low}
 
-      {_model, breakdown} = MultiObjectiveSelector.select_optimal(job)
+      {_model, breakdown} = MultiObjectiveSelector.select_optimal(op)
 
       assert breakdown.weights.quality == 0.50
       assert breakdown.weights.cost == 0.30
       assert breakdown.weights.budget == 0.20
     end
 
-    test "nil quest_id gives full budget score" do
-      job = %{job_type: :implementation, risk_level: :low, quest_id: nil}
+    test "nil mission_id gives full budget score" do
+      op = %{op_type: :implementation, risk_level: :low, mission_id: nil}
 
-      {_model, breakdown} = MultiObjectiveSelector.select_optimal(job)
+      {_model, breakdown} = MultiObjectiveSelector.select_optimal(op)
 
       assert breakdown.budget == 1.0
     end
@@ -78,9 +78,9 @@ defmodule GiTF.Runtime.MultiObjectiveSelectorTest do
 
   describe "score_breakdown/1" do
     test "returns candidates map with all three models" do
-      job = %{job_type: :implementation, risk_level: :low}
+      op = %{op_type: :implementation, risk_level: :low}
 
-      result = MultiObjectiveSelector.score_breakdown(job)
+      result = MultiObjectiveSelector.score_breakdown(op)
 
       assert Map.has_key?(result, :candidates)
       assert Map.has_key?(result.candidates, "opus")
@@ -89,18 +89,18 @@ defmodule GiTF.Runtime.MultiObjectiveSelectorTest do
     end
 
     test "includes weights and risk level" do
-      job = %{job_type: :implementation, risk_level: :medium}
+      op = %{op_type: :implementation, risk_level: :medium}
 
-      result = MultiObjectiveSelector.score_breakdown(job)
+      result = MultiObjectiveSelector.score_breakdown(op)
 
       assert Map.has_key?(result, :weights)
       assert result.risk_level == :medium
     end
 
     test "each candidate has quality, cost, budget, total" do
-      job = %{job_type: :verification}
+      op = %{op_type: :verification}
 
-      result = MultiObjectiveSelector.score_breakdown(job)
+      result = MultiObjectiveSelector.score_breakdown(op)
 
       for {_model, scores} <- result.candidates do
         assert Map.has_key?(scores, :quality)
@@ -116,13 +116,13 @@ defmodule GiTF.Runtime.MultiObjectiveSelectorTest do
       # Seed reputation data: make opus have high success for :planning
       for _ <- 1..10 do
         {:ok, _job} =
-          Store.insert(:jobs, %{
+          Store.insert(:ops, %{
             title: "Plan",
             status: "done",
-            quest_id: "q1",
-            comb_id: "c1",
+            mission_id: "q1",
+            sector_id: "c1",
             assigned_model: "opus",
-            job_type: :planning,
+            op_type: :planning,
             quality_score: 90
           })
       end
@@ -130,8 +130,8 @@ defmodule GiTF.Runtime.MultiObjectiveSelectorTest do
       # Invalidate cache
       Store.delete(:model_reputation, "model:opus:planning")
 
-      job = %{job_type: :planning, risk_level: :high}
-      {_model, breakdown} = MultiObjectiveSelector.select_optimal(job)
+      op = %{op_type: :planning, risk_level: :high}
+      {_model, breakdown} = MultiObjectiveSelector.select_optimal(op)
 
       opus_score = breakdown.total
       assert is_number(opus_score)

@@ -31,7 +31,7 @@ defmodule GiTF.Plugin.Builtin.ToolProviders.ProjectContext do
       name: "project_info",
       description: "Detect project language, build tool, test framework, and git info from the filesystem.",
       parameter_schema: [
-        path: [type: :string, doc: "Project root path (default: current comb)"]
+        path: [type: :string, doc: "Project root path (default: current sector)"]
       ],
       callback: &project_info/1
     )
@@ -115,7 +115,7 @@ defmodule GiTF.Plugin.Builtin.ToolProviders.ProjectContext do
       name: "codebase_map",
       description: "Generate a directory tree of the project, excluding build artifacts and dependencies.",
       parameter_schema: [
-        path: [type: :string, doc: "Root path (default: current comb)"],
+        path: [type: :string, doc: "Root path (default: current sector)"],
         depth: [type: :integer, doc: "Max depth (default: 3)"]
       ],
       callback: &codebase_map/1
@@ -167,7 +167,7 @@ defmodule GiTF.Plugin.Builtin.ToolProviders.ProjectContext do
       name: "dependency_info",
       description: "Parse project dependency files (mix.lock, package.json, Cargo.toml) and list dependencies.",
       parameter_schema: [
-        path: [type: :string, doc: "Project root path (default: current comb)"]
+        path: [type: :string, doc: "Project root path (default: current sector)"]
       ],
       callback: &dependency_info/1
     )
@@ -271,8 +271,8 @@ defmodule GiTF.Plugin.Builtin.ToolProviders.ProjectContext do
   # -- Helpers -----------------------------------------------------------------
 
   defp resolve_project_path(nil) do
-    case GiTF.Comb.current() do
-      {:ok, comb} -> comb.path
+    case GiTF.Sector.current() do
+      {:ok, sector} -> sector.path
       _ -> File.cwd!()
     end
   rescue

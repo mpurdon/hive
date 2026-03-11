@@ -15,39 +15,39 @@ defmodule GiTF.Major.StallDetectionTest do
     %{}
   end
 
-  describe "Waggle.send_checkpoint/2" do
-    test "sends checkpoint waggle to queen" do
-      {:ok, waggle} =
-        GiTF.Waggle.send_checkpoint("ghost-abc123", %{
+  describe "Link.send_checkpoint/2" do
+    test "sends checkpoint link_msg to queen" do
+      {:ok, link_msg} =
+        GiTF.Link.send_checkpoint("ghost-abc123", %{
           phase: "coding",
           files_changed: 3,
           progress_pct: 45
         })
 
-      assert waggle.from == "ghost-abc123"
-      assert waggle.to == "major"
-      assert waggle.subject == "checkpoint"
+      assert link_msg.from == "ghost-abc123"
+      assert link_msg.to == "major"
+      assert link_msg.subject == "checkpoint"
 
-      body = Jason.decode!(waggle.body)
+      body = Jason.decode!(link_msg.body)
       assert body["phase"] == "coding"
       assert body["progress_pct"] == 45
     end
   end
 
-  describe "Waggle.send_resource_warning/2" do
-    test "sends resource warning waggle to queen" do
-      {:ok, waggle} =
-        GiTF.Waggle.send_resource_warning("ghost-def456", %{
+  describe "Link.send_resource_warning/2" do
+    test "sends resource warning link_msg to queen" do
+      {:ok, link_msg} =
+        GiTF.Link.send_resource_warning("ghost-def456", %{
           type: "context_tokens",
           current: 180_000,
           limit: 200_000
         })
 
-      assert waggle.from == "ghost-def456"
-      assert waggle.to == "major"
-      assert waggle.subject == "resource_warning"
+      assert link_msg.from == "ghost-def456"
+      assert link_msg.to == "major"
+      assert link_msg.subject == "resource_warning"
 
-      body = Jason.decode!(waggle.body)
+      body = Jason.decode!(link_msg.body)
       assert body["type"] == "context_tokens"
       assert body["current"] == 180_000
     end
@@ -62,8 +62,8 @@ defmodule GiTF.Major.StallDetectionTest do
         Store.insert(:ghosts, %{
           name: "stale-ghost",
           status: "working",
-          job_id: nil,
-          cell_path: nil,
+          op_id: nil,
+          shell_path: nil,
           pid: nil,
           assigned_model: "sonnet",
           context_tokens_used: 0,
@@ -86,8 +86,8 @@ defmodule GiTF.Major.StallDetectionTest do
         Store.insert(:ghosts, %{
           name: "active-ghost",
           status: "working",
-          job_id: nil,
-          cell_path: nil,
+          op_id: nil,
+          shell_path: nil,
           pid: nil,
           assigned_model: "sonnet",
           context_tokens_used: 0,

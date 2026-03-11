@@ -164,7 +164,7 @@ defmodule GiTF.TranscriptWatcher do
     phase = infer_phase(entries)
 
     if phase do
-      GiTF.Waggle.send_checkpoint(ghost_id, %{
+      GiTF.Link.send_checkpoint(ghost_id, %{
         phase: phase,
         synthetic: true,
         entries_count: length(entries)

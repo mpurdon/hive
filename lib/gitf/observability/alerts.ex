@@ -34,8 +34,8 @@ defmodule GiTF.Observability.Alerts do
   end
 
   defp check_rule(:validation_failed, threshold_seconds) do
-    jobs = Store.all(:jobs)
-    recent_failures = Enum.filter(jobs, fn j ->
+    ops = Store.all(:ops)
+    recent_failures = Enum.filter(ops, fn j ->
       j.status == "done" &&
       Map.get(j, :verification_status) == "failed" &&
       j.verified_at &&
@@ -51,22 +51,22 @@ defmodule GiTF.Observability.Alerts do
   end
 
   defp check_rule(:quest_stuck, threshold_seconds) do
-    quests = Store.all(:quests)
-    stuck = Enum.filter(quests, fn q ->
+    missions = Store.all(:missions)
+    stuck = Enum.filter(missions, fn q ->
       q.status == "active" && 
       DateTime.diff(DateTime.utc_now(), q.updated_at) > threshold_seconds
     end)
     
     if length(stuck) > 0 do
-      {:alert, "#{length(stuck)} quest(s) stuck for > #{threshold_seconds}s"}
+      {:alert, "#{length(stuck)} mission(s) stuck for > #{threshold_seconds}s"}
     else
       :ok
     end
   end
 
   defp check_rule(:quality_drop, threshold) do
-    jobs = Store.all(:jobs)
-    recent = Enum.take(jobs, -10)
+    ops = Store.all(:ops)
+    recent = Enum.take(ops, -10)
     scores = Enum.map(recent, & &1[:quality_score]) |> Enum.reject(&is_nil/1)
     
     if !Enum.empty?(scores) do
@@ -102,8 +102,8 @@ defmodule GiTF.Observability.Alerts do
   end
 
   defp check_rule(:failure_rate_high, threshold) do
-    jobs = Store.all(:jobs)
-    recent = Enum.take(jobs, -20)
+    ops = Store.all(:ops)
+    recent = Enum.take(ops, -20)
     
     if length(recent) > 0 do
       failed = Enum.count(recent, & &1.status == "failed")

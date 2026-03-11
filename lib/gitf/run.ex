@@ -2,10 +2,10 @@ defmodule GiTF.Run do
   @moduledoc """
   Context module for coordinated run management.
 
-  A run represents a single execution attempt of a quest -- all the ghosts
-  spawned to work on its jobs during one pass. Tracking runs lets the Major
-  know when every job in a batch has finished (completed or failed) so it
-  can trigger quest completion or the next phase automatically.
+  A run represents a single execution attempt of a mission -- all the ghosts
+  spawned to work on its ops during one pass. Tracking runs lets the Major
+  know when every op in a batch has finished (completed or failed) so it
+  can trigger mission completion or the next phase automatically.
 
   This is a pure context module: no process state, just data transformations
   against the Store.
@@ -16,22 +16,22 @@ defmodule GiTF.Run do
   # -- Public API --------------------------------------------------------------
 
   @doc """
-  Creates a new run for a quest.
+  Creates a new run for a mission.
 
   Returns `{:ok, run}`.
   """
   @spec create(String.t(), keyword()) :: {:ok, map()}
-  def create(quest_id, opts \\ []) do
-    job_ids = Keyword.get(opts, :job_ids, [])
+  def create(mission_id, opts \\ []) do
+    op_ids = Keyword.get(opts, :op_ids, [])
 
     record = %{
-      quest_id: quest_id,
+      mission_id: mission_id,
       status: "active",
       started_at: DateTime.utc_now(),
       completed_at: nil,
       ghost_ids: [],
-      job_ids: job_ids,
-      total_jobs: length(job_ids),
+      op_ids: op_ids,
+      total_jobs: length(op_ids),
       completed_jobs: 0,
       failed_jobs: 0
     }
@@ -57,12 +57,12 @@ defmodule GiTF.Run do
   end
 
   @doc """
-  Appends a job ID to the run and increments total_jobs.
+  Appends a op ID to the run and increments total_jobs.
 
   Returns `{:ok, run}` or `{:error, :not_found}`.
   """
   @spec add_job(String.t(), String.t()) :: {:ok, map()} | {:error, :not_found}
-  def add_job(run_id, job_id) do
+  def add_job(run_id, op_id) do
     case Store.get(:runs, run_id) do
       nil ->
         {:error, :not_found}
@@ -70,7 +70,7 @@ defmodule GiTF.Run do
       run ->
         updated = %{
           run
-          | job_ids: Enum.uniq([job_id | run.job_ids]),
+          | op_ids: Enum.uniq([op_id | run.op_ids]),
             total_jobs: run.total_jobs + 1
         }
 
@@ -79,15 +79,15 @@ defmodule GiTF.Run do
   end
 
   @doc """
-  Records a job completion within the run.
+  Records a op completion within the run.
 
-  Increments completed_jobs. If all jobs are resolved (completed + failed == total),
+  Increments completed_jobs. If all ops are resolved (completed + failed == total),
   marks the run as completed and returns `{:ok, run, :run_complete}`.
   Otherwise returns `{:ok, run}`.
   """
   @spec job_completed(String.t(), String.t()) ::
           {:ok, map()} | {:ok, map(), :run_complete} | {:error, :not_found}
-  def job_completed(run_id, _job_id) do
+  def job_completed(run_id, _op_id) do
     # Atomic increment via update_matching to prevent race on concurrent completions
     count = Store.update_matching(
       :runs,
@@ -106,13 +106,13 @@ defmodule GiTF.Run do
   end
 
   @doc """
-  Records a job failure within the run.
+  Records a op failure within the run.
 
   Increments failed_jobs. Same completion check as `job_completed/2`.
   """
   @spec job_failed(String.t(), String.t()) ::
           {:ok, map()} | {:ok, map(), :run_complete} | {:error, :not_found}
-  def job_failed(run_id, _job_id) do
+  def job_failed(run_id, _op_id) do
     count = Store.update_matching(
       :runs,
       fn r -> r.id == run_id end,
@@ -140,12 +140,12 @@ defmodule GiTF.Run do
   end
 
   @doc """
-  Returns the active run (if any) for a given quest.
+  Returns the active run (if any) for a given mission.
   """
   @spec active_for_quest(String.t()) :: map() | nil
-  def active_for_quest(quest_id) do
+  def active_for_quest(mission_id) do
     Store.find_one(:runs, fn r ->
-      r.quest_id == quest_id and r.status == "active"
+      r.mission_id == mission_id and r.status == "active"
     end)
   end
 
@@ -154,7 +154,7 @@ defmodule GiTF.Run do
 
   ## Options
 
-    * `:quest_id` - filter by quest
+    * `:mission_id` - filter by mission
     * `:status` - filter by status ("active", "completed", "failed")
   """
   @spec list(keyword()) :: [map()]
@@ -162,7 +162,7 @@ defmodule GiTF.Run do
     runs = Store.all(:runs)
 
     runs
-    |> maybe_filter(:quest_id, Keyword.get(opts, :quest_id))
+    |> maybe_filter(:mission_id, Keyword.get(opts, :mission_id))
     |> maybe_filter(:status, Keyword.get(opts, :status))
     |> Enum.sort_by(& &1.started_at, {:desc, DateTime})
   end

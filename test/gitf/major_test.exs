@@ -9,9 +9,9 @@ defmodule GiTF.MajorTest do
   setup do
     GiTF.Test.StoreHelper.ensure_infrastructure()
 
-    # Ensure CombSupervisor is running (needed for ghost spawning during retry)
-    unless Process.whereis(GiTF.CombSupervisor) do
-      DynamicSupervisor.start_link(strategy: :one_for_one, name: GiTF.CombSupervisor)
+    # Ensure SectorSupervisor is running (needed for ghost spawning during retry)
+    unless Process.whereis(GiTF.SectorSupervisor) do
+      DynamicSupervisor.start_link(strategy: :one_for_one, name: GiTF.SectorSupervisor)
     end
 
     store_dir = Path.join(@tmp_dir, "gitf_store_#{:erlang.unique_integer([:positive])}")
@@ -116,12 +116,12 @@ defmodule GiTF.MajorTest do
     end
   end
 
-  describe "handle_info/2 waggle handling" do
-    test "handles job_complete waggle by removing ghost from active_ghosts" do
+  describe "handle_info/2 link_msg handling" do
+    test "handles job_complete link_msg by removing ghost from active_ghosts" do
       Major.start_session()
 
-      # Simulate receiving a waggle message directly (plain map now)
-      waggle = %{
+      # Simulate receiving a link_msg message directly (plain map now)
+      link_msg = %{
         id: "wag-test1",
         from: "ghost-abc123",
         to: "major",
@@ -130,7 +130,7 @@ defmodule GiTF.MajorTest do
         read: false
       }
 
-      send(Process.whereis(GiTF.Major), {:waggle_received, waggle})
+      send(Process.whereis(GiTF.Major), {:waggle_received, link_msg})
 
       # Give the GenServer a moment to process
       Process.sleep(10)
@@ -139,10 +139,10 @@ defmodule GiTF.MajorTest do
       refute Map.has_key?(status.active_ghosts, "ghost-abc123")
     end
 
-    test "handles job_failed waggle" do
+    test "handles job_failed link_msg" do
       Major.start_session()
 
-      waggle = %{
+      link_msg = %{
         id: "wag-test2",
         from: "ghost-def456",
         to: "major",
@@ -151,7 +151,7 @@ defmodule GiTF.MajorTest do
         read: false
       }
 
-      send(Process.whereis(GiTF.Major), {:waggle_received, waggle})
+      send(Process.whereis(GiTF.Major), {:waggle_received, link_msg})
       Process.sleep(10)
 
       # Should not crash
@@ -165,37 +165,37 @@ defmodule GiTF.MajorTest do
       assert Process.alive?(Process.whereis(GiTF.Major))
     end
 
-    test "retry logic increments retry count for failed job" do
+    test "retry logic increments retry count for failed op" do
       # Create the necessary DB records for retry
-      {:ok, comb} =
-        Store.insert(:combs, %{name: "retry-test-comb-#{:erlang.unique_integer([:positive])}"})
+      {:ok, sector} =
+        Store.insert(:sectors, %{name: "retry-test-sector-#{:erlang.unique_integer([:positive])}"})
 
-      {:ok, quest} =
-        Store.insert(:quests, %{
-          name: "retry-test-quest-#{:erlang.unique_integer([:positive])}",
+      {:ok, mission} =
+        Store.insert(:missions, %{
+          name: "retry-test-mission-#{:erlang.unique_integer([:positive])}",
           status: "pending"
         })
 
-      {:ok, job} =
-        GiTF.Jobs.create(%{
-          title: "Retry test job",
-          quest_id: quest.id,
-          comb_id: comb.id
+      {:ok, op} =
+        GiTF.Ops.create(%{
+          title: "Retry test op",
+          mission_id: mission.id,
+          sector_id: sector.id
         })
 
       {:ok, ghost} =
-        Store.insert(:ghosts, %{name: "retry-test-ghost", status: "starting", job_id: job.id})
+        Store.insert(:ghosts, %{name: "retry-test-ghost", status: "starting", op_id: op.id})
 
-      # Move job through states to failed
-      {:ok, _} = GiTF.Jobs.assign(job.id, ghost.id)
-      {:ok, _} = GiTF.Jobs.start(job.id)
-      {:ok, _} = GiTF.Jobs.fail(job.id)
+      # Move op through states to failed
+      {:ok, _} = GiTF.Ops.assign(op.id, ghost.id)
+      {:ok, _} = GiTF.Ops.start(op.id)
+      {:ok, _} = GiTF.Ops.fail(op.id)
 
       Major.start_session()
 
-      # Simulate the failed waggle -- retry will attempt to spawn a ghost
+      # Simulate the failed link_msg -- retry will attempt to spawn a ghost
       # which may fail (no worktree), but the retry count should still be tracked
-      waggle = %{
+      link_msg = %{
         id: "wag-retry-1",
         from: ghost.id,
         to: "major",
@@ -204,42 +204,42 @@ defmodule GiTF.MajorTest do
         read: false
       }
 
-      send(Process.whereis(GiTF.Major), {:waggle_received, waggle})
+      send(Process.whereis(GiTF.Major), {:waggle_received, link_msg})
       Process.sleep(50)
 
       # Major should still be alive after retry attempt
       assert Process.alive?(Process.whereis(GiTF.Major))
     end
 
-    test "updates quest status to completed on job_complete" do
-      # Create records: comb, quest, job (done), ghost
-      {:ok, comb} =
-        Store.insert(:combs, %{name: "quest-adv-comb-#{:erlang.unique_integer([:positive])}"})
+    test "updates mission status to completed on job_complete" do
+      # Create records: sector, mission, op (done), ghost
+      {:ok, sector} =
+        Store.insert(:sectors, %{name: "mission-adv-sector-#{:erlang.unique_integer([:positive])}"})
 
-      {:ok, quest} =
-        Store.insert(:quests, %{
-          name: "quest-adv-test-#{:erlang.unique_integer([:positive])}",
+      {:ok, mission} =
+        Store.insert(:missions, %{
+          name: "mission-adv-test-#{:erlang.unique_integer([:positive])}",
           status: "active"
         })
 
-      {:ok, job} =
-        GiTF.Jobs.create(%{
-          title: "Only job",
-          quest_id: quest.id,
-          comb_id: comb.id
+      {:ok, op} =
+        GiTF.Ops.create(%{
+          title: "Only op",
+          mission_id: mission.id,
+          sector_id: sector.id
         })
 
       {:ok, ghost} =
-        Store.insert(:ghosts, %{name: "adv-ghost", status: "working", job_id: job.id})
+        Store.insert(:ghosts, %{name: "adv-ghost", status: "working", op_id: op.id})
 
-      # Move job to "done" state
-      {:ok, _} = GiTF.Jobs.assign(job.id, ghost.id)
-      {:ok, _} = GiTF.Jobs.start(job.id)
-      {:ok, _} = GiTF.Jobs.complete(job.id)
+      # Move op to "done" state
+      {:ok, _} = GiTF.Ops.assign(op.id, ghost.id)
+      {:ok, _} = GiTF.Ops.start(op.id)
+      {:ok, _} = GiTF.Ops.complete(op.id)
 
       Major.start_session()
 
-      waggle = %{
+      link_msg = %{
         id: "wag-adv-1",
         from: ghost.id,
         to: "major",
@@ -248,52 +248,52 @@ defmodule GiTF.MajorTest do
         read: false
       }
 
-      send(Process.whereis(GiTF.Major), {:waggle_received, waggle})
+      send(Process.whereis(GiTF.Major), {:waggle_received, link_msg})
 
-      # The Major spawns async verification which will fail (no cell/worktree
+      # The Major spawns async verification which will fail (no shell/worktree
       # in test env), triggering retry. Wait for async tasks to settle.
       Process.sleep(500)
 
-      # Major should survive the waggle processing
+      # Major should survive the link_msg processing
       assert Process.alive?(Process.whereis(GiTF.Major))
 
       # Quest status depends on verification outcome:
       # - "completed" if verification passed (unlikely in test - no git worktree)
       # - "active" or "pending" if verification failed and triggered retry
-      {:ok, updated_quest} = GiTF.Quests.get(quest.id)
+      {:ok, updated_quest} = GiTF.Missions.get(mission.id)
       assert updated_quest.status in ["active", "pending", "completed"]
     end
 
-    test "sends quest_completed waggle on completion" do
-      # Subscribe to queen topic to receive the waggle
-      GiTF.Waggle.subscribe("link:major")
+    test "sends quest_completed link_msg on completion" do
+      # Subscribe to queen topic to receive the link_msg
+      GiTF.Link.subscribe("link:major")
 
-      {:ok, comb} =
-        Store.insert(:combs, %{name: "wag-comb-#{:erlang.unique_integer([:positive])}"})
+      {:ok, sector} =
+        Store.insert(:sectors, %{name: "wag-sector-#{:erlang.unique_integer([:positive])}"})
 
-      {:ok, quest} =
-        Store.insert(:quests, %{
-          name: "wag-quest-#{:erlang.unique_integer([:positive])}",
+      {:ok, mission} =
+        Store.insert(:missions, %{
+          name: "wag-mission-#{:erlang.unique_integer([:positive])}",
           status: "active"
         })
 
-      {:ok, job} =
-        GiTF.Jobs.create(%{
-          title: "Single job",
-          quest_id: quest.id,
-          comb_id: comb.id
+      {:ok, op} =
+        GiTF.Ops.create(%{
+          title: "Single op",
+          mission_id: mission.id,
+          sector_id: sector.id
         })
 
       {:ok, ghost} =
-        Store.insert(:ghosts, %{name: "wag-ghost", status: "working", job_id: job.id})
+        Store.insert(:ghosts, %{name: "wag-ghost", status: "working", op_id: op.id})
 
-      {:ok, _} = GiTF.Jobs.assign(job.id, ghost.id)
-      {:ok, _} = GiTF.Jobs.start(job.id)
-      {:ok, _} = GiTF.Jobs.complete(job.id)
+      {:ok, _} = GiTF.Ops.assign(op.id, ghost.id)
+      {:ok, _} = GiTF.Ops.start(op.id)
+      {:ok, _} = GiTF.Ops.complete(op.id)
 
       Major.start_session()
 
-      waggle = %{
+      link_msg = %{
         id: "wag-complete-1",
         from: ghost.id,
         to: "major",
@@ -302,10 +302,10 @@ defmodule GiTF.MajorTest do
         read: false
       }
 
-      send(Process.whereis(GiTF.Major), {:waggle_received, waggle})
+      send(Process.whereis(GiTF.Major), {:waggle_received, link_msg})
 
-      # In test env, verification will fail (no cell/worktree), so quest_completed
-      # waggle may not be sent. Accept either quest_completed or no message.
+      # In test env, verification will fail (no shell/worktree), so quest_completed
+      # link_msg may not be sent. Accept either quest_completed or no message.
       receive do
         {:waggle_received, %{subject: "quest_completed"}} ->
           assert true
@@ -317,44 +317,44 @@ defmodule GiTF.MajorTest do
       end
     end
 
-    test "attempts to spawn ghost for next pending job after completion" do
-      {:ok, comb} =
-        Store.insert(:combs, %{name: "spawn-comb-#{:erlang.unique_integer([:positive])}"})
+    test "attempts to spawn ghost for next pending op after completion" do
+      {:ok, sector} =
+        Store.insert(:sectors, %{name: "spawn-sector-#{:erlang.unique_integer([:positive])}"})
 
-      {:ok, quest} =
-        Store.insert(:quests, %{
-          name: "spawn-quest-#{:erlang.unique_integer([:positive])}",
+      {:ok, mission} =
+        Store.insert(:missions, %{
+          name: "spawn-mission-#{:erlang.unique_integer([:positive])}",
           status: "active"
         })
 
       {:ok, job_1} =
-        GiTF.Jobs.create(%{
-          title: "First job",
-          quest_id: quest.id,
-          comb_id: comb.id
+        GiTF.Ops.create(%{
+          title: "First op",
+          mission_id: mission.id,
+          sector_id: sector.id
         })
 
       {:ok, job_2} =
-        GiTF.Jobs.create(%{
-          title: "Second job",
-          quest_id: quest.id,
-          comb_id: comb.id
+        GiTF.Ops.create(%{
+          title: "Second op",
+          mission_id: mission.id,
+          sector_id: sector.id
         })
 
       # job_2 depends on job_1
-      {:ok, _dep} = GiTF.Jobs.add_dependency(job_2.id, job_1.id)
+      {:ok, _dep} = GiTF.Ops.add_dependency(job_2.id, job_1.id)
 
       {:ok, ghost} =
-        Store.insert(:ghosts, %{name: "spawn-ghost", status: "working", job_id: job_1.id})
+        Store.insert(:ghosts, %{name: "spawn-ghost", status: "working", op_id: job_1.id})
 
       # Complete job_1
-      {:ok, _} = GiTF.Jobs.assign(job_1.id, ghost.id)
-      {:ok, _} = GiTF.Jobs.start(job_1.id)
-      {:ok, _} = GiTF.Jobs.complete(job_1.id)
+      {:ok, _} = GiTF.Ops.assign(job_1.id, ghost.id)
+      {:ok, _} = GiTF.Ops.start(job_1.id)
+      {:ok, _} = GiTF.Ops.complete(job_1.id)
 
       Major.start_session()
 
-      waggle = %{
+      link_msg = %{
         id: "wag-spawn-1",
         from: ghost.id,
         to: "major",
@@ -363,54 +363,54 @@ defmodule GiTF.MajorTest do
         read: false
       }
 
-      send(Process.whereis(GiTF.Major), {:waggle_received, waggle})
+      send(Process.whereis(GiTF.Major), {:waggle_received, link_msg})
       Process.sleep(100)
 
       # Quest should be updated (not completed yet since job_2 is pending)
-      {:ok, updated_quest} = GiTF.Quests.get(quest.id)
+      {:ok, updated_quest} = GiTF.Missions.get(mission.id)
       # Status should be "pending" (job_2 is pending) or "active" if spawn succeeded
       # The spawn itself may fail (no real git worktree), but Major should not crash
       assert Process.alive?(Process.whereis(GiTF.Major))
       assert updated_quest.status in ["pending", "active"]
     end
 
-    test "updates quest status on retry exhaustion" do
-      {:ok, comb} =
-        Store.insert(:combs, %{name: "exhaust-comb-#{:erlang.unique_integer([:positive])}"})
+    test "updates mission status on retry exhaustion" do
+      {:ok, sector} =
+        Store.insert(:sectors, %{name: "exhaust-sector-#{:erlang.unique_integer([:positive])}"})
 
-      {:ok, quest} =
-        Store.insert(:quests, %{
-          name: "exhaust-quest-#{:erlang.unique_integer([:positive])}",
+      {:ok, mission} =
+        Store.insert(:missions, %{
+          name: "exhaust-mission-#{:erlang.unique_integer([:positive])}",
           status: "active"
         })
 
-      {:ok, job} =
-        GiTF.Jobs.create(%{
-          title: "Failing job",
-          quest_id: quest.id,
-          comb_id: comb.id
+      {:ok, op} =
+        GiTF.Ops.create(%{
+          title: "Failing op",
+          mission_id: mission.id,
+          sector_id: sector.id
         })
 
       {:ok, ghost} =
         Store.insert(:ghosts, %{
           name: "exhaust-ghost",
           status: "working",
-          job_id: job.id
+          op_id: op.id
         })
 
-      # Move job to failed state
-      {:ok, _} = GiTF.Jobs.assign(job.id, ghost.id)
-      {:ok, _} = GiTF.Jobs.start(job.id)
-      {:ok, _} = GiTF.Jobs.fail(job.id)
+      # Move op to failed state
+      {:ok, _} = GiTF.Ops.assign(op.id, ghost.id)
+      {:ok, _} = GiTF.Ops.start(op.id)
+      {:ok, _} = GiTF.Ops.fail(op.id)
 
       Major.start_session()
 
       # Pre-load retry count to max so next failure triggers exhaustion
-      # Retry counts are now persisted on the job record
-      {:ok, exhausted_job} = GiTF.Jobs.get(job.id)
-      Store.put(:jobs, Map.put(exhausted_job, :retry_count, 3))
+      # Retry counts are now persisted on the op record
+      {:ok, exhausted_job} = GiTF.Ops.get(op.id)
+      Store.put(:ops, Map.put(exhausted_job, :retry_count, 3))
 
-      waggle = %{
+      link_msg = %{
         id: "wag-exhaust-1",
         from: ghost.id,
         to: "major",
@@ -419,42 +419,42 @@ defmodule GiTF.MajorTest do
         read: false
       }
 
-      send(Process.whereis(GiTF.Major), {:waggle_received, waggle})
+      send(Process.whereis(GiTF.Major), {:waggle_received, link_msg})
       Process.sleep(100)
 
-      # After exhausting retries, quest status should be updated
-      {:ok, updated_quest} = GiTF.Quests.get(quest.id)
+      # After exhausting retries, mission status should be updated
+      {:ok, updated_quest} = GiTF.Missions.get(mission.id)
       # Quest status depends on Quests.update_status! logic
       assert updated_quest.status in ["active", "failed"]
     end
 
-    test "handles validation_failed waggle like job_failed" do
-      {:ok, comb} =
-        Store.insert(:combs, %{name: "val-comb-#{:erlang.unique_integer([:positive])}"})
+    test "handles validation_failed link_msg like job_failed" do
+      {:ok, sector} =
+        Store.insert(:sectors, %{name: "val-sector-#{:erlang.unique_integer([:positive])}"})
 
-      {:ok, quest} =
-        Store.insert(:quests, %{
-          name: "val-quest-#{:erlang.unique_integer([:positive])}",
+      {:ok, mission} =
+        Store.insert(:missions, %{
+          name: "val-mission-#{:erlang.unique_integer([:positive])}",
           status: "active"
         })
 
-      {:ok, job} =
-        GiTF.Jobs.create(%{
-          title: "Validation test job",
-          quest_id: quest.id,
-          comb_id: comb.id
+      {:ok, op} =
+        GiTF.Ops.create(%{
+          title: "Validation test op",
+          mission_id: mission.id,
+          sector_id: sector.id
         })
 
       {:ok, ghost} =
-        Store.insert(:ghosts, %{name: "val-ghost", status: "working", job_id: job.id})
+        Store.insert(:ghosts, %{name: "val-ghost", status: "working", op_id: op.id})
 
-      {:ok, _} = GiTF.Jobs.assign(job.id, ghost.id)
-      {:ok, _} = GiTF.Jobs.start(job.id)
-      {:ok, _} = GiTF.Jobs.fail(job.id)
+      {:ok, _} = GiTF.Ops.assign(op.id, ghost.id)
+      {:ok, _} = GiTF.Ops.start(op.id)
+      {:ok, _} = GiTF.Ops.fail(op.id)
 
       Major.start_session()
 
-      waggle = %{
+      link_msg = %{
         id: "wag-val-1",
         from: ghost.id,
         to: "major",
@@ -463,7 +463,7 @@ defmodule GiTF.MajorTest do
         read: false
       }
 
-      send(Process.whereis(GiTF.Major), {:waggle_received, waggle})
+      send(Process.whereis(GiTF.Major), {:waggle_received, link_msg})
       Process.sleep(50)
 
       # Should not crash and should attempt retry

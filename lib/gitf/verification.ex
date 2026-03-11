@@ -2,7 +2,7 @@ defmodule GiTF.Verification do
   @moduledoc """
   Job verification system.
   
-  Verifies completed jobs by running validation commands and checking
+  Verifies completed ops by running validation commands and checking
   against verification criteria.
   """
 
@@ -11,23 +11,23 @@ defmodule GiTF.Verification do
   alias GiTF.Quality
 
   @doc """
-  Verifies a completed job.
+  Verifies a completed op.
   
   Runs validation command and quality checks.
   Returns {:ok, :pass | :fail, result} or {:error, reason}.
   """
   @spec verify_job(String.t(), keyword()) :: {:ok, atom(), map()} | {:error, term()}
-  def verify_job(job_id, opts \\ []) do
-    with {:ok, job} <- GiTF.Jobs.get(job_id),
-         {:ok, cell} <- get_job_cell(job),
-         {:ok, comb} <- Store.fetch(:combs, job.comb_id) do
+  def verify_job(op_id, opts \\ []) do
+    with {:ok, op} <- GiTF.Ops.get(op_id),
+         {:ok, shell} <- get_job_cell(op),
+         {:ok, sector} <- Store.fetch(:sectors, op.sector_id) do
 
-      # Check graduated authority — auto-approve eligible jobs
-      authority_level = GiTF.Authority.verification_level(job)
+      # Check graduated authority — auto-approve eligible ops
+      authority_level = GiTF.Authority.verification_level(op)
 
-      if authority_level == :auto_approve and GiTF.Authority.should_auto_merge?(job) do
+      if authority_level == :auto_approve and GiTF.Authority.should_auto_merge?(op) do
         auto_result = %{
-          job_id: job_id,
+          op_id: op_id,
           status: "auto_approved",
           output: "Auto-approved via graduated authority (model reputation)",
           exit_code: 0,
@@ -35,12 +35,12 @@ defmodule GiTF.Verification do
           ran_at: DateTime.utc_now()
         }
 
-        {:ok, _} = record_result(job_id, auto_result)
-        update_job_verification(job_id, :pass, auto_result)
+        {:ok, _} = record_result(op_id, auto_result)
+        update_job_verification(op_id, :pass, auto_result)
         {:ok, :pass, auto_result}
       else
         result = %{
-          job_id: job_id,
+          op_id: op_id,
           status: "running",
           output: "",
           exit_code: nil,
@@ -52,8 +52,8 @@ defmodule GiTF.Verification do
 
         # Run validation command if configured (skip if already run by Validator)
         validation_result =
-          if not skip_validation and Map.get(comb, :validation_command) do
-            case run_validation_command(cell, comb.validation_command) do
+          if not skip_validation and Map.get(sector, :validation_command) do
+            case run_validation_command(shell, sector.validation_command) do
               {:ok, output} ->
                 %{result | status: "passed", output: output, exit_code: 0}
               {:error, {output, exit_code}} ->
@@ -64,16 +64,16 @@ defmodule GiTF.Verification do
           end
 
         # Run quality checks
-        quality_result = run_quality_checks(job_id, cell, comb)
+        quality_result = run_quality_checks(op_id, shell, sector)
 
         # Run cross-model audit if enabled
         cross_audit_result =
-          if GiTF.Runtime.CrossModelAudit.enabled?(comb.id) do
-            case GiTF.Runtime.CrossModelAudit.audit_job(job_id) do
+          if GiTF.Runtime.CrossModelAudit.enabled?(sector.id) do
+            case GiTF.Runtime.CrossModelAudit.audit_job(op_id) do
               {:ok, audit} ->
                 %{cross_audit_score: audit.score, cross_audit_issues: audit.issues}
               {:error, reason} ->
-                Logger.warning("Cross-model audit failed for job #{job_id}: #{inspect(reason)}")
+                Logger.warning("Cross-model audit failed for op #{op_id}: #{inspect(reason)}")
                 %{cross_audit_error: inspect(reason)}
             end
           else
@@ -87,17 +87,17 @@ defmodule GiTF.Verification do
           |> Map.merge(cross_audit_result)
 
         # Build verification contract and evaluate
-        contract = GiTF.VerificationContract.build_contract(job)
+        contract = GiTF.VerificationContract.build_contract(op)
         adjusted_contract = adjust_contract_thresholds(contract, authority_level)
         final_status = evaluate_contract_status(final_result, adjusted_contract)
         final_result = %{final_result | status: final_status}
 
         # Store result
-        {:ok, _} = record_result(job_id, final_result)
+        {:ok, _} = record_result(op_id, final_result)
 
-        # Update job
+        # Update op
         status = if final_status == "passed", do: :pass, else: :fail
-        update_job_verification(job_id, status, final_result)
+        update_job_verification(op_id, status, final_result)
 
         {:ok, status, final_result}
       end
@@ -105,73 +105,73 @@ defmodule GiTF.Verification do
   end
 
   @doc """
-  Gets verification status for a job.
+  Gets verification status for a op.
   """
   @spec get_verification_status(String.t()) :: {:ok, map()} | {:error, :not_found}
-  def get_verification_status(job_id) do
-    case Store.get(:jobs, job_id) do
+  def get_verification_status(op_id) do
+    case Store.get(:ops, op_id) do
       nil -> {:error, :not_found}
-      job -> 
+      op -> 
         {:ok, %{
-          status: Map.get(job, :verification_status, "pending"),
-          result: Map.get(job, :verification_result),
-          verified_at: Map.get(job, :verified_at)
+          status: Map.get(op, :verification_status, "pending"),
+          result: Map.get(op, :verification_result),
+          verified_at: Map.get(op, :verified_at)
         }}
     end
   end
 
   @doc """
-  Records a verification result and updates the job status.
+  Records a verification result and updates the op status.
   """
   @spec record_result(String.t(), map()) :: {:ok, map()}
-  def record_result(job_id, result) do
+  def record_result(op_id, result) do
     # Store in verification_results collection
-    record = Map.put(result, :job_id, job_id)
+    record = Map.put(result, :op_id, op_id)
     {:ok, vr} = Store.insert(:verification_results, record)
     
-    # Update job verification status
-    case Store.get(:jobs, job_id) do
+    # Update op verification status
+    case Store.get(:ops, op_id) do
       nil -> {:error, :not_found}
-      job ->
+      op ->
         verification_status = result.status
-        updated = job
+        updated = op
         |> Map.put(:verification_status, verification_status)
         |> Map.put(:verification_result, result[:output])
         |> Map.put(:verified_at, DateTime.utc_now())
         
-        Store.put(:jobs, updated)
+        Store.put(:ops, updated)
         {:ok, vr}
     end
   end
 
   @doc """
-  Lists jobs needing verification.
+  Lists ops needing verification.
   """
   @spec jobs_needing_verification() :: [map()]
   def jobs_needing_verification do
-    Store.filter(:jobs, fn job ->
-      job.status == "done" and 
-      Map.get(job, :verification_status, "pending") == "pending"
+    Store.filter(:ops, fn op ->
+      op.status == "done" and 
+      Map.get(op, :verification_status, "pending") == "pending"
     end)
   end
 
   # Private functions
 
-  defp get_job_cell(job) do
-    case Store.find_one(:cells, fn c -> 
-      c.ghost_id == job.ghost_id and c.status == "active" 
+  defp get_job_cell(op) do
+    case Store.find_one(:shells, fn c -> 
+      c.ghost_id == op.ghost_id and c.status == "active" 
     end) do
       nil -> {:error, :no_cell}
-      cell -> {:ok, cell}
+      shell -> {:ok, shell}
     end
   end
 
   @validation_timeout_ms 120_000
 
-  defp run_validation_command(cell, command) do
+  defp run_validation_command(shell, command) do
     task = Task.async(fn ->
       System.cmd("sh", ["-c", command],
-        cd: cell.worktree_path,
+        cd: shell.worktree_path,
         stderr_to_stdout: true)
     end)
 
@@ -184,49 +184,49 @@ defmodule GiTF.Verification do
     e -> {:error, {Exception.message(e), 1}}
   end
 
-  defp update_job_verification(job_id, status, result) do
-    case Store.get(:jobs, job_id) do
+  defp update_job_verification(op_id, status, result) do
+    case Store.get(:ops, op_id) do
       nil -> :error
-      job ->
+      op ->
         verification_status = if status == :pass, do: "passed", else: "failed"
         
-        updated = job
+        updated = op
         |> Map.put(:verification_status, verification_status)
         |> Map.put(:verification_result, result.output)
         |> Map.put(:quality_score, result[:quality_score])
         |> Map.put(:verified_at, DateTime.utc_now())
         
-        Store.put(:jobs, updated)
+        Store.put(:ops, updated)
     end
   end
 
-  defp run_quality_checks(job_id, cell, comb) do
-    language = detect_language(comb)
+  defp run_quality_checks(op_id, shell, sector) do
+    language = detect_language(sector)
 
     # Run static analysis
-    static_result = case Quality.analyze_static(job_id, cell.worktree_path, language) do
+    static_result = case Quality.analyze_static(op_id, shell.worktree_path, language) do
       {:ok, report} -> %{static_score: report.score, static_issues: length(report.issues)}
       {:error, reason} ->
-        Logger.warning("Static analysis failed for job #{job_id}: #{inspect(reason)}")
+        Logger.warning("Static analysis failed for op #{op_id}: #{inspect(reason)}")
         %{static_score: 0, static_issues: 0, static_error: inspect(reason)}
     end
 
     # Run security scan
-    security_result = case Quality.analyze_security(job_id, cell.worktree_path, language) do
+    security_result = case Quality.analyze_security(op_id, shell.worktree_path, language) do
       {:ok, report} -> %{security_score: report.score, security_findings: length(report.issues)}
       {:error, reason} ->
-        Logger.warning("Security scan failed for job #{job_id}: #{inspect(reason)}")
+        Logger.warning("Security scan failed for op #{op_id}: #{inspect(reason)}")
         %{security_score: 0, security_findings: 0, security_error: inspect(reason)}
     end
 
     # Run performance benchmarks (if configured)
-    performance_result = case Quality.analyze_performance(job_id, cell.worktree_path, comb) do
+    performance_result = case Quality.analyze_performance(op_id, shell.worktree_path, sector) do
       {:ok, report} -> %{performance_score: report.score, performance_metrics: length(report.issues)}
       {:error, _} -> %{performance_score: nil, performance_metrics: 0}
     end
 
     # Calculate composite score
-    composite = Quality.calculate_composite_score(job_id)
+    composite = Quality.calculate_composite_score(op_id)
 
     Map.merge(static_result, security_result)
     |> Map.merge(performance_result)
@@ -235,9 +235,9 @@ defmodule GiTF.Verification do
 
   @known_languages ~w(elixir javascript typescript python rust go ruby java)a
 
-  defp detect_language(comb) do
+  defp detect_language(sector) do
     # Use metadata if available
-    case Map.get(comb, :metadata) do
+    case Map.get(sector, :metadata) do
       %{language: lang} when is_binary(lang) ->
         atom = String.to_existing_atom(lang)
         if atom in @known_languages, do: atom, else: :unknown
@@ -245,10 +245,10 @@ defmodule GiTF.Verification do
       _ ->
         # Fallback: detect from path
         cond do
-          File.exists?(Path.join(comb.path, "mix.exs")) -> :elixir
-          File.exists?(Path.join(comb.path, "package.json")) -> :javascript
-          File.exists?(Path.join(comb.path, "Cargo.toml")) -> :rust
-          File.exists?(Path.join(comb.path, "requirements.txt")) -> :python
+          File.exists?(Path.join(sector.path, "mix.exs")) -> :elixir
+          File.exists?(Path.join(sector.path, "package.json")) -> :javascript
+          File.exists?(Path.join(sector.path, "Cargo.toml")) -> :rust
+          File.exists?(Path.join(sector.path, "requirements.txt")) -> :python
           true -> :unknown
         end
     end
@@ -261,11 +261,11 @@ defmodule GiTF.Verification do
   failure should halt processing.
   """
   @spec verify_job!(String.t()) :: map()
-  def verify_job!(job_id) do
-    case verify_job(job_id) do
+  def verify_job!(op_id) do
+    case verify_job(op_id) do
       {:ok, :pass, result} -> result
-      {:ok, :fail, result} -> raise "Verification failed for job #{job_id}: #{inspect(result[:output])}"
-      {:error, reason} -> raise "Verification error for job #{job_id}: #{inspect(reason)}"
+      {:ok, :fail, result} -> raise "Verification failed for op #{op_id}: #{inspect(result[:output])}"
+      {:error, reason} -> raise "Verification error for op #{op_id}: #{inspect(reason)}"
     end
   end
 

@@ -1,9 +1,9 @@
-defmodule GiTF.Dashboard.QuestsLive do
+defmodule GiTF.Dashboard.MissionsLive do
   @moduledoc """
   Quest management page.
 
-  Displays all quests in a table with status badges. Quests can be
-  expanded to reveal their constituent jobs. Status colors provide
+  Displays all missions in a table with status badges. Quests can be
+  expanded to reveal their constituent ops. Status colors provide
   visual feedback: green for completed, blue for active, grey for
   pending, red for failed.
   """
@@ -19,48 +19,48 @@ defmodule GiTF.Dashboard.QuestsLive do
       Process.send_after(self(), :refresh, @refresh_interval)
     end
 
-    quests = load_quests()
+    missions = load_quests()
 
     {:ok,
      socket
      |> assign(:page_title, "Quests")
-     |> assign(:current_path, "/quests")
-     |> assign(:quests, quests)
+     |> assign(:current_path, "/missions")
+     |> assign(:missions, missions)
      |> assign(:expanded, MapSet.new())}
   end
 
   @impl true
   def handle_info(:refresh, socket) do
     Process.send_after(self(), :refresh, @refresh_interval)
-    {:noreply, assign(socket, :quests, load_quests())}
+    {:noreply, assign(socket, :missions, load_quests())}
   end
 
   def handle_info({:waggle_received, _waggle}, socket) do
-    {:noreply, assign(socket, :quests, load_quests())}
+    {:noreply, assign(socket, :missions, load_quests())}
   end
 
   @impl true
-  def handle_event("toggle", %{"id" => quest_id}, socket) do
+  def handle_event("toggle", %{"id" => mission_id}, socket) do
     expanded =
-      if MapSet.member?(socket.assigns.expanded, quest_id) do
-        MapSet.delete(socket.assigns.expanded, quest_id)
+      if MapSet.member?(socket.assigns.expanded, mission_id) do
+        MapSet.delete(socket.assigns.expanded, mission_id)
       else
-        MapSet.put(socket.assigns.expanded, quest_id)
+        MapSet.put(socket.assigns.expanded, mission_id)
       end
 
     {:noreply, assign(socket, :expanded, expanded)}
   end
 
   def handle_event("refresh", _params, socket) do
-    {:noreply, assign(socket, :quests, load_quests())}
+    {:noreply, assign(socket, :missions, load_quests())}
   end
 
   defp load_quests do
-    GiTF.Quests.list()
-    |> Enum.map(fn quest ->
-      case GiTF.Quests.get(quest.id) do
+    GiTF.Missions.list()
+    |> Enum.map(fn mission ->
+      case GiTF.Missions.get(mission.id) do
         {:ok, q} -> q
-        _ -> quest
+        _ -> mission
       end
     end)
   end
@@ -77,8 +77,8 @@ defmodule GiTF.Dashboard.QuestsLive do
       </div>
 
       <div class="panel">
-        <%= if @quests == [] do %>
-          <div class="empty">No quests created yet. Use <code>hive quest new &lt;name&gt;</code> to create one.</div>
+        <%= if @missions == [] do %>
+          <div class="empty">No missions created yet. Use <code>hive mission new &lt;name&gt;</code> to create one.</div>
         <% else %>
           <table>
             <thead>
@@ -92,22 +92,22 @@ defmodule GiTF.Dashboard.QuestsLive do
               </tr>
             </thead>
             <tbody>
-              <%= for quest <- @quests do %>
-                <tr class="detail-toggle" phx-click="toggle" phx-value-id={quest.id}>
-                  <td style="width:1.5rem">{if MapSet.member?(@expanded, quest.id), do: "v", else: ">"}</td>
-                  <td style="font-family:monospace; font-size:0.8rem">{quest.id}</td>
-                  <td>{Map.get(quest, :name, quest.goal)}</td>
-                  <td><span class={"badge #{status_badge(Map.get(quest, :status, "unknown"))}"}>{Map.get(quest, :status, "unknown")}</span></td>
-                  <td><span class={"badge #{phase_badge(Map.get(quest, :current_phase, "pending"))}"}>
-                    {Map.get(quest, :current_phase, "pending")}
+              <%= for mission <- @missions do %>
+                <tr class="detail-toggle" phx-click="toggle" phx-value-id={mission.id}>
+                  <td style="width:1.5rem">{if MapSet.member?(@expanded, mission.id), do: "v", else: ">"}</td>
+                  <td style="font-family:monospace; font-size:0.8rem">{mission.id}</td>
+                  <td>{Map.get(mission, :name, mission.goal)}</td>
+                  <td><span class={"badge #{status_badge(Map.get(mission, :status, "unknown"))}"}>{Map.get(mission, :status, "unknown")}</span></td>
+                  <td><span class={"badge #{phase_badge(Map.get(mission, :current_phase, "pending"))}"}>
+                    {Map.get(mission, :current_phase, "pending")}
                   </span></td>
-                  <td>{job_count(quest)}</td>
+                  <td>{job_count(mission)}</td>
                 </tr>
-                <%= if MapSet.member?(@expanded, quest.id) do %>
+                <%= if MapSet.member?(@expanded, mission.id) do %>
                   <tr>
                     <td colspan="6" style="padding:0">
                       <div class="detail-content">
-                        <%= if has_jobs?(quest) do %>
+                        <%= if has_jobs?(mission) do %>
                           <table>
                             <thead>
                               <tr>
@@ -119,27 +119,27 @@ defmodule GiTF.Dashboard.QuestsLive do
                               </tr>
                             </thead>
                             <tbody>
-                              <%= for job <- quest.jobs do %>
+                              <%= for op <- mission.ops do %>
                                 <tr>
-                                  <td style="font-family:monospace; font-size:0.8rem">{job.id}</td>
-                                  <td>{job.title}</td>
-                                  <td><span class={"badge #{status_badge(Map.get(job, :status, "unknown"))}"}>{Map.get(job, :status, "unknown")}</span></td>
+                                  <td style="font-family:monospace; font-size:0.8rem">{op.id}</td>
+                                  <td>{op.title}</td>
+                                  <td><span class={"badge #{status_badge(Map.get(op, :status, "unknown"))}"}>{Map.get(op, :status, "unknown")}</span></td>
                                   <td>
-                                    <%= if Map.get(job, :verification_status) do %>
-                                      <span class={"badge #{verification_badge(job.verification_status)}"}>
-                                        {job.verification_status}
+                                    <%= if Map.get(op, :verification_status) do %>
+                                      <span class={"badge #{verification_badge(op.verification_status)}"}>
+                                        {op.verification_status}
                                       </span>
                                     <% else %>
                                       <span class="badge badge-grey">-</span>
                                     <% end %>
                                   </td>
-                                  <td style="font-family:monospace; font-size:0.8rem">{job.ghost_id || "-"}</td>
+                                  <td style="font-family:monospace; font-size:0.8rem">{op.ghost_id || "-"}</td>
                                 </tr>
                               <% end %>
                             </tbody>
                           </table>
                         <% else %>
-                          <div class="empty" style="text-align:left">No jobs in this quest.</div>
+                          <div class="empty" style="text-align:left">No ops in this mission.</div>
                         <% end %>
                       </div>
                     </td>
@@ -175,9 +175,9 @@ defmodule GiTF.Dashboard.QuestsLive do
   defp verification_badge("pending"), do: "badge-yellow"
   defp verification_badge(_), do: "badge-grey"
 
-  defp has_jobs?(%{jobs: jobs}) when is_list(jobs), do: jobs != []
+  defp has_jobs?(%{ops: ops}) when is_list(ops), do: ops != []
   defp has_jobs?(_), do: false
 
-  defp job_count(%{jobs: jobs}) when is_list(jobs), do: "#{length(jobs)}"
+  defp job_count(%{ops: ops}) when is_list(ops), do: "#{length(ops)}"
   defp job_count(_), do: "-"
 end

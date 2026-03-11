@@ -4,7 +4,7 @@ defmodule GiTF.TestDriver.Recorder do
 
   Attaches to:
   - All `GiTF.Telemetry.events()` via `:telemetry.attach_many/4`
-  - PubSub topics: `waggle:major`, `section:progress`, `section:costs`, `section:system`
+  - PubSub topics: `link_msg:major`, `section:progress`, `section:costs`, `section:system`
   - Store polling every 200ms, diffing snapshots for changes
 
   The timeline is a list of entries ordered by timestamp:
@@ -159,11 +159,11 @@ defmodule GiTF.TestDriver.Recorder do
   end
 
   # PubSub messages
-  def handle_info({:waggle_received, waggle}, state) do
+  def handle_info({:waggle_received, link_msg}, state) do
     entry = %{
       type: :pubsub,
       event: :waggle_received,
-      data: waggle,
+      data: link_msg,
       at_us: System.monotonic_time(:microsecond)
     }
 
@@ -212,7 +212,7 @@ defmodule GiTF.TestDriver.Recorder do
   # -- Private: Store snapshotting ---------------------------------------------
 
   defp take_store_snapshot do
-    collections = [:quests, :jobs, :ghosts, :waggles, :costs, :cells, :combs]
+    collections = [:missions, :ops, :ghosts, :links, :costs, :shells, :sectors]
 
     Map.new(collections, fn col ->
       records =

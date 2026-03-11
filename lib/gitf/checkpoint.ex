@@ -2,7 +2,7 @@ defmodule GiTF.Checkpoint do
   @moduledoc """
   Structured checkpointing for ghost state persistence.
 
-  Provides richer state snapshots than waggle-based handoffs by capturing
+  Provides richer state snapshots than link_msg-based handoffs by capturing
   progress summaries, files modified, pending work, tool call counts, and
   context usage. Each save appends a new record (append-only history),
   enabling both point-in-time recovery and progress trend analysis.

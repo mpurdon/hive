@@ -85,8 +85,8 @@ defmodule GiTF.QuickStartTest do
       assert "project-two" in names
 
       # Verify they are actually in the database
-      combs = GiTF.Comb.list()
-      comb_names = Enum.map(combs, & &1.name)
+      sectors = GiTF.Sector.list()
+      comb_names = Enum.map(sectors, & &1.name)
       assert "project-one" in comb_names
       assert "project-two" in comb_names
     end
@@ -111,11 +111,11 @@ defmodule GiTF.QuickStartTest do
   end
 
   describe "generate_comb_claude_md/2" do
-    test "generates markdown with comb name and waggle instructions" do
+    test "generates markdown with sector name and link_msg instructions" do
       md = QuickStart.generate_comb_claude_md("my-project", "/path/to/my-project")
 
       assert md =~ "my-project"
-      assert md =~ "waggle"
+      assert md =~ "link_msg"
       assert md =~ "major"
       assert md =~ "/path/to/my-project"
       assert md =~ "job_complete"

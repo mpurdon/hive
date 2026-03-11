@@ -64,6 +64,6 @@ defmodule GiTF.Dashboard.SmokeTest do
     assert String.contains?(body, "Quests")
     assert String.contains?(body, "Bees")
     assert String.contains?(body, "Costs")
-    assert String.contains?(body, "Waggles")
+    assert String.contains?(body, "Links")
   end
 end

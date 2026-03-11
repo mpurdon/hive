@@ -4,9 +4,9 @@ defmodule GiTF.Budget.Watchdog do
 
   Periodically checks the accumulated cost of all active Quests and Ghosts.
   If a budget is exceeded, it:
-  1. Pauses the quest (stops active ghosts, preserves state).
+  1. Pauses the mission (stops active ghosts, preserves state).
   2. Attempts auto-escalation (25% budget increase, up to 2x original).
-  3. Resumes the quest if budget is expanded.
+  3. Resumes the mission if budget is expanded.
   4. Emits a high-priority alert.
   """
 
@@ -44,25 +44,25 @@ defmodule GiTF.Budget.Watchdog do
 
   defp check_active_quests(state) do
     active_quests =
-      Store.filter(:quests, fn q ->
+      Store.filter(:missions, fn q ->
         q[:status] in ["active", "implementation", "research", "design",
                         "review", "planning", "validation", "requirements"]
       end)
 
-    Enum.reduce(active_quests, state, fn quest, acc ->
-      case Budget.check(quest.id) do
+    Enum.reduce(active_quests, state, fn mission, acc ->
+      case Budget.check(mission.id) do
         {:error, :budget_exceeded, spent} ->
-          handle_over_budget(quest, spent, acc)
+          handle_over_budget(mission, spent, acc)
         _ ->
           acc
       end
     end)
   end
 
-  defp handle_over_budget(quest, spent, state) do
-    quest_id = quest.id
-    count = Map.get(state.escalation_count, quest_id, 0)
-    original_budget = Budget.budget_for(quest_id)
+  defp handle_over_budget(mission, spent, state) do
+    mission_id = mission.id
+    count = Map.get(state.escalation_count, mission_id, 0)
+    original_budget = Budget.budget_for(mission_id)
     max_allowed = original_budget * @max_budget_multiplier
 
     if count < 3 and spent < max_allowed do
@@ -70,55 +70,55 @@ defmodule GiTF.Budget.Watchdog do
       new_budget = Float.round(spent * 1.25, 2)
       new_budget = min(new_budget, max_allowed)
 
-      # Store budget override on the quest record
-      case Store.get(:quests, quest_id) do
+      # Store budget override on the mission record
+      case Store.get(:missions, mission_id) do
         nil ->
-          Logger.warning("Failed to escalate budget for quest #{quest_id}")
+          Logger.warning("Failed to escalate budget for mission #{mission_id}")
 
         quest_record ->
-          Store.put(:quests, Map.put(quest_record, :budget_override, new_budget))
+          Store.put(:missions, Map.put(quest_record, :budget_override, new_budget))
 
           Logger.info(
-            "Budget auto-escalated for quest #{quest_id}: " <>
+            "Budget auto-escalated for mission #{mission_id}: " <>
               "$#{spent} spent, new budget $#{new_budget} (escalation #{count + 1})"
           )
 
           GiTF.Telemetry.emit([:gitf, :alert, :raised], %{}, %{
             type: :budget_escalated,
-            message: "Quest #{quest_id} budget escalated to $#{new_budget} (#{count + 1}x)"
+            message: "Quest #{mission_id} budget escalated to $#{new_budget} (#{count + 1}x)"
           })
       end
 
-      %{state | escalation_count: Map.put(state.escalation_count, quest_id, count + 1)}
+      %{state | escalation_count: Map.put(state.escalation_count, mission_id, count + 1)}
     else
-      # Max escalations reached — pause the quest, don't kill it
+      # Max escalations reached — pause the mission, don't kill it
       Logger.warning(
-        "Quest #{quest_id} exceeded max budget ($#{spent}). " <>
-          "Pausing quest (#{count} escalations exhausted)."
+        "Quest #{mission_id} exceeded max budget ($#{spent}). " <>
+          "Pausing mission (#{count} escalations exhausted)."
       )
 
-      pause_quest(quest, spent)
+      pause_quest(mission, spent)
       state
     end
   end
 
-  defp pause_quest(quest, spent) do
-    quest_id = quest.id
+  defp pause_quest(mission, spent) do
+    mission_id = mission.id
 
-    # Stop active ghosts but don't fail their jobs (they can resume)
+    # Stop active ghosts but don't fail their ops (they can resume)
     active_ghosts =
       Store.filter(:ghosts, fn b ->
-        b.job_id != nil and b.status == "working"
+        b.op_id != nil and b.status == "working"
       end)
       |> Enum.filter(fn b ->
-        case Store.get(:jobs, b.job_id) do
-          %{quest_id: ^quest_id} -> true
+        case Store.get(:ops, b.op_id) do
+          %{mission_id: ^mission_id} -> true
           _ -> false
         end
       end)
 
     Enum.each(active_ghosts, fn ghost ->
-      Logger.warning("Watchdog killing ghost #{ghost.id} (Quest #{quest_id} over budget)")
+      Logger.warning("Watchdog killing ghost #{ghost.id} (Quest #{mission_id} over budget)")
       # Create handoff before stopping so work isn't lost
       try do
         GiTF.Handoff.create(ghost.id)
@@ -138,30 +138,30 @@ defmodule GiTF.Budget.Watchdog do
       end
     end)
 
-    update_quest_status(quest.id, "paused_budget")
+    update_quest_status(mission.id, "paused_budget")
 
     GiTF.Telemetry.emit([:gitf, :alert, :raised], %{}, %{
       type: :budget_paused,
-      message: "Quest #{quest.id} paused at $#{spent} (budget exhausted after escalations)"
+      message: "Quest #{mission.id} paused at $#{spent} (budget exhausted after escalations)"
     })
   end
 
   defp check_paused_quests do
-    # Check if any paused quests now have budget (e.g., manual increase)
-    paused = Store.filter(:quests, fn q -> q[:status] == "paused_budget" end)
+    # Check if any paused missions now have budget (e.g., manual increase)
+    paused = Store.filter(:missions, fn q -> q[:status] == "paused_budget" end)
 
-    Enum.each(paused, fn quest ->
-      case Budget.check(quest.id) do
+    Enum.each(paused, fn mission ->
+      case Budget.check(mission.id) do
         {:ok, _remaining} ->
-          Logger.info("Quest #{quest.id} budget restored, resuming")
-          update_quest_status(quest.id, "active")
+          Logger.info("Quest #{mission.id} budget restored, resuming")
+          update_quest_status(mission.id, "active")
 
           # Notify Major to re-evaluate
-          GiTF.Waggle.send(
+          GiTF.Link.send(
             "watchdog",
             "major",
             "quest_advance",
-            quest.id
+            mission.id
           )
 
         _ ->
@@ -172,10 +172,10 @@ defmodule GiTF.Budget.Watchdog do
     _ -> :ok
   end
 
-  defp update_quest_status(quest_id, status) do
-    case Store.get(:quests, quest_id) do
+  defp update_quest_status(mission_id, status) do
+    case Store.get(:missions, mission_id) do
       nil -> :ok
-      quest -> Store.put(:quests, Map.put(quest, :status, status))
+      mission -> Store.put(:missions, Map.put(mission, :status, status))
     end
   end
 end

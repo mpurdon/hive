@@ -17,8 +17,8 @@ defmodule GiTF.Merge.History do
 
   ## Attrs
 
-    * `:job_id` — the job being merged
-    * `:cell_id` — the cell/worktree
+    * `:op_id` — the op being merged
+    * `:shell_id` — the shell/worktree
     * `:tier` — which resolution tier was attempted (0-3)
     * `:status` — `:success` or `:failure`
     * `:files` — list of file paths involved

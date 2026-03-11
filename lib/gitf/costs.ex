@@ -65,12 +65,12 @@ defmodule GiTF.Costs do
   end
 
   @doc """
-  Returns all cost records for ghosts participating in a quest.
+  Returns all cost records for ghosts participating in a mission.
   """
   @spec for_quest(String.t()) :: [map()]
-  def for_quest(quest_id) do
+  def for_quest(mission_id) do
     ghost_ids =
-      GiTF.Jobs.list(quest_id: quest_id)
+      GiTF.Ops.list(mission_id: mission_id)
       |> Enum.map(& &1.ghost_id)
       |> Enum.reject(&is_nil/1)
       |> Enum.uniq()
@@ -141,13 +141,13 @@ defmodule GiTF.Costs do
 
   defp derive_category(ghost_id) when is_binary(ghost_id) do
     with {:ok, ghost} <- GiTF.Ghosts.get(ghost_id),
-         job_id when is_binary(job_id) <- Map.get(ghost, :job_id),
-         {:ok, job} <- GiTF.Jobs.get(job_id) do
+         op_id when is_binary(op_id) <- Map.get(ghost, :op_id),
+         {:ok, op} <- GiTF.Ops.get(op_id) do
       cond do
-        Map.get(job, :phase_job, false) and job[:phase] in @planning_phases ->
+        Map.get(op, :phase_job, false) and op[:phase] in @planning_phases ->
           "planning"
 
-        Map.get(job, :phase_job, false) and job[:phase] in @verification_phases ->
+        Map.get(op, :phase_job, false) and op[:phase] in @verification_phases ->
           "verification"
 
         true ->
