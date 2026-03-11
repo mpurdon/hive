@@ -12,7 +12,7 @@ defmodule GiTF.Recon do
 
   require Logger
 
-  alias GiTF.{Jobs, Archive, Triage}
+  alias GiTF.{Ops, Archive, Triage}
 
   @sections ~w(relevant_files patterns risks complexity approach)a
 
@@ -118,7 +118,7 @@ defmodule GiTF.Recon do
   """
   @spec inject_findings(String.t(), map()) :: {:ok, map()} | {:error, term()}
   def inject_findings(op_id, findings) do
-    with {:ok, op} <- Jobs.get(op_id) do
+    with {:ok, op} <- Ops.get(op_id) do
       report = format_report(findings)
       new_description = report <> "\n\n" <> (op.description || "")
 
@@ -139,7 +139,7 @@ defmodule GiTF.Recon do
   """
   @spec create_scout_job(String.t(), String.t()) :: {:ok, map()} | {:error, term()}
   def create_scout_job(parent_op_id, sector_id) do
-    with {:ok, parent_job} <- Jobs.get(parent_op_id) do
+    with {:ok, parent_job} <- Ops.get(parent_op_id) do
       prompt = build_scout_prompt(parent_job)
 
       attrs = %{
@@ -152,9 +152,9 @@ defmodule GiTF.Recon do
         skip_verification: true
       }
 
-      with {:ok, scout_job} <- Jobs.create(attrs),
-           {:ok, _dep} <- Jobs.add_dependency(parent_op_id, scout_job.id),
-           {:ok, _blocked} <- Jobs.block(parent_op_id) do
+      with {:ok, scout_job} <- Ops.create(attrs),
+           {:ok, _dep} <- Ops.add_dependency(parent_op_id, scout_job.id),
+           {:ok, _blocked} <- Ops.block(parent_op_id) do
         Logger.info("Created recon op #{scout_job.id} for parent #{parent_op_id}")
         {:ok, scout_job}
       end

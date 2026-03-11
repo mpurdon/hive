@@ -48,7 +48,7 @@ defmodule GiTF.Dashboard.EndpointTest do
       conn = request(:get, "/missions")
 
       assert conn.status == 200
-      assert String.contains?(conn.resp_body, "Quests")
+      assert String.contains?(conn.resp_body, "Missions")
     end
 
     test "serves the ghosts page at /ghosts" do

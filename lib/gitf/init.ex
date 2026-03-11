@@ -12,13 +12,13 @@ defmodule GiTF.Init do
       +-- .gitf/
           +-- config.toml
           +-- queen/
-          |   +-- QUEEN.md
+          |   +-- MAJOR.md
           +-- store/             (ETF file store directory)
   """
 
   alias GiTF.Config
 
-  @queen_instructions """
+  @major_instructions """
   # Major Instructions
 
   You are the Major of this GiTF. Your role is COORDINATION, not coding.
@@ -207,10 +207,10 @@ defmodule GiTF.Init do
   @doc """
   Returns the Major's instruction text.
 
-  Used by `GiTF.Medic` to regenerate `QUEEN.md` when it is missing.
+  Used by `GiTF.Medic` to regenerate `MAJOR.md` when it is missing.
   """
-  @spec queen_instructions() :: String.t()
-  def queen_instructions, do: @queen_instructions
+  @spec major_instructions() :: String.t()
+  def major_instructions, do: @major_instructions
 
   @doc """
   Initializes a GiTF workspace at `path`.
@@ -271,8 +271,8 @@ defmodule GiTF.Init do
   end
 
   defp write_major_instructions(gitf_dir) do
-    queen_path = Path.join([gitf_dir, "major", "QUEEN.md"])
-    File.write(queen_path, @queen_instructions)
+    major_path = Path.join([gitf_dir, "major", "MAJOR.md"])
+    File.write(major_path, @major_instructions)
   end
 
   defp init_store(gitf_dir) do

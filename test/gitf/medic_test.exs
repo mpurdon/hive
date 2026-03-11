@@ -149,10 +149,10 @@ defmodule GiTF.MedicTest do
   end
 
   describe "fix/1 - queen_workspace" do
-    test "regenerates QUEEN.md when in a gitf workspace" do
+    test "regenerates MAJOR.md when in a gitf workspace" do
       case GiTF.gitf_dir() do
         {:ok, path} ->
-          queen_md = Path.join([path, ".gitf", "major", "QUEEN.md"])
+          queen_md = Path.join([path, ".gitf", "major", "MAJOR.md"])
           # Remove it so fix can regenerate
           File.rm(queen_md)
 

@@ -43,7 +43,7 @@ defmodule GiTF.MajorTest do
     path = Path.join(@tmp_dir, name)
     queen_dir = Path.join([path, ".gitf", "major"])
     File.mkdir_p!(queen_dir)
-    File.write!(Path.join(queen_dir, "QUEEN.md"), "# Major\n")
+    File.write!(Path.join(queen_dir, "MAJOR.md"), "# Major\n")
     on_exit(fn -> File.rm_rf!(path) end)
     path
   end
@@ -424,7 +424,7 @@ defmodule GiTF.MajorTest do
 
       # After exhausting retries, mission status should be updated
       {:ok, updated_quest} = GiTF.Missions.get(mission.id)
-      # Quest status depends on Quests.update_status! logic
+      # Quest status depends on Missions.update_status! logic
       assert updated_quest.status in ["active", "failed"]
     end
 

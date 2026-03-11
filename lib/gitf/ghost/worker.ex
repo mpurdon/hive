@@ -364,7 +364,7 @@ defmodule GiTF.Ghost.Worker do
 
     # Exfil API task if running (allow 2s for graceful cleanup)
     if state.task != nil do
-      Task.exfil(state.task, 2_000)
+      Task.shutdown(state.task, 2_000)
     end
 
     # Close CLI port if running
@@ -547,7 +547,7 @@ defmodule GiTF.Ghost.Worker do
   defp spawn_process_with_timeout(state, shell) do
     task = Task.async(fn -> spawn_process(state, shell) end)
 
-    case Task.yield(task, @spawn_timeout_ms) || Task.exfil(task, :brutal_kill) do
+    case Task.yield(task, @spawn_timeout_ms) || Task.shutdown(task, :brutal_kill) do
       {:ok, result} -> result
       nil ->
         Logger.error("Bee #{state.ghost_id} spawn timed out after #{@spawn_timeout_ms}ms")
@@ -1018,7 +1018,7 @@ defmodule GiTF.Ghost.Worker do
 
   defp do_stop(state) do
     if state.task != nil do
-      Task.exfil(state.task, 5_000)
+      Task.shutdown(state.task, 5_000)
     end
 
     if state.port != nil and port_alive?(state.port) do

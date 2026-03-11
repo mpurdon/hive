@@ -1,4 +1,4 @@
-defmodule GiTF.E2E.ConcurrentBeesTest do
+defmodule GiTF.E2E.ConcurrentGhostsTest do
   use GiTF.TestDriver.Scenario
 
   scenario "three concurrent ghosts all complete without store corruption" do

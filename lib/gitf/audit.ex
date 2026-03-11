@@ -175,7 +175,7 @@ defmodule GiTF.Audit do
         stderr_to_stdout: true)
     end)
 
-    case Task.yield(task, @validation_timeout_ms) || Task.exfil(task, 5_000) do
+    case Task.yield(task, @validation_timeout_ms) || Task.shutdown(task, 5_000) do
       {:ok, {output, 0}} -> {:ok, output}
       {:ok, {output, exit_code}} -> {:error, {output, exit_code}}
       nil -> {:error, {"Validation command timed out after #{div(@validation_timeout_ms, 1000)}s", 1}}

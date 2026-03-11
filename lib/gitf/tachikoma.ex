@@ -370,7 +370,7 @@ defmodule GiTF.Tachikoma do
       {:ok, gitf_root} ->
         task = Task.async(fn -> System.cmd("df", ["-m", gitf_root], stderr_to_stdout: true) end)
 
-        df_result = case Task.yield(task, 5_000) || Task.exfil(task, 1_000) do
+        df_result = case Task.yield(task, 5_000) || Task.shutdown(task, 1_000) do
           {:ok, cmd_result} -> cmd_result
           nil -> {"", 1}
         end
@@ -499,7 +499,7 @@ defmodule GiTF.Tachikoma do
 
   defp prune_event_store do
     if Code.ensure_loaded?(GiTF.EventStore) and function_exported?(GiTF.EventStore, :prune, 1) do
-      GiTF.EventArchive.prune(days: 30)
+      GiTF.EventStore.prune(days: 30)
     end
   rescue
     _ -> :ok

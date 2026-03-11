@@ -29,7 +29,7 @@ defmodule GiTF.PubSubBridgeTest do
     # Assert we receive it
     assert_receive {:gitf_event, payload}, 1000
 
-    assert payload.event == "section.ghost.spawned"
+    assert payload.event == "gitf.ghost.spawned"
     assert payload.measurements == %{count: 1}
     # PubSubBridge adds :node to metadata
     assert payload.metadata.ghost_id == "test-ghost"

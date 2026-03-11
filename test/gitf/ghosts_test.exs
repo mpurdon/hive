@@ -129,8 +129,8 @@ defmodule GiTF.GhostsTest do
       assert :ok = Ghosts.stop(ghost.id)
       Process.sleep(200)
 
-      {:ok, stopped_bee} = Ghosts.get(ghost.id)
-      assert stopped_bee.status == "stopped"
+      {:ok, stopped_ghost} = Ghosts.get(ghost.id)
+      assert stopped_ghost.status == "stopped"
     end
 
     test "returns error for non-running ghost" do
@@ -151,18 +151,18 @@ defmodule GiTF.GhostsTest do
       Process.sleep(1_000)
 
       # Bee should be stopped now; mark it as crashed for revive testing
-      {:ok, stopped_bee} = Ghosts.get(ghost.id)
-      Archive.put(:ghosts, %{stopped_bee | status: "crashed"})
+      {:ok, stopped_ghost} = Ghosts.get(ghost.id)
+      Archive.put(:ghosts, %{stopped_ghost | status: "crashed"})
 
       # The op was completed by the worker — mark it failed so revive transition works
       {:ok, op} = GiTF.Ops.get(ctx.op.id)
       Archive.put(:ops, %{op | status: "failed"})
 
       # Revive
-      {:ok, new_bee} = Ghosts.revive(ghost.id, ctx.gitf_root, claude_executable: "/bin/echo")
+      {:ok, new_ghost} = Ghosts.revive(ghost.id, ctx.gitf_root, claude_executable: "/bin/echo")
 
       assert new_ghost.id != ghost.id
-      assert new_bee.op_id == ghost.op_id
+      assert new_ghost.op_id == ghost.op_id
 
       # Cell should be reassigned to new ghost
       shell = Archive.find_one(:shells, fn c -> c.ghost_id == new_ghost.id and c.status == "active" end)
@@ -196,13 +196,13 @@ defmodule GiTF.GhostsTest do
 
       Process.sleep(1_000)
 
-      {:ok, stopped_bee} = Ghosts.get(ghost.id)
-      Archive.put(:ghosts, %{stopped_bee | status: "crashed"})
+      {:ok, stopped_ghost} = Ghosts.get(ghost.id)
+      Archive.put(:ghosts, %{stopped_ghost | status: "crashed"})
 
       {:ok, op} = GiTF.Ops.get(ctx.op.id)
       Archive.put(:ops, %{op | status: "failed"})
 
-      {:ok, new_bee} = Ghosts.revive(ghost.id, ctx.gitf_root, claude_executable: "/bin/echo")
+      {:ok, new_ghost} = Ghosts.revive(ghost.id, ctx.gitf_root, claude_executable: "/bin/echo")
 
       {:ok, updated_job} = GiTF.Ops.get(ctx.op.id)
       assert updated_job.status == "running"
@@ -222,14 +222,14 @@ defmodule GiTF.GhostsTest do
 
       Process.sleep(1_000)
 
-      {:ok, stopped_bee} = Ghosts.get(ghost.id)
-      Archive.put(:ghosts, %{stopped_bee | status: "crashed"})
+      {:ok, stopped_ghost} = Ghosts.get(ghost.id)
+      Archive.put(:ghosts, %{stopped_ghost | status: "crashed"})
 
       # Job is "done" from the worker completing — leave it done
       {:ok, op} = GiTF.Ops.get(ctx.op.id)
       assert op.status == "done"
 
-      {:ok, _new_bee} = Ghosts.revive(ghost.id, ctx.gitf_root, claude_executable: "/bin/echo")
+      {:ok, _new_ghost} = Ghosts.revive(ghost.id, ctx.gitf_root, claude_executable: "/bin/echo")
 
       {:ok, still_done_job} = GiTF.Ops.get(ctx.op.id)
       assert still_done_job.status == "done"

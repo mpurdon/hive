@@ -51,7 +51,7 @@ defmodule GiTF.Plugin.Builtin.Commands.Quest do
             "  #{q.id}  #{q.name}  [#{q.status}]"
           end)
 
-        send_output(ctx, ["Quests:", "" | lines] |> Enum.join("\n"))
+        send_output(ctx, ["Missions:", "" | lines] |> Enum.join("\n"))
     end
   end
 

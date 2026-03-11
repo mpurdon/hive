@@ -54,7 +54,7 @@ defmodule GiTF.EventStore do
 
   ## Examples
 
-      iex> GiTF.EventArchive.record(:bee_spawned, "ghost-abc123", %{model: "sonnet"})
+      iex> GiTF.EventStore.record(:bee_spawned, "ghost-abc123", %{model: "sonnet"})
       {:ok, %{type: :bee_spawned, entity_id: "ghost-abc123", ...}}
   """
   @spec record(atom(), String.t(), map()) :: {:ok, map()} | {:error, :invalid_event_type}

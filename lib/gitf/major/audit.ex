@@ -48,7 +48,7 @@ defmodule GiTF.Major.Audit do
 
   ## Examples
 
-      iex> GiTF.Major.Audit.inside_gitf_dir?("/project/.gitf/queen/QUEEN.md", "/project/.gitf")
+      iex> GiTF.Major.Audit.inside_gitf_dir?("/project/.gitf/queen/MAJOR.md", "/project/.gitf")
       true
 
       iex> GiTF.Major.Audit.inside_gitf_dir?("/project/src/app.ex", "/project/.gitf")

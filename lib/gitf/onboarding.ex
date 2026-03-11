@@ -80,7 +80,7 @@ defmodule GiTF.Onboarding do
       sync_strategy: suggest_sync_strategy(project_info)
     ]
     
-    case Comb.add(path, comb_opts) do
+    case Sector.add(path, comb_opts) do
       {:ok, sector} -> {:ok, sector}
       {:error, reason} -> {:error, "Failed to create sector: #{inspect(reason)}"}
     end

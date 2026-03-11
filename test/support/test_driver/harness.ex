@@ -39,7 +39,7 @@ defmodule GiTF.TestDriver.Harness do
     File.mkdir_p!(store_dir)
     File.mkdir_p!(Path.join([gitf_root, ".gitf", "major"]))
     File.write!(Path.join([gitf_root, ".gitf", "config.toml"]), "")
-    File.write!(Path.join([gitf_root, ".gitf", "major", "QUEEN.md"]), "# Major\n")
+    File.write!(Path.join([gitf_root, ".gitf", "major", "MAJOR.md"]), "# Major\n")
     File.mkdir_p!(mock_dir)
 
     # Restart Archive with isolated directory

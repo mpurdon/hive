@@ -23,7 +23,7 @@ defmodule GiTF.Dashboard.MissionsLive do
 
     {:ok,
      socket
-     |> assign(:page_title, "Quests")
+     |> assign(:page_title, "Missions")
      |> assign(:current_path, "/missions")
      |> assign(:missions, missions)
      |> assign(:expanded, MapSet.new())}
@@ -70,7 +70,7 @@ defmodule GiTF.Dashboard.MissionsLive do
     ~H"""
     <.live_component module={GiTF.Dashboard.AppLayout} id="layout" current_path={@current_path} flash={@flash}>
       <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:1.25rem">
-        <h1 class="page-title" style="margin-bottom:0">Quests</h1>
+        <h1 class="page-title" style="margin-bottom:0">Missions</h1>
         <button phx-click="refresh" style="background:#1f6feb33; color:#58a6ff; border:1px solid #1f6feb55; padding:0.4rem 1rem; border-radius:6px; cursor:pointer; font-size:0.85rem">
           Refresh
         </button>

@@ -28,7 +28,7 @@ defmodule GiTF.InitTest do
       assert File.dir?(Path.join(workspace, ".gitf"))
       assert File.dir?(Path.join([workspace, ".gitf", "major"]))
       assert File.exists?(Path.join([workspace, ".gitf", "config.toml"]))
-      assert File.exists?(Path.join([workspace, ".gitf", "major", "QUEEN.md"]))
+      assert File.exists?(Path.join([workspace, ".gitf", "major", "MAJOR.md"]))
     end
 
     test "writes a valid TOML config" do
@@ -41,12 +41,12 @@ defmodule GiTF.InitTest do
       assert config["major"]["max_ghosts"] == 5
     end
 
-    test "writes QUEEN.md with delegation instructions" do
+    test "writes MAJOR.md with delegation instructions" do
       workspace = tmp_workspace()
 
       {:ok, _} = GiTF.Init.init(workspace)
 
-      queen_path = Path.join([workspace, ".gitf", "major", "QUEEN.md"])
+      queen_path = Path.join([workspace, ".gitf", "major", "MAJOR.md"])
       content = File.read!(queen_path)
 
       assert content =~ "Major Instructions"

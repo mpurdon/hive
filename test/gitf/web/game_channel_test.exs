@@ -70,7 +70,7 @@ defmodule GiTF.Web.GameChannelTest do
     GiTF.Telemetry.emit([:gitf, :ghost, :spawned], %{}, %{ghost_id: "test-ghost"})
 
     # Assert pushed to channel
-    assert_push "gitf_event", %{type: "section.ghost.spawned", data: %{ghost_id: "test-ghost"}}
+    assert_push "gitf_event", %{type: "gitf.ghost.spawned", data: %{ghost_id: "test-ghost"}}
   end
 
   test "can spawn mission via command", %{socket: socket} do

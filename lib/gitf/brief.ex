@@ -3,7 +3,7 @@ defmodule GiTF.Brief do
   Generates context prompts for Claude Code sessions.
 
   Priming is the act of feeding Claude its initial context at session start.
-  The Major gets the QUEEN.md instructions plus a snapshot of the current
+  The Major gets the MAJOR.md instructions plus a snapshot of the current
   section state. A Bee gets its specific op description, relevant links,
   and information about the sector it is working on.
 
@@ -17,7 +17,7 @@ defmodule GiTF.Brief do
   @doc """
   Briefs a Major or Bee with context for a Claude Code session.
 
-  - `brief(:major, gitf_root)` reads QUEEN.md and appends current section state
+  - `brief(:major, gitf_root)` reads MAJOR.md and appends current section state
   - `brief(:ghost, ghost_id)` builds a briefing from the ghost's op, shell, and links
 
   Returns `{:ok, markdown}` or `{:error, reason}`.
@@ -26,7 +26,7 @@ defmodule GiTF.Brief do
   def brief(role, identifier)
 
   def brief(:major, gitf_root) do
-    queen_md_path = Path.join([gitf_root, ".gitf", "major", "QUEEN.md"])
+    queen_md_path = Path.join([gitf_root, ".gitf", "major", "MAJOR.md"])
 
     with {:ok, instructions} <- File.read(queen_md_path) do
       state_summary = build_major_state_summary()

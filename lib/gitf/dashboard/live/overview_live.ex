@@ -97,12 +97,12 @@ defmodule GiTF.Dashboard.OverviewLive do
 
       <div class="cards">
         <div class="card">
-          <div class="card-label">Total Bees</div>
+          <div class="card-label">Total Ghosts</div>
           <div class="card-value blue">{@ghost_count}</div>
           <div class="card-label" style="margin-top:0.25rem">{@active_ghosts} active</div>
         </div>
         <div class="card">
-          <div class="card-label">Quests</div>
+          <div class="card-label">Missions</div>
           <div class="card-value yellow">{@quest_count}</div>
           <div class="card-label" style="margin-top:0.25rem">{@active_quests} active</div>
         </div>

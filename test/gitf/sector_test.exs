@@ -20,7 +20,7 @@ defmodule GiTF.CombTest do
 
   describe "add/2 with a local path" do
     test "registers a sector from an existing directory", %{tmp: tmp} do
-      assert {:ok, sector} = Comb.add(tmp)
+      assert {:ok, sector} = Sector.add(tmp)
 
       assert sector.name == Path.basename(tmp)
       assert sector.path == tmp
@@ -28,19 +28,19 @@ defmodule GiTF.CombTest do
     end
 
     test "uses a custom name when provided", %{tmp: tmp} do
-      assert {:ok, sector} = Comb.add(tmp, name: "my-project")
+      assert {:ok, sector} = Sector.add(tmp, name: "my-project")
 
       assert sector.name == "my-project"
     end
 
     test "returns error for non-existent path" do
-      assert {:error, :path_not_found} = Comb.add("/nonexistent/path/#{System.unique_integer()}")
+      assert {:error, :path_not_found} = Sector.add("/nonexistent/path/#{System.unique_integer()}")
     end
   end
 
   describe "list/0" do
     test "returns empty list when no sectors exist" do
-      assert Comb.list() == []
+      assert Sector.list() == []
     end
 
     test "returns all registered sectors", %{tmp: tmp} do
@@ -49,10 +49,10 @@ defmodule GiTF.CombTest do
       File.mkdir_p!(sub1)
       File.mkdir_p!(sub2)
 
-      {:ok, _} = Comb.add(sub1, name: "project-a")
-      {:ok, _} = Comb.add(sub2, name: "project-b")
+      {:ok, _} = Sector.add(sub1, name: "project-a")
+      {:ok, _} = Sector.add(sub2, name: "project-b")
 
-      sectors = Comb.list()
+      sectors = Sector.list()
       names = Enum.map(sectors, & &1.name) |> Enum.sort()
 
       assert names == ["project-a", "project-b"]
@@ -61,36 +61,36 @@ defmodule GiTF.CombTest do
 
   describe "get/1" do
     test "finds a sector by name", %{tmp: tmp} do
-      {:ok, created} = Comb.add(tmp, name: "findme")
+      {:ok, created} = Sector.add(tmp, name: "findme")
 
-      assert {:ok, found} = Comb.get("findme")
+      assert {:ok, found} = Sector.get("findme")
       assert found.id == created.id
     end
 
     test "finds a sector by ID", %{tmp: tmp} do
-      {:ok, created} = Comb.add(tmp, name: "byid")
+      {:ok, created} = Sector.add(tmp, name: "byid")
 
-      assert {:ok, found} = Comb.get(created.id)
+      assert {:ok, found} = Sector.get(created.id)
       assert found.name == "byid"
     end
 
     test "returns error for unknown name" do
-      assert {:error, :not_found} = Comb.get("nonexistent")
+      assert {:error, :not_found} = Sector.get("nonexistent")
     end
   end
 
   describe "remove/2" do
     test "removes a sector record by name", %{tmp: tmp} do
-      {:ok, _} = Comb.add(tmp, name: "removeme")
+      {:ok, _} = Sector.add(tmp, name: "removeme")
 
-      assert {:ok, removed} = Comb.remove("removeme")
+      assert {:ok, removed} = Sector.remove("removeme")
       assert removed.name == "removeme"
 
-      assert {:error, :not_found} = Comb.get("removeme")
+      assert {:error, :not_found} = Sector.get("removeme")
     end
 
     test "returns error for unknown sector" do
-      assert {:error, :not_found} = Comb.remove("ghost")
+      assert {:error, :not_found} = Sector.remove("ghost")
     end
   end
 
@@ -98,18 +98,18 @@ defmodule GiTF.CombTest do
     test "updates sector name in store", %{tmp: tmp} do
       dir = Path.join(tmp, "original")
       File.mkdir_p!(dir)
-      {:ok, sector} = Comb.add(dir, name: "original")
+      {:ok, sector} = Sector.add(dir, name: "original")
 
-      assert {:ok, renamed} = Comb.rename("original", "new-name")
+      assert {:ok, renamed} = Sector.rename("original", "new-name")
       assert renamed.name == "new-name"
       assert renamed.id == sector.id
 
       # Verify lookup by new name works
-      assert {:ok, found} = Comb.get("new-name")
+      assert {:ok, found} = Sector.get("new-name")
       assert found.id == sector.id
 
       # Old name no longer resolves
-      assert {:error, :not_found} = Comb.get("original")
+      assert {:error, :not_found} = Sector.get("original")
     end
 
     test "rejects duplicate name", %{tmp: tmp} do
@@ -117,19 +117,19 @@ defmodule GiTF.CombTest do
       dir2 = Path.join(tmp, "beta")
       File.mkdir_p!(dir1)
       File.mkdir_p!(dir2)
-      {:ok, _} = Comb.add(dir1, name: "alpha")
-      {:ok, _} = Comb.add(dir2, name: "beta")
+      {:ok, _} = Sector.add(dir1, name: "alpha")
+      {:ok, _} = Sector.add(dir2, name: "beta")
 
-      assert {:error, :name_already_taken} = Comb.rename("alpha", "beta")
+      assert {:error, :name_already_taken} = Sector.rename("alpha", "beta")
     end
 
     test "moves directory when basename matches old name", %{tmp: tmp} do
       dir = Path.join(tmp, "moveme")
       File.mkdir_p!(dir)
       File.write!(Path.join(dir, "marker.txt"), "hello")
-      {:ok, _} = Comb.add(dir, name: "moveme")
+      {:ok, _} = Sector.add(dir, name: "moveme")
 
-      assert {:ok, renamed} = Comb.rename("moveme", "moved")
+      assert {:ok, renamed} = Sector.rename("moveme", "moved")
 
       new_dir = Path.join(tmp, "moved")
       assert renamed.path == new_dir
@@ -141,7 +141,7 @@ defmodule GiTF.CombTest do
     test "updates shell worktree_path and ghost shell_path when path changes", %{tmp: tmp} do
       dir = Path.join(tmp, "repo")
       File.mkdir_p!(dir)
-      {:ok, sector} = Comb.add(dir, name: "repo")
+      {:ok, sector} = Sector.add(dir, name: "repo")
 
       # Create a shell with a worktree_path under the sector
       {:ok, shell} =
@@ -162,7 +162,7 @@ defmodule GiTF.CombTest do
           op_id: nil
         })
 
-      assert {:ok, _} = Comb.rename("repo", "renamed-repo")
+      assert {:ok, _} = Sector.rename("repo", "renamed-repo")
 
       new_dir = Path.join(tmp, "renamed-repo")
       updated_cell = Archive.get(:shells, shell.id)
@@ -176,9 +176,9 @@ defmodule GiTF.CombTest do
       # Add a sector with a custom name different from the directory basename
       dir = Path.join(tmp, "actual-dir")
       File.mkdir_p!(dir)
-      {:ok, sector} = Comb.add(dir, name: "custom-name")
+      {:ok, sector} = Sector.add(dir, name: "custom-name")
 
-      assert {:ok, renamed} = Comb.rename("custom-name", "new-custom")
+      assert {:ok, renamed} = Sector.rename("custom-name", "new-custom")
       assert renamed.name == "new-custom"
       # Path stays the same since basename("actual-dir") != "custom-name"
       assert renamed.path == sector.path
@@ -188,7 +188,7 @@ defmodule GiTF.CombTest do
 
   describe "sync_strategy field" do
     test "defaults to manual when not specified", %{tmp: tmp} do
-      assert {:ok, sector} = Comb.add(tmp, name: "default-strategy")
+      assert {:ok, sector} = Sector.add(tmp, name: "default-strategy")
 
       assert sector.sync_strategy == "manual"
     end

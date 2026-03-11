@@ -164,7 +164,7 @@ defmodule GiTF.Runtime.Loadout do
       System.cmd("grep", grep_args, stderr_to_stdout: true)
     end)
 
-    case Task.yield(task, 30_000) || Task.exfil(task, 5_000) do
+    case Task.yield(task, 30_000) || Task.shutdown(task, 5_000) do
       {:ok, {output, 0}} -> {:ok, String.slice(output, 0, 10_000)}
       {:ok, {output, 1}} -> {:ok, "No matches found.\n#{output}"}
       {:ok, {output, _}} -> {:ok, "Search error: #{String.slice(output, 0, 2_000)}"}
@@ -196,7 +196,7 @@ defmodule GiTF.Runtime.Loadout do
       System.cmd(cmd, cmd_args, cmd_opts)
     end)
 
-    case Task.yield(task, timeout) || Task.exfil(task, 5_000) do
+    case Task.yield(task, timeout) || Task.shutdown(task, 5_000) do
       {:ok, {output, exit_code}} ->
         result = String.slice(output, 0, 15_000)
         {:ok, "Exit code: #{exit_code}\n#{result}"}

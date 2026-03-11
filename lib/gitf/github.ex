@@ -15,7 +15,7 @@ defmodule GiTF.GitHub do
 
   Returns `{:ok, pr_url}` or `{:error, reason}`.
   """
-  @spec create_pr(GiTF.Schema.Comb.t(), GiTF.Schema.Cell.t(), GiTF.Schema.Job.t()) ::
+  @spec create_pr(GiTF.Schema.Sector.t(), GiTF.Schema.Shell.t(), GiTF.Schema.Op.t()) ::
           {:ok, String.t()} | {:error, term()}
   def create_pr(sector, shell, op) do
     with {:ok, client} <- client(sector) do
@@ -46,7 +46,7 @@ defmodule GiTF.GitHub do
   end
 
   @doc "Closes a GitHub issue by number."
-  @spec close_issue(GiTF.Schema.Comb.t(), integer()) :: :ok | {:error, term()}
+  @spec close_issue(GiTF.Schema.Sector.t(), integer()) :: :ok | {:error, term()}
   def close_issue(sector, issue_number) do
     with {:ok, client} <- client(sector) do
       case Req.patch(client,
@@ -66,7 +66,7 @@ defmodule GiTF.GitHub do
   end
 
   @doc "Creates a GitHub issue."
-  @spec create_issue(GiTF.Schema.Comb.t(), String.t(), String.t()) ::
+  @spec create_issue(GiTF.Schema.Sector.t(), String.t(), String.t()) ::
           {:ok, map()} | {:error, term()}
   def create_issue(sector, title, body) do
     with {:ok, client} <- client(sector) do
@@ -87,7 +87,7 @@ defmodule GiTF.GitHub do
   end
 
   @doc "Lists open issues for a sector."
-  @spec list_issues(GiTF.Schema.Comb.t(), keyword()) :: {:ok, [map()]} | {:error, term()}
+  @spec list_issues(GiTF.Schema.Sector.t(), keyword()) :: {:ok, [map()]} | {:error, term()}
   def list_issues(sector, opts \\ []) do
     with {:ok, client} <- client(sector) do
       state = Keyword.get(opts, :state, "open")
@@ -109,7 +109,7 @@ defmodule GiTF.GitHub do
   end
 
   @doc "Adds a comment to an issue or PR."
-  @spec add_comment(GiTF.Schema.Comb.t(), integer(), String.t()) :: :ok | {:error, term()}
+  @spec add_comment(GiTF.Schema.Sector.t(), integer(), String.t()) :: :ok | {:error, term()}
   def add_comment(sector, issue_number, body) do
     with {:ok, client} <- client(sector) do
       case Req.post(client,
@@ -130,7 +130,7 @@ defmodule GiTF.GitHub do
   end
 
   @doc "Builds a Req client with GitHub auth."
-  @spec client(GiTF.Schema.Comb.t()) :: {:ok, Req.Request.t()} | {:error, :no_github_config}
+  @spec client(GiTF.Schema.Sector.t()) :: {:ok, Req.Request.t()} | {:error, :no_github_config}
   def client(sector) do
     if Map.get(sector, :github_owner) && Map.get(sector, :github_repo) do
       token = github_token()

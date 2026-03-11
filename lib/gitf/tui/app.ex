@@ -261,7 +261,7 @@ defmodule GiTF.TUI.App do
 
   # Events: only when events panel is active, every 6th tick
   defp maybe_refresh_events(%{right_panel: :events} = model, count) when rem(count, 6) == 0 do
-    Map.put(model, :event_store_events, safe_call(fn -> GiTF.EventArchive.list(limit: 30) end, model.event_store_events))
+    Map.put(model, :event_store_events, safe_call(fn -> GiTF.EventStore.list(limit: 30) end, model.event_store_events))
   end
 
   defp maybe_refresh_events(model, _count), do: model

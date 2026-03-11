@@ -1,4 +1,4 @@
-defmodule GiTF.JobsDepTest do
+defmodule GiTF.OpsDepTest do
   use ExUnit.Case, async: false
 
   alias GiTF.Ops
@@ -25,7 +25,7 @@ defmodule GiTF.JobsDepTest do
 
   defp create_job(mission, sector, title \\ nil) do
     title = title || "Job #{:erlang.unique_integer([:positive])}"
-    Jobs.create(%{title: title, mission_id: mission.id, sector_id: sector.id})
+    Ops.create(%{title: title, mission_id: mission.id, sector_id: sector.id})
   end
 
   defp create_bee do
@@ -43,7 +43,7 @@ defmodule GiTF.JobsDepTest do
       {:ok, job_a} = create_job(q, c, "Job A")
       {:ok, job_b} = create_job(q, c, "Job B")
 
-      assert {:ok, dep} = Jobs.add_dependency(job_b.id, job_a.id)
+      assert {:ok, dep} = Ops.add_dependency(job_b.id, job_a.id)
       assert dep.op_id == job_b.id
       assert dep.depends_on_id == job_a.id
       assert String.starts_with?(dep.id, "jdp-")
@@ -51,7 +51,7 @@ defmodule GiTF.JobsDepTest do
 
     test "rejects self-dependency", %{mission: q, sector: c} do
       {:ok, op} = create_job(q, c)
-      assert {:error, :self_dependency} = Jobs.add_dependency(op.id, op.id)
+      assert {:error, :self_dependency} = Ops.add_dependency(op.id, op.id)
     end
 
     test "rejects cycles", %{mission: q, sector: c} do
@@ -60,17 +60,17 @@ defmodule GiTF.JobsDepTest do
       {:ok, cc} = create_job(q, c, "C")
 
       # A -> B -> C, then trying C -> A should fail
-      {:ok, _} = Jobs.add_dependency(a.id, b.id)
-      {:ok, _} = Jobs.add_dependency(b.id, cc.id)
-      assert {:error, :cycle_detected} = Jobs.add_dependency(cc.id, a.id)
+      {:ok, _} = Ops.add_dependency(a.id, b.id)
+      {:ok, _} = Ops.add_dependency(b.id, cc.id)
+      assert {:error, :cycle_detected} = Ops.add_dependency(cc.id, a.id)
     end
 
     test "rejects direct cycle (A->B, B->A)", %{mission: q, sector: c} do
       {:ok, a} = create_job(q, c, "A")
       {:ok, b} = create_job(q, c, "B")
 
-      {:ok, _} = Jobs.add_dependency(a.id, b.id)
-      assert {:error, :cycle_detected} = Jobs.add_dependency(b.id, a.id)
+      {:ok, _} = Ops.add_dependency(a.id, b.id)
+      assert {:error, :cycle_detected} = Ops.add_dependency(b.id, a.id)
     end
   end
 
@@ -78,17 +78,17 @@ defmodule GiTF.JobsDepTest do
     test "removes an existing dependency", %{mission: q, sector: c} do
       {:ok, a} = create_job(q, c)
       {:ok, b} = create_job(q, c)
-      {:ok, _} = Jobs.add_dependency(a.id, b.id)
+      {:ok, _} = Ops.add_dependency(a.id, b.id)
 
-      assert :ok = Jobs.remove_dependency(a.id, b.id)
-      assert Jobs.dependencies(a.id) == []
+      assert :ok = Ops.remove_dependency(a.id, b.id)
+      assert Ops.dependencies(a.id) == []
     end
 
     test "returns error for non-existent dependency", %{mission: q, sector: c} do
       {:ok, a} = create_job(q, c)
       {:ok, b} = create_job(q, c)
 
-      assert {:error, :not_found} = Jobs.remove_dependency(a.id, b.id)
+      assert {:error, :not_found} = Ops.remove_dependency(a.id, b.id)
     end
   end
 
@@ -98,15 +98,15 @@ defmodule GiTF.JobsDepTest do
       {:ok, b} = create_job(q, c, "B")
       {:ok, cc} = create_job(q, c, "C")
 
-      {:ok, _} = Jobs.add_dependency(cc.id, a.id)
-      {:ok, _} = Jobs.add_dependency(cc.id, b.id)
+      {:ok, _} = Ops.add_dependency(cc.id, a.id)
+      {:ok, _} = Ops.add_dependency(cc.id, b.id)
 
-      deps = Jobs.dependencies(cc.id)
+      deps = Ops.dependencies(cc.id)
       assert length(deps) == 2
       dep_ids = Enum.map(deps, & &1.id) |> Enum.sort()
       assert dep_ids == Enum.sort([a.id, b.id])
 
-      dependents_of_a = Jobs.dependents(a.id)
+      dependents_of_a = Ops.dependents(a.id)
       assert length(dependents_of_a) == 1
       assert hd(dependents_of_a).id == cc.id
     end
@@ -115,29 +115,29 @@ defmodule GiTF.JobsDepTest do
   describe "ready?/1" do
     test "returns true when no dependencies", %{mission: q, sector: c} do
       {:ok, op} = create_job(q, c)
-      assert Jobs.ready?(op.id) == true
+      assert Ops.ready?(op.id) == true
     end
 
     test "returns false when dependency is not done", %{mission: q, sector: c} do
       {:ok, a} = create_job(q, c, "A")
       {:ok, b} = create_job(q, c, "B")
-      {:ok, _} = Jobs.add_dependency(b.id, a.id)
+      {:ok, _} = Ops.add_dependency(b.id, a.id)
 
-      assert Jobs.ready?(b.id) == false
+      assert Ops.ready?(b.id) == false
     end
 
     test "returns true when all dependencies are done", %{mission: q, sector: c} do
       ghost = create_bee()
       {:ok, a} = create_job(q, c, "A")
       {:ok, b} = create_job(q, c, "B")
-      {:ok, _} = Jobs.add_dependency(b.id, a.id)
+      {:ok, _} = Ops.add_dependency(b.id, a.id)
 
       # Complete op A
-      {:ok, _} = Jobs.assign(a.id, ghost.id)
-      {:ok, _} = Jobs.start(a.id)
-      {:ok, _} = Jobs.complete(a.id)
+      {:ok, _} = Ops.assign(a.id, ghost.id)
+      {:ok, _} = Ops.start(a.id)
+      {:ok, _} = Ops.complete(a.id)
 
-      assert Jobs.ready?(b.id) == true
+      assert Ops.ready?(b.id) == true
     end
   end
 
@@ -146,17 +146,17 @@ defmodule GiTF.JobsDepTest do
       ghost = create_bee()
       {:ok, a} = create_job(q, c, "A")
       {:ok, b} = create_job(q, c, "B")
-      {:ok, _} = Jobs.add_dependency(b.id, a.id)
-      {:ok, _} = Jobs.block(b.id)
+      {:ok, _} = Ops.add_dependency(b.id, a.id)
+      {:ok, _} = Ops.block(b.id)
 
       # Complete A
-      {:ok, _} = Jobs.assign(a.id, ghost.id)
-      {:ok, _} = Jobs.start(a.id)
-      {:ok, _} = Jobs.complete(a.id)
+      {:ok, _} = Ops.assign(a.id, ghost.id)
+      {:ok, _} = Ops.start(a.id)
+      {:ok, _} = Ops.complete(a.id)
 
-      :ok = Jobs.unblock_dependents(a.id)
+      :ok = Ops.unblock_dependents(a.id)
 
-      {:ok, b_updated} = Jobs.get(b.id)
+      {:ok, b_updated} = Ops.get(b.id)
       assert b_updated.status == "pending"
     end
 
@@ -166,18 +166,18 @@ defmodule GiTF.JobsDepTest do
       {:ok, b} = create_job(q, c, "B")
       {:ok, cc} = create_job(q, c, "C")
 
-      {:ok, _} = Jobs.add_dependency(cc.id, a.id)
-      {:ok, _} = Jobs.add_dependency(cc.id, b.id)
-      {:ok, _} = Jobs.block(cc.id)
+      {:ok, _} = Ops.add_dependency(cc.id, a.id)
+      {:ok, _} = Ops.add_dependency(cc.id, b.id)
+      {:ok, _} = Ops.block(cc.id)
 
       # Complete only A
-      {:ok, _} = Jobs.assign(a.id, ghost.id)
-      {:ok, _} = Jobs.start(a.id)
-      {:ok, _} = Jobs.complete(a.id)
+      {:ok, _} = Ops.assign(a.id, ghost.id)
+      {:ok, _} = Ops.start(a.id)
+      {:ok, _} = Ops.complete(a.id)
 
-      :ok = Jobs.unblock_dependents(a.id)
+      :ok = Ops.unblock_dependents(a.id)
 
-      {:ok, cc_updated} = Jobs.get(cc.id)
+      {:ok, cc_updated} = Ops.get(cc.id)
       assert cc_updated.status == "blocked"
     end
   end
@@ -186,7 +186,7 @@ defmodule GiTF.JobsDepTest do
     test "Ghosts.spawn returns :blocked when deps not ready", %{mission: q, sector: c} do
       {:ok, a} = create_job(q, c, "A")
       {:ok, b} = create_job(q, c, "B")
-      {:ok, _} = Jobs.add_dependency(b.id, a.id)
+      {:ok, _} = Ops.add_dependency(b.id, a.id)
 
       assert {:error, :blocked} = GiTF.Ghosts.spawn(b.id, c.id, "/tmp/fake_gitf")
     end

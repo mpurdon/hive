@@ -21,7 +21,7 @@ defmodule GiTF.BriefTest do
     queen_dir = Path.join([gitf_root, ".gitf", "major"])
     File.mkdir_p!(queen_dir)
 
-    queen_md = Path.join(queen_dir, "QUEEN.md")
+    queen_md = Path.join(queen_dir, "MAJOR.md")
     File.write!(queen_md, "# Major Instructions\n\nYou are the Major.\n")
 
     on_exit(fn -> File.rm_rf!(gitf_root) end)
@@ -29,7 +29,7 @@ defmodule GiTF.BriefTest do
   end
 
   describe "brief(:major, gitf_root)" do
-    test "returns QUEEN.md content plus section state summary" do
+    test "returns MAJOR.md content plus section state summary" do
       gitf_root = create_gitf_workspace()
 
       assert {:ok, markdown} = Brief.brief(:major, gitf_root)
@@ -39,7 +39,7 @@ defmodule GiTF.BriefTest do
       assert markdown =~ "Pending Jobs"
     end
 
-    test "returns error when QUEEN.md is missing" do
+    test "returns error when MAJOR.md is missing" do
       tmp = Path.join(@tmp_dir, "gitf_prime_nomd_#{:erlang.unique_integer([:positive])}")
       File.mkdir_p!(Path.join(tmp, ".gitf"))
       on_exit(fn -> File.rm_rf!(tmp) end)

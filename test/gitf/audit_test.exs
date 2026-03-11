@@ -1,7 +1,7 @@
 defmodule GiTF.AuditTest do
   use ExUnit.Case, async: false
 
-  alias GiTF.{Archive, Audit, Jobs}
+  alias GiTF.{Archive, Audit, Ops}
 
   setup do
     GiTF.Test.StoreHelper.ensure_infrastructure()
@@ -14,7 +14,7 @@ defmodule GiTF.AuditTest do
     # Create test data
     {:ok, sector} = Archive.insert(:sectors, %{name: "test-sector", path: "/tmp/test"})
     {:ok, mission} = Archive.insert(:missions, %{name: "test-mission", goal: "test"})
-    {:ok, op} = Jobs.create(%{
+    {:ok, op} = Ops.create(%{
       title: "Test op",
       mission_id: mission.id,
       sector_id: sector.id
@@ -29,9 +29,9 @@ defmodule GiTF.AuditTest do
     })
 
     # Assign op to ghost and complete it
-    {:ok, op} = Jobs.assign(op.id, ghost.id)
-    {:ok, op} = Jobs.start(op.id)
-    {:ok, op} = Jobs.complete(op.id)
+    {:ok, op} = Ops.assign(op.id, ghost.id)
+    {:ok, op} = Ops.start(op.id)
+    {:ok, op} = Ops.complete(op.id)
 
     %{op: op, sector: sector, shell: shell, ghost: ghost}
   end
@@ -75,7 +75,7 @@ defmodule GiTF.AuditTest do
     assert result.output == "No validation command configured"
 
     # Check op was updated
-    {:ok, updated_job} = Jobs.get(op.id)
+    {:ok, updated_job} = Ops.get(op.id)
     assert updated_job.verification_status == "passed"
     assert not is_nil(updated_job.verified_at)
   end

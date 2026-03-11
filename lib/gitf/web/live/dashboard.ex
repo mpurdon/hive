@@ -35,7 +35,7 @@ defmodule GiTF.Web.Live.Dashboard do
       |> assign(:sync_queue, safe_call(fn -> GiTF.Sync.Queue.status() end, %{pending: [], active: nil, completed: []}))
       |> assign(:runs, safe_call(fn -> GiTF.Run.list(status: "active") end, []))
       |> assign(:event_store_events, [])
-      |> assign(:event_types, safe_call(fn -> GiTF.EventArchive.event_types() end, []))
+      |> assign(:event_types, safe_call(fn -> GiTF.EventStore.event_types() end, []))
       |> assign(:agent_identities, safe_call(fn -> GiTF.GhostID.list() end, []))
       |> assign(:backups, %{})
       |> assign(:budget_status, [])
@@ -129,7 +129,7 @@ defmodule GiTF.Web.Live.Dashboard do
     socket =
       socket
       |> assign(:event_type_filter, nil)
-      |> assign(:event_store_events, safe_call(fn -> GiTF.EventArchive.list(limit: 50) end, []))
+      |> assign(:event_store_events, safe_call(fn -> GiTF.EventStore.list(limit: 50) end, []))
 
     {:noreply, socket}
   end
@@ -145,7 +145,7 @@ defmodule GiTF.Web.Live.Dashboard do
     socket =
       socket
       |> assign(:event_type_filter, type_atom)
-      |> assign(:event_store_events, safe_call(fn -> GiTF.EventArchive.list(limit: 50, type: type_atom) end, []))
+      |> assign(:event_store_events, safe_call(fn -> GiTF.EventStore.list(limit: 50, type: type_atom) end, []))
 
     {:noreply, socket}
   end
@@ -157,7 +157,7 @@ defmodule GiTF.Web.Live.Dashboard do
   end
 
   def handle_event("view_quest_timeline", %{"id" => mission_id}, socket) do
-    events = safe_call(fn -> GiTF.EventArchive.list(limit: 50, mission_id: mission_id) end, [])
+    events = safe_call(fn -> GiTF.EventStore.list(limit: 50, mission_id: mission_id) end, [])
 
     socket =
       socket
@@ -230,7 +230,7 @@ defmodule GiTF.Web.Live.Dashboard do
   defp maybe_refresh_tab(%{assigns: %{active_tab: :events}} = socket) do
     opts = [limit: 50]
     opts = if socket.assigns.event_type_filter, do: Keyword.put(opts, :type, socket.assigns.event_type_filter), else: opts
-    assign(socket, :event_store_events, safe_call(fn -> GiTF.EventArchive.list(opts) end, socket.assigns.event_store_events))
+    assign(socket, :event_store_events, safe_call(fn -> GiTF.EventStore.list(opts) end, socket.assigns.event_store_events))
   end
 
   defp maybe_refresh_tab(socket), do: socket

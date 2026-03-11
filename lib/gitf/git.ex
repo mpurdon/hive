@@ -302,7 +302,7 @@ defmodule GiTF.Git do
   def safe_cmd(args, opts \\ []) do
     task = Task.async(fn -> System.cmd("git", args, opts) end)
 
-    case Task.yield(task, @git_timeout_ms) || Task.exfil(task, 5_000) do
+    case Task.yield(task, @git_timeout_ms) || Task.shutdown(task, 5_000) do
       {:ok, result} -> result
       nil -> {"git command timed out after #{div(@git_timeout_ms, 1000)}s", 1}
     end

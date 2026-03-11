@@ -128,10 +128,10 @@ defmodule GiTF.Major.PlannerTest do
       {:ok, ops} = Planner.create_jobs_from_plan(mission.id, plan)
       
       # Check that ops have dependencies (except the first one)
-      [first_job | rest_jobs] = ops
+      [first_op | rest_ops] = ops
       
       # First op should have no dependencies
-      assert GiTF.Ops.dependencies(first_job.id) == []
+      assert GiTF.Ops.dependencies(first_op.id) == []
       
       # Each subsequent op should depend on the previous one
       Enum.reduce(ops, nil, fn op, prev_job ->

@@ -1,4 +1,4 @@
-defmodule GiTF.QuestPhasesTest do
+defmodule GiTF.MissionPhasesTest do
   use ExUnit.Case, async: false
 
   alias GiTF.Archive
@@ -16,7 +16,7 @@ defmodule GiTF.QuestPhasesTest do
 
   describe "mission phase transitions" do
     test "new missions start in pending phase" do
-      {:ok, mission} = Quests.create(%{goal: "Test mission"})
+      {:ok, mission} = Missions.create(%{goal: "Test mission"})
       
       assert mission.current_phase == "pending"
       assert mission.research_summary == nil
@@ -24,14 +24,14 @@ defmodule GiTF.QuestPhasesTest do
     end
 
     test "can transition mission phases" do
-      {:ok, mission} = Quests.create(%{goal: "Test mission"})
+      {:ok, mission} = Missions.create(%{goal: "Test mission"})
       
-      {:ok, updated} = Quests.transition_phase(mission.id, "research", "Starting research")
+      {:ok, updated} = Missions.transition_phase(mission.id, "research", "Starting research")
       
       assert updated.current_phase == "research"
       
       # Check transition was recorded
-      transitions = Quests.get_phase_transitions(mission.id)
+      transitions = Missions.get_phase_transitions(mission.id)
       assert length(transitions) == 1
       
       transition = List.first(transitions)
@@ -42,13 +42,13 @@ defmodule GiTF.QuestPhasesTest do
     end
 
     test "can track multiple phase transitions" do
-      {:ok, mission} = Quests.create(%{goal: "Test mission"})
+      {:ok, mission} = Missions.create(%{goal: "Test mission"})
       
-      {:ok, _} = Quests.transition_phase(mission.id, "research")
-      {:ok, _} = Quests.transition_phase(mission.id, "planning")
-      {:ok, _} = Quests.transition_phase(mission.id, "implementation")
+      {:ok, _} = Missions.transition_phase(mission.id, "research")
+      {:ok, _} = Missions.transition_phase(mission.id, "planning")
+      {:ok, _} = Missions.transition_phase(mission.id, "implementation")
       
-      transitions = Quests.get_phase_transitions(mission.id)
+      transitions = Missions.get_phase_transitions(mission.id)
       assert length(transitions) == 3
       
       # Check that all expected phases are present
@@ -59,13 +59,13 @@ defmodule GiTF.QuestPhasesTest do
     end
 
     test "transition_phase returns error for non-existent mission" do
-      assert {:error, :not_found} = Quests.transition_phase("nonexistent", "research")
+      assert {:error, :not_found} = Missions.transition_phase("nonexistent", "research")
     end
 
     test "get_phase_transitions returns empty list for mission with no transitions" do
-      {:ok, mission} = Quests.create(%{goal: "Test mission"})
+      {:ok, mission} = Missions.create(%{goal: "Test mission"})
       
-      transitions = Quests.get_phase_transitions(mission.id)
+      transitions = Missions.get_phase_transitions(mission.id)
       assert transitions == []
     end
   end

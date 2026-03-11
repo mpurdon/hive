@@ -66,7 +66,7 @@ defmodule GiTF.Validator do
       )
     end)
 
-    case Task.yield(task, @validation_timeout_ms) || Task.exfil(task, 5_000) do
+    case Task.yield(task, @validation_timeout_ms) || Task.shutdown(task, 5_000) do
       {:ok, {_output, 0}} ->
         :ok
 

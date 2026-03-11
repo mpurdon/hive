@@ -274,12 +274,12 @@ defmodule GiTF.Medic do
   defp check_major_workspace do
     case GiTF.gitf_dir() do
       {:ok, path} ->
-        queen_md = Path.join([path, ".gitf", "major", "QUEEN.md"])
+        major_md = Path.join([path, ".gitf", "major", "MAJOR.md"])
 
-        if File.exists?(queen_md) do
-          result(:major_workspace, :ok, "QUEEN.md exists")
+        if File.exists?(major_md) do
+          result(:major_workspace, :ok, "MAJOR.md exists")
         else
-          result(:major_workspace, :error, "QUEEN.md is missing from .gitf/queen/", true)
+          result(:major_workspace, :error, "MAJOR.md is missing from .gitf/queen/", true)
         end
 
       {:error, _} ->
@@ -346,14 +346,14 @@ defmodule GiTF.Medic do
     case GiTF.gitf_dir() do
       {:ok, path} ->
         queen_dir = Path.join([path, ".gitf", "major"])
-        queen_md = Path.join(queen_dir, "QUEEN.md")
+        major_md = Path.join(queen_dir, "MAJOR.md")
 
         with :ok <- File.mkdir_p(queen_dir),
-             :ok <- File.write(queen_md, GiTF.Init.major_instructions()) do
-          result(:major_workspace, :ok, "Regenerated QUEEN.md")
+             :ok <- File.write(major_md, GiTF.Init.major_instructions()) do
+          result(:major_workspace, :ok, "Regenerated MAJOR.md")
         else
           {:error, reason} ->
-            result(:major_workspace, :error, "Failed to regenerate QUEEN.md: #{inspect(reason)}")
+            result(:major_workspace, :error, "Failed to regenerate MAJOR.md: #{inspect(reason)}")
         end
 
       {:error, _} ->

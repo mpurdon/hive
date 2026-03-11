@@ -89,7 +89,7 @@ defmodule GiTF.Telemetry do
     try do
       case map_event(event, measurements, metadata) do
         nil -> :ok
-        {type, entity_id, data, meta} -> GiTF.EventArchive.record(type, entity_id, data, meta)
+        {type, entity_id, data, meta} -> GiTF.EventStore.record(type, entity_id, data, meta)
       end
     rescue
       _ -> :ok

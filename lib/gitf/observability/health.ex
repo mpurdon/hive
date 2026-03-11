@@ -81,7 +81,7 @@ defmodule GiTF.Observability.Health do
 
     task = Task.async(fn -> System.cmd("df", ["-k", gitf_dir], stderr_to_stdout: true) end)
 
-    df_result = case Task.yield(task, 5_000) || Task.exfil(task, 1_000) do
+    df_result = case Task.yield(task, 5_000) || Task.shutdown(task, 1_000) do
       {:ok, result} -> result
       nil -> {"", 1}
     end

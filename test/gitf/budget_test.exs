@@ -1,7 +1,7 @@
 defmodule GiTF.BudgetTest do
   use ExUnit.Case, async: false
 
-  alias GiTF.{Budget, Costs, Jobs}
+  alias GiTF.{Budget, Costs, Ops}
   alias GiTF.Archive
 
   setup do
@@ -27,9 +27,9 @@ defmodule GiTF.BudgetTest do
       })
 
     {:ok, op} =
-      Jobs.create(%{title: "budget op", mission_id: mission.id, sector_id: sector.id})
+      Ops.create(%{title: "budget op", mission_id: mission.id, sector_id: sector.id})
 
-    {:ok, _} = Jobs.assign(op.id, ghost.id)
+    {:ok, _} = Ops.assign(op.id, ghost.id)
 
     %{sector: sector, mission: mission, ghost: ghost, op: op}
   end

@@ -76,7 +76,7 @@ defmodule GiTF.Triage do
 
   defp has_dependencies?(op) do
     op_id = Map.get(op, :id)
-    op_id != nil and Jobs.dependencies(op_id) != []
+    op_id != nil and Ops.dependencies(op_id) != []
   rescue
     _ -> false
   end

@@ -69,7 +69,7 @@ defmodule GiTF.Debrief do
             cd: sector.path, stderr_to_stdout: true)
         end)
 
-        case Task.yield(task, 120_000) || Task.exfil(task, 5_000) do
+        case Task.yield(task, 120_000) || Task.shutdown(task, 5_000) do
           {:ok, {_output, 0}} ->
             {:ok, :clean}
 

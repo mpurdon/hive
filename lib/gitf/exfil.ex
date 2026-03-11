@@ -146,7 +146,7 @@ defmodule GiTF.Exfil do
         # Wait for all with a hard ceiling
         Task.yield_many(tasks, timeout + 1_000)
         |> Enum.each(fn {task, result} ->
-          if result == nil, do: Task.exfil(task, :brutal_kill)
+          if result == nil, do: Task.shutdown(task, :brutal_kill)
         end)
     end
   rescue

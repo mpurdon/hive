@@ -5,7 +5,7 @@ defmodule GiTF.Major.AuditTest do
 
   describe "inside_gitf_dir?/2" do
     test "returns true for path inside .gitf" do
-      assert Audit.inside_gitf_dir?("/project/.gitf/queen/QUEEN.md", "/project/.gitf")
+      assert Audit.inside_gitf_dir?("/project/.gitf/queen/MAJOR.md", "/project/.gitf")
     end
 
     test "returns true for .gitf dir itself" do
@@ -33,7 +33,7 @@ defmodule GiTF.Major.AuditTest do
       # Use a real-ish path structure
       gitf_root = System.tmp_dir!()
       gitf_dir = Path.join(gitf_root, ".gitf")
-      path = Path.join([gitf_dir, "major", "QUEEN.md"])
+      path = Path.join([gitf_dir, "major", "MAJOR.md"])
 
       assert :ok = Audit.check_file_access(path, gitf_root)
     end

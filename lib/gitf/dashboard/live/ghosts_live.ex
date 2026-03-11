@@ -35,7 +35,7 @@ defmodule GiTF.Dashboard.GhostsLive do
     ghosts = GiTF.Ghosts.list()
 
     socket
-    |> assign(:page_title, "Bees")
+    |> assign(:page_title, "Ghosts")
     |> assign(:current_path, "/ghosts")
     |> assign(:ghosts, ghosts)
   end
@@ -48,7 +48,7 @@ defmodule GiTF.Dashboard.GhostsLive do
 
       <div class="panel">
         <%= if @ghosts == [] do %>
-          <div class="empty">No ghosts spawned yet. Bees are created when the Major assigns ops.</div>
+          <div class="empty">No ghosts deployed yet. Ghosts are created when the Major assigns ops.</div>
         <% else %>
           <table>
             <thead>

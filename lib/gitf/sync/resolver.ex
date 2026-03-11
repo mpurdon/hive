@@ -550,7 +550,7 @@ defmodule GiTF.Sync.Resolver do
               cd: sector.path, stderr_to_stdout: true, env: [])
           end)
 
-          case Task.yield(task, @validation_timeout_ms) || Task.exfil(task, 5_000) do
+          case Task.yield(task, @validation_timeout_ms) || Task.shutdown(task, 5_000) do
             {:ok, {_, 0}} -> :ok
             {:ok, {output, _}} -> {:error, String.slice(output, 0, 500)}
             nil -> {:error, "validation command timed out"}
