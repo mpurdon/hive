@@ -47,38 +47,28 @@ defmodule GiTF.CLI do
   end
 
   defp launch_tui do
-    File.write("/tmp/gitf_tui_debug.log", "launch_tui_entered\n", [:append])
-
     case ensure_store() do
       :ok ->
         :logger.remove_handler(:default)
         suppress_stderr()
 
         {:ok, _} = Application.ensure_all_started(:gitf)
-
-        File.write("/tmp/gitf_tui_debug.log",
-          "[#{DateTime.utc_now()}] app started, calling start_major\n", [:append])
-
         start_major()
 
         Process.flag(:trap_exit, true)
         try do
-          result = Ratatouille.run(GiTF.TUI.App,
+          Ratatouille.run(GiTF.TUI.App,
             quit_events: [{:key, Ratatouille.Constants.key(:ctrl_c)}]
           )
-          File.write("/tmp/gitf_tui_debug.log",
-            "[#{DateTime.utc_now()}] Ratatouille.run returned: #{inspect(result)}\n", [:append])
         rescue
-          e in MatchError ->
+          _e in MatchError ->
             Format.warn("TUI failed to initialize (this is normal when running as a global escript).")
             Format.info("Please use standard CLI commands instead (e.g. gitf --help).")
         end
 
-        # Check if any exit messages were trapped
+        # Drain any trapped exit messages
         receive do
-          {:EXIT, pid, reason} ->
-            File.write("/tmp/gitf_tui_debug.log",
-              "[#{DateTime.utc_now()}] Trapped EXIT from #{inspect(pid)}: #{inspect(reason)}\n", [:append])
+          {:EXIT, _pid, _reason} -> :ok
         after
           100 -> :ok
         end
@@ -759,16 +749,30 @@ defmodule GiTF.CLI do
       return_early()
     end
 
+    # heal is a convenience alias: runs medic checks + self-healing
     Format.info("Running self-healing checks...")
-    
-    results = GiTF.Autonomy.self_heal()
-    
-    if Enum.empty?(results) do
+
+    results = GiTF.Medic.run_all(fix: true)
+    issues = Enum.filter(results, &(&1.status in [:warn, :error]))
+
+    if issues == [] do
       Format.success("System healthy, no repairs needed")
     else
-      Format.success("Self-healing complete:")
-      Enum.each(results, fn {action, count} ->
-        Format.info("  • #{action}: #{count}")
+      Enum.each(results, fn r ->
+        case r.status do
+          :ok -> Format.success("  #{r.name}: ok")
+          :warn -> Format.warn("  #{r.name}: #{r.message}")
+          :error -> Format.error("  #{r.name}: #{r.message}")
+        end
+      end)
+    end
+
+    # Also run autonomy self-heal for higher-level recovery
+    auto_results = GiTF.Autonomy.self_heal()
+    unless Enum.empty?(auto_results) do
+      Format.success("Auto-repairs:")
+      Enum.each(auto_results, fn {action, count} ->
+        Format.info("  #{action}: #{count}")
       end)
     end
   end
@@ -877,14 +881,18 @@ defmodule GiTF.CLI do
         IO.puts(metrics)
       
       "health" ->
-        health = GiTF.Observability.Health.check()
-        IO.puts("Status: #{health.status}")
-        Enum.each(health.checks, fn {name, status} ->
-          IO.puts("  #{name}: #{status}")
+        # Same as `gitf medic`
+        results = GiTF.Medic.run_all(fix: false)
+        Enum.each(results, fn r ->
+          case r.status do
+            :ok -> Format.success("  #{r.name}: ok")
+            :warn -> Format.warn("  #{r.name}: #{r.message}")
+            :error -> Format.error("  #{r.name}: #{r.message}")
+          end
         end)
-      
+
       _ ->
-        Format.error("Usage: section monitor <start|status|metrics|health>")
+        Format.error("Usage: gitf monitor <start|status|metrics|health>")
     end
   end
 
@@ -2465,28 +2473,8 @@ defmodule GiTF.CLI do
     end
   end
 
-  defp dispatch([:github, :sync], result) do
-    case resolve_comb_id(result_get(result, :options, :sector)) do
-      {:ok, sector_id} ->
-        case GiTF.Sector.get(sector_id) do
-          {:ok, sector} ->
-            case GiTF.GitHub.list_issues(sector) do
-              {:ok, issues} ->
-                Format.info("Found #{length(issues)} open issues for #{sector.name}")
-                Enum.each(issues, fn i -> IO.puts("  ##{i["number"]} #{i["title"]}") end)
-
-              {:error, reason} ->
-                Format.error("Sync failed: #{inspect(reason)}")
-            end
-
-          {:error, _} ->
-            show_not_found_error(:sector, sector_id)
-        end
-
-      {:error, :no_comb} ->
-        Format.error("No sector specified. Use --sector or set one with `gitf sector use`.")
-    end
-  end
+  # `github sync` is an alias for `github issues` (kept for backward compatibility)
+  defp dispatch([:github, :sync], result), do: dispatch([:github, :issues], result)
 
   defp dispatch([:mission, :spec, :write], result) do
     mission_id = result_get(result, :args, :mission_id)
