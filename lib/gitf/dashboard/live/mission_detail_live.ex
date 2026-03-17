@@ -106,6 +106,19 @@ defmodule GiTF.Dashboard.MissionDetailLive do
     end
   end
 
+  def handle_event("remove", _params, socket) do
+    case GiTF.Missions.delete(socket.assigns.mission.id) do
+      :ok ->
+        {:noreply,
+         socket
+         |> put_flash(:info, "Mission removed.")
+         |> push_navigate(to: "/dashboard/missions")}
+
+      {:error, reason} ->
+        {:noreply, put_flash(socket, :error, "Failed to remove: #{inspect(reason)}")}
+    end
+  end
+
   def handle_event("kill", _params, socket) do
     case GiTF.Missions.kill(socket.assigns.mission.id) do
       :ok ->
@@ -235,6 +248,7 @@ defmodule GiTF.Dashboard.MissionDetailLive do
           <%= if Map.get(@mission, :status) == "failed" || Enum.any?(@ops, &(Map.get(&1, :status) == "failed")) do %>
             <a href={"/dashboard/missions/#{@mission.id}/diagnostics"} class="btn btn-red">Diagnose</a>
           <% end %>
+          <button phx-click="remove" class="btn btn-red" data-confirm="Permanently remove this mission and all its data? This cannot be undone.">Remove</button>
           <a href="/dashboard/missions" class="btn btn-grey">Back</a>
         </div>
       </div>
