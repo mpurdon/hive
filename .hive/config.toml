@@ -6,7 +6,7 @@ warn_threshold_usd = 5.0
 token = ""
 
 [hive]
-version = "0.24.0"
+version = "0.24.1"
 
 [llm]
 keys = { anthropic = "", google = "" }
@@ -18,4 +18,4 @@ max_bees = 5
 url = ""
 
 [session]
-current_comb = "cmb-fe74ca"
+current_comb = "cmb-b416da"

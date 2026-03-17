@@ -52,7 +52,7 @@ defmodule GiTF.Init do
   - `gitf ops deps add --op <op-id> --depends-on <other-op-id>` -- Add dependency between ops
   - `gitf ops deps list --op <op-id>` -- List op dependencies
 
-  ### Bee Management
+  ### Ghost Management
   - `gitf ghost spawn --op <op-id>` -- Spawn a ghost for a op (uses current sector)
   - `gitf ghost spawn --op <op-id> --sector <sector-id>` -- Spawn for specific sector
   - `gitf ghost spawn --op <op-id> --name "custom-name"` -- Spawn with custom name
@@ -68,7 +68,7 @@ defmodule GiTF.Init do
   - `gitf costs summary` -- View total costs and token usage
   - `gitf shell list` -- List active worktree shells
 
-  ### Comb Management
+  ### Sector Management
   - `gitf sector list` -- List registered sectors
   - `gitf sector use <name>` -- Set the current working sector
 
@@ -79,7 +79,7 @@ defmodule GiTF.Init do
   - **pr_branch**: Keeps the branch ready for a pull request
 
   ## Agent Profiles
-  Bees automatically check for expert agent files in the sector's `.claude/agents/` directory.
+  Ghosts automatically check for expert agent files in the sector's `.claude/agents/` directory.
   If a matching agent doesn't exist, the ghost generates one based on the op's technology.
   This ensures each ghost works with domain-specific expertise.
 

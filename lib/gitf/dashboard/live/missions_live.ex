@@ -10,6 +10,8 @@ defmodule GiTF.Dashboard.MissionsLive do
 
   use Phoenix.LiveView
 
+  import GiTF.Dashboard.Helpers
+
   @refresh_interval :timer.seconds(5)
 
   @impl true
@@ -55,6 +57,23 @@ defmodule GiTF.Dashboard.MissionsLive do
     {:noreply, assign(socket, :missions, load_quests())}
   end
 
+  def handle_event("start", %{"id" => id}, socket) do
+    case GiTF.Major.Orchestrator.start_quest(id) do
+      {:ok, _} ->
+        {:noreply,
+         socket
+         |> put_flash(:info, "Mission started.")
+         |> assign(:missions, load_quests())}
+
+      {:error, reason} ->
+        {:noreply, put_flash(socket, :error, "Failed to start: #{inspect(reason)}")}
+    end
+  end
+
+  def handle_event("navigate", %{"id" => id}, socket) do
+    {:noreply, push_navigate(socket, to: "/dashboard/missions/#{id}")}
+  end
+
   defp load_quests do
     GiTF.Missions.list()
     |> Enum.map(fn mission ->
@@ -71,14 +90,18 @@ defmodule GiTF.Dashboard.MissionsLive do
     <.live_component module={GiTF.Dashboard.AppLayout} id="layout" current_path={@current_path} flash={@flash}>
       <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:1.25rem">
         <h1 class="page-title" style="margin-bottom:0">Missions</h1>
-        <button phx-click="refresh" style="background:#1f6feb33; color:#58a6ff; border:1px solid #1f6feb55; padding:0.4rem 1rem; border-radius:6px; cursor:pointer; font-size:0.85rem">
-          Refresh
-        </button>
+        <div style="display:flex; gap:0.5rem">
+          <a href="/dashboard/missions/new" class="btn btn-green">New Mission</a>
+          <button phx-click="refresh" class="btn btn-blue">Refresh</button>
+        </div>
       </div>
 
       <div class="panel">
         <%= if @missions == [] do %>
-          <div class="empty">No missions created yet. Use <code>hive mission new &lt;name&gt;</code> to create one.</div>
+          <div class="empty">
+            No missions created yet.
+            <a href="/dashboard/missions/new" style="color:#58a6ff">Create your first mission</a>
+          </div>
         <% else %>
           <table>
             <thead>
@@ -89,6 +112,7 @@ defmodule GiTF.Dashboard.MissionsLive do
                 <th>Status</th>
                 <th>Phase</th>
                 <th>Jobs</th>
+                <th></th>
               </tr>
             </thead>
             <tbody>
@@ -96,12 +120,23 @@ defmodule GiTF.Dashboard.MissionsLive do
                 <tr class="detail-toggle" phx-click="toggle" phx-value-id={mission.id}>
                   <td style="width:1.5rem">{if MapSet.member?(@expanded, mission.id), do: "v", else: ">"}</td>
                   <td style="font-family:monospace; font-size:0.8rem">{mission.id}</td>
-                  <td>{Map.get(mission, :name, mission.goal)}</td>
+                  <td>
+                    <a href={"/dashboard/missions/#{mission.id}"} style="color:#58a6ff" phx-click="navigate" phx-value-id={mission.id}>
+                      {Map.get(mission, :name, mission.goal)}
+                    </a>
+                  </td>
                   <td><span class={"badge #{status_badge(Map.get(mission, :status, "unknown"))}"}>{Map.get(mission, :status, "unknown")}</span></td>
                   <td><span class={"badge #{phase_badge(Map.get(mission, :current_phase, "pending"))}"}>
                     {Map.get(mission, :current_phase, "pending")}
                   </span></td>
                   <td>{job_count(mission)}</td>
+                  <td>
+                    <%= if Map.get(mission, :status) == "pending" do %>
+                      <button phx-click="start" phx-value-id={mission.id} class="btn btn-green" style="padding:0.2rem 0.6rem; font-size:0.75rem">
+                        Start
+                      </button>
+                    <% end %>
+                  </td>
                 </tr>
                 <%= if MapSet.member?(@expanded, mission.id) do %>
                   <tr>
@@ -115,7 +150,7 @@ defmodule GiTF.Dashboard.MissionsLive do
                                 <th>Title</th>
                                 <th>Status</th>
                                 <th>Audit</th>
-                                <th>Bee ID</th>
+                                <th>Ghost ID</th>
                               </tr>
                             </thead>
                             <tbody>
@@ -153,27 +188,6 @@ defmodule GiTF.Dashboard.MissionsLive do
     </.live_component>
     """
   end
-
-  defp status_badge("completed"), do: "badge-green"
-  defp status_badge("done"), do: "badge-green"
-  defp status_badge("active"), do: "badge-blue"
-  defp status_badge("running"), do: "badge-blue"
-  defp status_badge("assigned"), do: "badge-blue"
-  defp status_badge("failed"), do: "badge-red"
-  defp status_badge("blocked"), do: "badge-yellow"
-  defp status_badge("pending"), do: "badge-grey"
-  defp status_badge(_), do: "badge-grey"
-  
-  defp phase_badge("research"), do: "badge-blue"
-  defp phase_badge("planning"), do: "badge-yellow"
-  defp phase_badge("implementation"), do: "badge-purple"
-  defp phase_badge("completed"), do: "badge-green"
-  defp phase_badge(_), do: "badge-grey"
-  
-  defp verification_badge("passed"), do: "badge-green"
-  defp verification_badge("failed"), do: "badge-red"
-  defp verification_badge("pending"), do: "badge-yellow"
-  defp verification_badge(_), do: "badge-grey"
 
   defp has_jobs?(%{ops: ops}) when is_list(ops), do: ops != []
   defp has_jobs?(_), do: false

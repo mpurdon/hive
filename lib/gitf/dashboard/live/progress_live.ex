@@ -36,7 +36,7 @@ defmodule GiTF.Dashboard.ProgressLive do
   def render(assigns) do
     ~H"""
     <.live_component module={GiTF.Dashboard.AppLayout} id="layout" current_path={@current_path} flash={@flash}>
-      <h1 class="page-title">Bee Progress</h1>
+      <h1 class="page-title">Ghost Progress</h1>
 
       <%= if @entries == [] do %>
         <div class="empty">No active ghosts.</div>
@@ -44,7 +44,7 @@ defmodule GiTF.Dashboard.ProgressLive do
         <table class="data-table">
           <thead>
             <tr>
-              <th>Bee ID</th>
+              <th>Ghost ID</th>
               <th>Tool</th>
               <th>File</th>
               <th>Message</th>

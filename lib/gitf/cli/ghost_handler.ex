@@ -20,7 +20,7 @@ defmodule GiTF.CLI.GhostHandler do
 
     case ghosts do
       [] ->
-        Format.info("No ghosts. Bees are spawned when the Major assigns ops.")
+        Format.info("No ghosts. Ghosts are spawned when the Major assigns ops.")
 
       ghosts ->
         headers = ["ID", "Name", "Status", "Job ID", "Context %"]
@@ -43,7 +43,7 @@ defmodule GiTF.CLI.GhostHandler do
 
   def dispatch([:ghost, :spawn], result, helpers) do
     if GiTF.Client.remote?() do
-      Format.error("Bee spawning is a server-side operation. Run it on the server directly.")
+      Format.error("Ghost spawning is a server-side operation. Run it on the server directly.")
     else
       op_id = helpers.result_get.(result, :options, :op)
       name = helpers.result_get.(result, :options, :name)
@@ -56,7 +56,7 @@ defmodule GiTF.CLI.GhostHandler do
 
             case GiTF.Ghosts.spawn_detached(op_id, sector.id, gitf_root, opts) do
               {:ok, ghost} ->
-                Format.success("Bee \"#{ghost.name}\" spawned (#{ghost.id})")
+                Format.success("Ghost \"#{ghost.name}\" spawned (#{ghost.id})")
 
               {:error, reason} ->
                 Format.error("Failed to spawn ghost: #{inspect(reason)}")
@@ -66,7 +66,7 @@ defmodule GiTF.CLI.GhostHandler do
               Format.error("Not inside a gitf workspace. Run `gitf init` first.")
 
             {:error, :not_found} ->
-              Format.error("Comb not found: #{sector_id}")
+              Format.error("Sector not found: #{sector_id}")
 
             {:error, reason} ->
               Format.error("Failed: #{inspect(reason)}")
@@ -88,10 +88,10 @@ defmodule GiTF.CLI.GhostHandler do
 
     case stop_result do
       :ok ->
-        Format.success("Bee #{ghost_id} stopped.")
+        Format.success("Ghost #{ghost_id} stopped.")
 
       {:error, :not_found} ->
-        Format.error("Bee not found or not running: #{ghost_id}")
+        Format.error("Ghost not found or not running: #{ghost_id}")
         Format.info("Hint: use `gitf ghost list` to see all ghosts.")
     end
   end
@@ -101,7 +101,7 @@ defmodule GiTF.CLI.GhostHandler do
 
     case GiTF.Runtime.ContextMonitor.get_usage_stats(ghost_id) do
       {:ok, stats} ->
-        IO.puts("Bee: #{ghost_id}")
+        IO.puts("Ghost: #{ghost_id}")
         IO.puts("Context Usage:")
         IO.puts("  Tokens used:  #{stats.tokens_used}")
         IO.puts("  Tokens limit: #{stats.tokens_limit || "unknown"}")
@@ -110,7 +110,7 @@ defmodule GiTF.CLI.GhostHandler do
         IO.puts("  Needs transfer: #{stats.needs_handoff}")
 
       {:error, :not_found} ->
-        Format.error("Bee not found: #{ghost_id}")
+        Format.error("Ghost not found: #{ghost_id}")
     end
   end
 

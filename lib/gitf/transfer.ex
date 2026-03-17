@@ -53,7 +53,7 @@ defmodule GiTF.Transfer do
   @doc """
   Reads a transfer link_msg and generates a briefing for the new ghost.
 
-  Takes a ghost_id and a transfer waggle_id, marks the link_msg as read,
+  Takes a ghost_id and a transfer link_id, marks the link_msg as read,
   and returns the transfer context as markdown.
   """
   @spec resume(String.t(), String.t()) :: {:ok, String.t()} | {:error, term()}
@@ -123,7 +123,7 @@ defmodule GiTF.Transfer do
         [
           "# Transfer Context for #{Map.get(ghost, :name, ghost.id)} (#{ghost.id})",
           "",
-          "## Bee Status",
+          "## Ghost Status",
           "- Status: #{ghost.status}",
           "- Created: #{ghost.inserted_at}",
           "",

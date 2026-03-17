@@ -5,11 +5,11 @@ defmodule GiTF.Plugin.Channel do
   Channels are long-running GenServers under `GiTF.Plugin.ChannelSupervisor`.
   They bridge PubSub <-> external services bidirectionally.
 
-  **Outbound** (hive -> you): Channel attaches telemetry handlers for
+  **Outbound** (factory -> you): Channel attaches telemetry handlers for
   configured events and forwards them as external messages. Uses
   `GiTF.Formattable` protocol for channel-appropriate formatting.
 
-  **Inbound** (you -> hive): Channel receives messages from external API,
+  **Inbound** (you -> factory): Channel receives messages from external API,
   parses them as commands, and publishes to PubSub or calls Manager.
   """
 

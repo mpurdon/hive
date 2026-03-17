@@ -138,7 +138,7 @@ defmodule GiTF.CLI.MissionHandler do
 
             if impl_jobs != [] do
               IO.puts("Implementation Jobs:")
-              headers = ["Job ID", "Title", "Status", "Bee", "Model"]
+              headers = ["Job ID", "Title", "Status", "Ghost", "Model"]
 
               rows =
                 Enum.map(impl_jobs, fn j ->

@@ -12,10 +12,10 @@ defmodule GiTF.Web.Layout do
         <title>GiTF Control Plane</title>
         <script src="https://cdn.tailwindcss.com"></script>
         <style>
-          .hive-scrollbar::-webkit-scrollbar { width: 6px; height: 6px; }
-          .hive-scrollbar::-webkit-scrollbar-track { background: rgb(31, 41, 55); border-radius: 3px; }
-          .hive-scrollbar::-webkit-scrollbar-thumb { background: rgb(75, 85, 99); border-radius: 3px; }
-          .hive-scrollbar::-webkit-scrollbar-thumb:hover { background: rgb(107, 114, 128); }
+          .factory-scrollbar::-webkit-scrollbar { width: 6px; height: 6px; }
+          .factory-scrollbar::-webkit-scrollbar-track { background: rgb(31, 41, 55); border-radius: 3px; }
+          .factory-scrollbar::-webkit-scrollbar-thumb { background: rgb(75, 85, 99); border-radius: 3px; }
+          .factory-scrollbar::-webkit-scrollbar-thumb:hover { background: rgb(107, 114, 128); }
         </style>
       </head>
       <body class="bg-gray-900 text-gray-100 font-mono antialiased">

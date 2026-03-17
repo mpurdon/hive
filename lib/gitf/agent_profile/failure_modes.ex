@@ -2,7 +2,7 @@ defmodule GiTF.AgentProfile.FailureModes do
   @moduledoc """
   Named anti-patterns (failure modes) injected into agent profile `.md` files.
 
-  Bees receive these as explicit "DO NOT" instructions so they avoid common
+  Ghosts receive these as explicit "DO NOT" instructions so they avoid common
   mistakes. When a ghost fails, the Tachikoma uses `learn_from_failure/2` to
   produce a new, structured anti-pattern from the failure analysis, which
   gets appended to the agent profile for future runs.

@@ -4,7 +4,7 @@ defmodule GiTF.PubSubBridge do
   
   This allows external systems (Dashboards, CLIs, LiveViews) to subscribe 
   to the "section:monitor" topic and receive real-time updates about:
-  - Bee lifecycle (spawn, complete, fail)
+  - Ghost lifecycle (spawn, complete, fail)
   - Job progress
   - Quest updates
   - Token usage

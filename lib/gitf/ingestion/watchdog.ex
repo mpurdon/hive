@@ -72,7 +72,7 @@ defmodule GiTF.Ingestion.Watchdog do
     title = Path.rootname(filename) |> String.replace("_", " ") |> String.capitalize()
     
     # We need a sector. For now, assume the current working directory's main sector.
-    # A robust implementation might parse "Comb: xxx" from the file.
+    # A robust implementation might parse "Sector: xxx" from the file.
     # We'll use the default/first sector found.
     
     case GiTF.Sector.list() do

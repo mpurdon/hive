@@ -66,13 +66,13 @@ defmodule GiTF.Client do
   def get_job(id), do: get("/api/v1/ops/#{id}") |> unwrap_data()
   def reset_job(id), do: post("/api/v1/ops/#{id}/reset") |> unwrap_data()
 
-  # Bees
+  # Ghosts
   def list_bees, do: get("/api/v1/ghosts") |> unwrap_data()
   def stop_ghost(id), do: post("/api/v1/ghosts/#{id}/stop") |> unwrap_ok()
   def complete_bee(id), do: post("/api/v1/ghosts/#{id}/complete") |> unwrap_ok()
   def fail_bee(id, reason \\ "unknown"), do: post("/api/v1/ghosts/#{id}/fail", %{reason: reason}) |> unwrap_ok()
 
-  # Combs
+  # Sectors
   def add_comb(path_or_url, opts \\ []) do
     post("/api/v1/sectors", %{path: path_or_url, opts: Map.new(opts)}) |> unwrap_data()
   end

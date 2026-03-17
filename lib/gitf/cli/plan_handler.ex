@@ -21,10 +21,19 @@ defmodule GiTF.CLI.PlanHandler do
     mode = GiTF.Runtime.ModelResolver.execution_mode()
 
     plan_result =
-      if mode in [:api, :ollama, :bedrock] do
-        GiTF.CLI.Chat.start(mission)
-      else
-        run_cli_planning(mission)
+      cond do
+        # TUI mode: launch Ratatouille with planning context for full
+        # keyboard-driven selection (arrow keys, shortcuts) — no raw mode hacks.
+        mode in [:api, :ollama, :bedrock] and System.get_env("GITF_NO_TUI") == nil ->
+          launch_tui_planning(mission)
+
+        # API mode without TUI: text-based chat fallback
+        mode in [:api, :ollama, :bedrock] ->
+          GiTF.CLI.Chat.start(mission)
+
+        # CLI mode: spawn Claude Code interactively
+        true ->
+          run_cli_planning(mission)
       end
 
     case plan_result do
@@ -36,6 +45,45 @@ defmodule GiTF.CLI.PlanHandler do
 
       :no_plan ->
         start_quest_execution(mission)
+    end
+  end
+
+  defp launch_tui_planning(mission) do
+    # Pass mission context to TUI via application env
+    Application.put_env(:gitf, :tui_planning_mission, mission)
+
+    try do
+      Process.flag(:trap_exit, true)
+
+      Ratatouille.run(GiTF.TUI.App,
+        quit_events: [{:key, Ratatouille.Constants.key(:ctrl_c)}]
+      )
+
+      # Check if the TUI produced a plan
+      case Application.get_env(:gitf, :tui_plan_result) do
+        {:ok, plan} ->
+          Application.delete_env(:gitf, :tui_plan_result)
+          {:ok, plan}
+
+        _ ->
+          Application.delete_env(:gitf, :tui_plan_result)
+          :no_plan
+      end
+    rescue
+      # Catch the MatchError thrown by Ratatouille when ExTermbox NIF fails to load in an escript
+      e in MatchError ->
+        GiTF.CLI.Format.warn("TUI failed to initialize (this is normal when running as a global escript).")
+        GiTF.CLI.Format.info("Falling back to CLI mode...")
+        run_cli_planning(mission)
+    after
+      Application.delete_env(:gitf, :tui_planning_mission)
+      Application.delete_env(:gitf, :tui_plan_result)
+
+      receive do
+        {:EXIT, _pid, _reason} -> :ok
+      after
+        100 -> :ok
+      end
     end
   end
 

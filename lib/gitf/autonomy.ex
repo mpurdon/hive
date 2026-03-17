@@ -147,7 +147,7 @@ defmodule GiTF.Autonomy do
       Enum.each(inconsistent, fn op ->
         Logger.warning("Reconciling inconsistent op state: #{op.id}")
         updated = Map.put(op, :status, "failed")
-        |> Map.put(:error_message, "Bee disappeared, marked as failed")
+        |> Map.put(:error_message, "Ghost disappeared, marked as failed")
         Archive.put(:ops, updated)
       end)
       

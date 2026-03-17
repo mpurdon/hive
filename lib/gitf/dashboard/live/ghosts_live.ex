@@ -1,6 +1,6 @@
 defmodule GiTF.Dashboard.GhostsLive do
   @moduledoc """
-  Bee monitoring page.
+  Ghost monitoring page.
 
   Displays all ghosts with their status, name, assigned op, and shell
   information. Subscribes to PubSub for live status updates. Working
@@ -8,6 +8,8 @@ defmodule GiTF.Dashboard.GhostsLive do
   """
 
   use Phoenix.LiveView
+
+  import GiTF.Dashboard.Helpers
 
   @refresh_interval :timer.seconds(5)
 
@@ -31,6 +33,28 @@ defmodule GiTF.Dashboard.GhostsLive do
     {:noreply, assign_data(socket)}
   end
 
+  @impl true
+  def handle_event("toggle", %{"id" => ghost_id}, socket) do
+    expanded = Map.get(socket.assigns, :expanded, MapSet.new())
+
+    expanded =
+      if MapSet.member?(expanded, ghost_id),
+        do: MapSet.delete(expanded, ghost_id),
+        else: MapSet.put(expanded, ghost_id)
+
+    {:noreply, assign(socket, :expanded, expanded)}
+  end
+
+  def handle_event("stop", %{"id" => ghost_id}, socket) do
+    case GiTF.Ghosts.stop(ghost_id) do
+      :ok ->
+        {:noreply, socket |> put_flash(:info, "Ghost stopped.") |> assign_data()}
+
+      {:error, reason} ->
+        {:noreply, put_flash(socket, :error, "Failed to stop: #{inspect(reason)}")}
+    end
+  end
+
   defp assign_data(socket) do
     ghosts = GiTF.Ghosts.list()
 
@@ -38,13 +62,14 @@ defmodule GiTF.Dashboard.GhostsLive do
     |> assign(:page_title, "Ghosts")
     |> assign(:current_path, "/ghosts")
     |> assign(:ghosts, ghosts)
+    |> Map.put_new(:expanded, MapSet.new())
   end
 
   @impl true
   def render(assigns) do
     ~H"""
     <.live_component module={GiTF.Dashboard.AppLayout} id="layout" current_path={@current_path} flash={@flash}>
-      <h1 class="page-title">Bee Agents</h1>
+      <h1 class="page-title">Ghost Agents</h1>
 
       <div class="panel">
         <%= if @ghosts == [] do %>
@@ -54,24 +79,33 @@ defmodule GiTF.Dashboard.GhostsLive do
             <thead>
               <tr>
                 <th></th>
+                <th></th>
                 <th>ID</th>
                 <th>Name</th>
                 <th>Status</th>
                 <th>Job ID</th>
                 <th>Model</th>
                 <th>Context</th>
+                <th></th>
               </tr>
             </thead>
             <tbody>
               <%= for ghost <- @ghosts do %>
-                <tr>
+                <tr class="detail-toggle" phx-click="toggle" phx-value-id={ghost.id}>
+                  <td style="width:1.5rem">{if MapSet.member?(Map.get(assigns, :expanded, MapSet.new()), ghost.id), do: "v", else: ">"}</td>
                   <td style="width:1rem">
                     <span style={"display:inline-block; width:8px; height:8px; border-radius:50%; background:#{status_dot_color(Map.get(ghost, :status, "unknown"))}"} class={if Map.get(ghost, :status) == "working", do: "pulse"}></span>
                   </td>
-                  <td style="font-family:monospace; font-size:0.8rem">{ghost.id}</td>
+                  <td style="font-family:monospace; font-size:0.8rem">{short_id(ghost.id)}</td>
                   <td>{Map.get(ghost, :name, "-")}</td>
                   <td><span class={"badge #{status_badge(Map.get(ghost, :status, "unknown"))}"}>{Map.get(ghost, :status, "unknown")}</span></td>
-                  <td style="font-family:monospace; font-size:0.8rem">{Map.get(ghost, :op_id, "-")}</td>
+                  <td style="font-family:monospace; font-size:0.8rem">
+                    <%= if Map.get(ghost, :op_id) do %>
+                      <a href={"/dashboard/ops/#{ghost.op_id}"}>{short_id(ghost.op_id)}</a>
+                    <% else %>
+                      -
+                    <% end %>
+                  </td>
                   <td style="font-size:0.8rem">{Map.get(ghost, :assigned_model, "-")}</td>
                   <td>
                     <%= if Map.has_key?(ghost, :context_percentage) do %>
@@ -82,7 +116,46 @@ defmodule GiTF.Dashboard.GhostsLive do
                       <span class="badge badge-grey">-</span>
                     <% end %>
                   </td>
+                  <td>
+                    <%= if Map.get(ghost, :status) == "working" do %>
+                      <button phx-click="stop" phx-value-id={ghost.id} class="btn btn-red" style="padding:0.2rem 0.6rem; font-size:0.75rem">
+                        Stop
+                      </button>
+                    <% end %>
+                  </td>
                 </tr>
+                <%= if MapSet.member?(Map.get(assigns, :expanded, MapSet.new()), ghost.id) do %>
+                  <tr>
+                    <td colspan="9" style="padding:0">
+                      <div class="detail-content">
+                        <dl class="metadata-grid">
+                          <dt>Full ID</dt><dd style="font-family:monospace; font-size:0.8rem">{ghost.id}</dd>
+                          <dt>Shell</dt><dd style="font-family:monospace; font-size:0.8rem">{Map.get(ghost, :shell_path, "-")}</dd>
+                          <dt>Model</dt><dd>{Map.get(ghost, :assigned_model, "-")}</dd>
+                          <dt>Op</dt>
+                          <dd>
+                            <%= if Map.get(ghost, :op_id) do %>
+                              <a href={"/dashboard/ops/#{ghost.op_id}"} style="font-family:monospace; font-size:0.8rem">{ghost.op_id}</a>
+                            <% else %>
+                              -
+                            <% end %>
+                          </dd>
+                          <dt>Context</dt>
+                          <dd>
+                            <%= if Map.has_key?(ghost, :context_percentage) do %>
+                              <div class="cost-bar" style="width:120px; margin-top:0.25rem">
+                                <div class="cost-bar-fill" style={"width:#{min(ghost.context_percentage, 100)}%; background:#{if ghost.context_percentage > 40, do: "#f85149", else: "#3fb950"}"}></div>
+                              </div>
+                              <span style="font-size:0.8rem">{Float.round(ghost.context_percentage / 1, 1)}%</span>
+                            <% else %>
+                              -
+                            <% end %>
+                          </dd>
+                        </dl>
+                      </div>
+                    </td>
+                  </tr>
+                <% end %>
               <% end %>
             </tbody>
           </table>
@@ -91,14 +164,6 @@ defmodule GiTF.Dashboard.GhostsLive do
     </.live_component>
     """
   end
-
-  defp status_badge("working"), do: "badge-green"
-  defp status_badge("starting"), do: "badge-blue"
-  defp status_badge("idle"), do: "badge-grey"
-  defp status_badge("paused"), do: "badge-yellow"
-  defp status_badge("stopped"), do: "badge-grey"
-  defp status_badge("crashed"), do: "badge-red"
-  defp status_badge(_), do: "badge-grey"
 
   defp status_dot_color("working"), do: "#3fb950"
   defp status_dot_color("starting"), do: "#58a6ff"

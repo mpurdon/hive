@@ -5,6 +5,7 @@ defmodule GiTF.Intel.Retry do
 
   alias GiTF.Intel.FailureAnalysis
   alias GiTF.Archive
+  alias GiTF.Runtime.ModelResolver
 
   @doc """
   Retry a failed op with an intelligent strategy.
@@ -75,12 +76,9 @@ defmodule GiTF.Intel.Retry do
   end
 
   defp retry_with_different_model(op, analysis) do
-    # Switch to a more capable model
-    new_model = case Map.get(op, :model) do
-      "claude-haiku" -> "claude-sonnet"
-      "claude-sonnet" -> "claude-opus"
-      _ -> "claude-opus"
-    end
+    # Escalate to a more capable model using configured model tiers
+    current = Map.get(op, :model, "haiku")
+    new_model = ModelResolver.escalate(current) || ModelResolver.resolve("opus")
 
     retry_job(op, :different_model, %{model: new_model, feedback: analysis[:feedback]})
   end

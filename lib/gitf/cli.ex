@@ -21,6 +21,9 @@ defmodule GiTF.CLI do
         # Interactive mode: launch TUI
         launch_tui()
 
+      {:mcp_serve} ->
+        run_mcp_server()
+
       {:cli, argv} ->
         # Has subcommands, run classic CLI
         run_cli(argv)
@@ -32,8 +35,15 @@ defmodule GiTF.CLI do
       ["-c" | rest] when rest != [] -> {:cmd, rest}
       ["--cmd" | rest] when rest != [] -> {:cmd, rest}
       [] -> :tui
+      ["mcp-serve" | _] -> {:mcp_serve}
       _ -> {:cli, argv}
     end
+  end
+
+  defp run_mcp_server do
+    # App is already started by the escript boot. Just run the server.
+    # Boot-time log noise on stdout is filtered by the bin/gitf-mcp wrapper.
+    GiTF.MCPServer.run()
   end
 
   defp launch_tui do
@@ -52,11 +62,17 @@ defmodule GiTF.CLI do
         start_major()
 
         Process.flag(:trap_exit, true)
-        result = Ratatouille.run(GiTF.TUI.App,
-          quit_events: [{:key, Ratatouille.Constants.key(:ctrl_c)}]
-        )
-        File.write("/tmp/gitf_tui_debug.log",
-          "[#{DateTime.utc_now()}] Ratatouille.run returned: #{inspect(result)}\n", [:append])
+        try do
+          result = Ratatouille.run(GiTF.TUI.App,
+            quit_events: [{:key, Ratatouille.Constants.key(:ctrl_c)}]
+          )
+          File.write("/tmp/gitf_tui_debug.log",
+            "[#{DateTime.utc_now()}] Ratatouille.run returned: #{inspect(result)}\n", [:append])
+        rescue
+          e in MatchError ->
+            Format.warn("TUI failed to initialize (this is normal when running as a global escript).")
+            Format.info("Please use standard CLI commands instead (e.g. gitf --help).")
+        end
 
         # Check if any exit messages were trapped
         receive do
@@ -844,7 +860,7 @@ defmodule GiTF.CLI do
         Format.info("System Status:")
         IO.puts("  Health: #{status.health.status}")
         IO.puts("  Quests: #{status.metrics.missions.active} active, #{status.metrics.missions.completed} completed")
-        IO.puts("  Bees: #{status.metrics.ghosts.active} active")
+        IO.puts("  Ghosts: #{status.metrics.ghosts.active} active")
         IO.puts("  Quality: #{Float.round(status.metrics.quality.average, 1)}")
         IO.puts("  Cost: $#{Float.round(status.metrics.costs.total, 2)}")
         
@@ -971,7 +987,7 @@ defmodule GiTF.CLI do
       opts = if name, do: [name: name], else: []
 
       case GiTF.Client.add_comb(path, opts) do
-        {:ok, sector} -> Format.success("Comb \"#{sector.name}\" registered (#{sector.id})")
+        {:ok, sector} -> Format.success("Sector \"#{sector.name}\" registered (#{sector.id})")
         {:error, reason} -> Format.error("Failed to add sector: #{inspect(reason)}")
       end
     else
@@ -1022,7 +1038,7 @@ defmodule GiTF.CLI do
 
         case GiTF.Onboarding.onboard(path, opts) do
           {:ok, result} ->
-            Format.success("Comb \"#{result.sector.name}\" auto-configured (#{result.sector.id})")
+            Format.success("Sector \"#{result.sector.name}\" auto-configured (#{result.sector.id})")
             Format.info("  Language: #{result.project_info.language}")
             if result.project_info.framework, do: Format.info("  Framework: #{result.project_info.framework}")
             if result.project_info.validation_command, do: Format.info("  Validation: #{result.project_info.validation_command}")
@@ -1051,7 +1067,7 @@ defmodule GiTF.CLI do
 
         case GiTF.Sector.add(path, opts) do
           {:ok, sector} ->
-            Format.success("Comb \"#{sector.name}\" registered (#{sector.id})")
+            Format.success("Sector \"#{sector.name}\" registered (#{sector.id})")
 
           {:error, :path_not_found} ->
             Format.error("Path does not exist: #{path}")
@@ -1109,10 +1125,10 @@ defmodule GiTF.CLI do
 
     case remove_result do
       :ok ->
-        Format.success("Comb \"#{name}\" removed.")
+        Format.success("Sector \"#{name}\" removed.")
 
       {:ok, sector} ->
-        Format.success("Comb \"#{sector.name}\" removed.")
+        Format.success("Sector \"#{sector.name}\" removed.")
 
       {:error, :not_found} ->
         show_not_found_error(:sector, name)
@@ -1188,7 +1204,7 @@ defmodule GiTF.CLI do
 
     case GiTF.Sector.rename(name, new_name) do
       {:ok, sector} ->
-        Format.success("Comb renamed to \"#{sector.name}\" (#{sector.id})")
+        Format.success("Sector renamed to \"#{sector.name}\" (#{sector.id})")
 
       {:error, :not_found} ->
         show_not_found_error(:sector, name)
@@ -1263,7 +1279,7 @@ defmodule GiTF.CLI do
         Format.info("No active shells. Use `gitf shell list` after spawning a ghost.")
 
       shells ->
-        headers = ["ID", "Bee ID", "Comb ID", "Branch", "Path"]
+        headers = ["ID", "Ghost ID", "Sector ID", "Branch", "Path"]
 
         rows =
           Enum.map(shells, fn c ->
@@ -1354,7 +1370,7 @@ defmodule GiTF.CLI do
 
     case ghosts do
       [] ->
-        Format.info("No ghosts. Bees are spawned when the Major assigns ops.")
+        Format.info("No ghosts. Ghosts are spawned when the Major assigns ops.")
 
       ghosts ->
         headers = ["ID", "Name", "Status", "Job ID", "Context %"]
@@ -1387,7 +1403,7 @@ defmodule GiTF.CLI do
 
           case GiTF.Ghosts.spawn_detached(op_id, sector.id, gitf_root, opts) do
             {:ok, ghost} ->
-              Format.success("Bee \"#{ghost.name}\" spawned (#{ghost.id})")
+              Format.success("Ghost \"#{ghost.name}\" spawned (#{ghost.id})")
 
             {:error, reason} ->
               Format.error("Failed to spawn ghost: #{inspect(reason)}")
@@ -1418,7 +1434,7 @@ defmodule GiTF.CLI do
 
     case stop_result do
       :ok ->
-        Format.success("Bee #{ghost_id} stopped.")
+        Format.success("Ghost #{ghost_id} stopped.")
 
       {:error, :not_found} ->
         show_not_found_error(:ghost, ghost_id)
@@ -1430,7 +1446,7 @@ defmodule GiTF.CLI do
 
     if GiTF.Client.remote?() do
       case GiTF.Client.complete_bee(ghost_id) do
-        :ok -> Format.success("Bee #{ghost_id} marked as completed.")
+        :ok -> Format.success("Ghost #{ghost_id} marked as completed.")
         {:error, reason} -> Format.error("Failed: #{inspect(reason)}")
       end
     else
@@ -1450,7 +1466,7 @@ defmodule GiTF.CLI do
             )
           end
 
-          Format.success("Bee #{ghost_id} marked as completed.")
+          Format.success("Ghost #{ghost_id} marked as completed.")
 
         {:error, _} ->
           show_not_found_error(:ghost, ghost_id)
@@ -1464,7 +1480,7 @@ defmodule GiTF.CLI do
 
     if GiTF.Client.remote?() do
       case GiTF.Client.fail_bee(ghost_id, reason) do
-        :ok -> Format.success("Bee #{ghost_id} marked as failed: #{reason}")
+        :ok -> Format.success("Ghost #{ghost_id} marked as failed: #{reason}")
         {:error, err} -> Format.error("Failed: #{inspect(err)}")
       end
     else
@@ -1477,7 +1493,7 @@ defmodule GiTF.CLI do
             GiTF.Link.send(ghost_id, "major", "job_failed", "Job #{ghost.op_id} failed: #{reason}")
           end
 
-          Format.success("Bee #{ghost_id} marked as failed: #{reason}")
+          Format.success("Ghost #{ghost_id} marked as failed: #{reason}")
 
         {:error, _} ->
           show_not_found_error(:ghost, ghost_id)
@@ -1509,7 +1525,7 @@ defmodule GiTF.CLI do
 
     case GiTF.Runtime.ContextMonitor.get_usage_stats(ghost_id) do
       {:ok, stats} ->
-        IO.puts("Bee: #{ghost_id}")
+        IO.puts("Ghost: #{ghost_id}")
         IO.puts("Context Usage:")
         IO.puts("  Tokens used:  #{stats.tokens_used}")
         IO.puts("  Tokens limit: #{stats.tokens_limit || "unknown"}")
@@ -1687,7 +1703,7 @@ defmodule GiTF.CLI do
         Format.info("No missions. Create one with `gitf mission \"<goal>\"`.")
 
       missions ->
-        headers = ["ID", "Name", "Phase", "Status", "Comb"]
+        headers = ["ID", "Name", "Phase", "Status", "Sector"]
 
         rows =
           Enum.map(missions, fn q ->
@@ -1718,7 +1734,7 @@ defmodule GiTF.CLI do
         if mission[:sector_id] do
           sector_name =
             if GiTF.Client.remote?(), do: mission[:sector_id], else: resolve_comb_name(mission[:sector_id])
-          IO.puts("Comb:   #{sector_name}")
+          IO.puts("Sector: #{sector_name}")
         end
 
         if mission[:goal] do
@@ -1743,7 +1759,7 @@ defmodule GiTF.CLI do
             Format.info("No ops in this mission.")
 
           ops ->
-            headers = ["Job ID", "Title", "Status", "Bee ID"]
+            headers = ["Job ID", "Title", "Status", "Ghost ID"]
 
             rows =
               Enum.map(ops, fn j ->
@@ -1774,7 +1790,7 @@ defmodule GiTF.CLI do
         Format.info("No ops found.")
 
       ops ->
-        headers = ["ID", "Title", "Status", "Quest ID", "Bee ID"]
+        headers = ["ID", "Title", "Status", "Quest ID", "Ghost ID"]
 
         rows =
           Enum.map(ops, fn j ->
@@ -1799,8 +1815,8 @@ defmodule GiTF.CLI do
         IO.puts("Title:       #{op.title}")
         IO.puts("Status:      #{op.status}")
         IO.puts("Quest ID:    #{op[:mission_id]}")
-        IO.puts("Comb ID:     #{op[:sector_id]}")
-        IO.puts("Bee ID:      #{op[:ghost_id] || "-"}")
+        IO.puts("Sector ID:   #{op[:sector_id]}")
+        IO.puts("Ghost ID:    #{op[:ghost_id] || "-"}")
         IO.puts("Created:     #{op[:inserted_at]}")
         IO.puts("")
 
@@ -1926,7 +1942,7 @@ defmodule GiTF.CLI do
     by_bee = summary[:by_bee] || %{}
     if map_size(by_bee) > 0 do
       IO.puts("By ghost:")
-      headers = ["Bee ID", "Cost", "Input Tokens", "Output Tokens"]
+      headers = ["Ghost ID", "Cost", "Input Tokens", "Output Tokens"]
 
       rows =
         Enum.map(by_bee, fn {ghost_id, data} ->
@@ -2283,7 +2299,7 @@ defmodule GiTF.CLI do
         Format.info("No active shell for ghost #{ghost_id}")
       end
     else
-      {:error, :not_found} -> Format.error("Bee or op not found: #{ghost_id}")
+      {:error, :not_found} -> Format.error("Ghost or op not found: #{ghost_id}")
       {:error, reason} -> Format.error("Failed: #{inspect(reason)}")
     end
   end
@@ -2307,7 +2323,7 @@ defmodule GiTF.CLI do
 
         is_nil(Map.get(sector, :github_owner)) || is_nil(Map.get(sector, :github_repo)) ->
           Format.error(
-            "Comb #{sector.name} has no GitHub config. Use --github-owner and --github-repo when adding."
+            "Sector #{sector.name} has no GitHub config. Use --github-owner and --github-repo when adding."
           )
 
         true ->
@@ -2317,7 +2333,7 @@ defmodule GiTF.CLI do
           end
       end
     else
-      {:error, :not_found} -> Format.error("Bee or op not found: #{ghost_id}")
+      {:error, :not_found} -> Format.error("Ghost or op not found: #{ghost_id}")
       {:error, reason} -> Format.error("Failed: #{inspect(reason)}")
     end
   end
@@ -2615,24 +2631,14 @@ defmodule GiTF.CLI do
   end
 
   defp do_start_dashboard do
-    case GiTF.Dashboard.Endpoint.start_link() do
-      {:ok, _pid} ->
-        port =
-          Application.get_env(:gitf, GiTF.Dashboard.Endpoint)
-          |> Keyword.get(:http, [])
-          |> Keyword.get(:port, 4040)
+    port =
+      Application.get_env(:gitf, GiTF.Web.Endpoint)
+      |> Keyword.get(:http, [])
+      |> Keyword.get(:port, 4000)
 
-        url = "http://localhost:#{port}"
-        Format.success("Dashboard running at #{url}")
-        Format.info("Press Ctrl+C to stop.")
-        Process.sleep(:infinity)
-
-      {:error, {:already_started, _pid}} ->
-        Format.warn("Dashboard is already running.")
-
-      {:error, reason} ->
-        Format.error("Failed to start dashboard: #{inspect(reason)}")
-    end
+    url = "http://localhost:#{port}/dashboard"
+    Format.success("Dashboard available at #{url}")
+    Format.info("The web server runs on port #{port} (shared with the API).")
   end
 
   defp discover_nearby_repos do
@@ -2670,9 +2676,9 @@ defmodule GiTF.CLI do
   defp build_optimus! do
     Optimus.new!(
       name: "gitf",
-      description: "The GiTF - Multi-agent orchestration for Claude Code",
+      description: "The GiTF - Multi-agent orchestration for AI coding assistants",
       version: GiTF.version(),
-      about: "Coordinate multiple Claude Code agents working on a shared codebase.",
+      about: "Coordinate multiple AI coding assistants working on a shared codebase.",
       subcommands: [
         medic: [
           name: "medic",
@@ -2830,7 +2836,7 @@ defmodule GiTF.CLI do
                 sector: [
                   short: "-c",
                   long: "--sector",
-                  help: "Comb ID (repository) to work in (defaults to current sector)",
+                  help: "Sector ID (repository) to work in (defaults to current sector)",
                   parser: :string,
                   required: false
                 ],
@@ -2849,7 +2855,7 @@ defmodule GiTF.CLI do
               options: [
                 id: [
                   long: "--id",
-                  help: "Bee ID to stop",
+                  help: "Ghost ID to stop",
                   parser: :string,
                   required: true
                 ]
@@ -2860,8 +2866,8 @@ defmodule GiTF.CLI do
               about: "Mark a ghost as completed (used by wrapper scripts)",
               args: [
                 ghost_id: [
-                  value_name: "BEE_ID",
-                  help: "Bee ID to mark as completed",
+                  value_name: "GHOST_ID",
+                  help: "Ghost ID to mark as completed",
                   required: true,
                   parser: :string
                 ]
@@ -2872,8 +2878,8 @@ defmodule GiTF.CLI do
               about: "Mark a ghost as failed (used by wrapper scripts)",
               args: [
                 ghost_id: [
-                  value_name: "BEE_ID",
-                  help: "Bee ID to mark as failed",
+                  value_name: "GHOST_ID",
+                  help: "Ghost ID to mark as failed",
                   required: true,
                   parser: :string
                 ]
@@ -2893,7 +2899,7 @@ defmodule GiTF.CLI do
                 "Revive a dead ghost — spawn a new ghost into its existing worktree to finish the work",
               args: [
                 ghost_id: [
-                  value_name: "BEE_ID",
+                  value_name: "GHOST_ID",
                   help: "ID of the dead ghost whose worktree to reuse",
                   required: true,
                   parser: :string
@@ -2905,8 +2911,8 @@ defmodule GiTF.CLI do
               about: "Show context usage statistics for a ghost",
               args: [
                 ghost_id: [
-                  value_name: "BEE_ID",
-                  help: "Bee ID to check context usage",
+                  value_name: "GHOST_ID",
+                  help: "Ghost ID to check context usage",
                   required: true,
                   parser: :string
                 ]
@@ -2933,7 +2939,7 @@ defmodule GiTF.CLI do
                 sector: [
                   short: "-c",
                   long: "--sector",
-                  help: "Comb ID (defaults to current sector)",
+                  help: "Sector ID (defaults to current sector)",
                   parser: :string,
                   required: false
                 ]
@@ -3125,7 +3131,7 @@ defmodule GiTF.CLI do
                 sector: [
                   short: "-c",
                   long: "--sector",
-                  help: "Comb ID for the op (defaults to current sector)",
+                  help: "Sector ID for the op (defaults to current sector)",
                   parser: :string,
                   required: false
                 ],
@@ -3295,7 +3301,7 @@ defmodule GiTF.CLI do
                 ghost: [
                   short: "-b",
                   long: "--ghost",
-                  help: "Bee ID to record costs for",
+                  help: "Ghost ID to record costs for",
                   parser: :string,
                   required: false
                 ],
@@ -3364,7 +3370,7 @@ defmodule GiTF.CLI do
             name: [
               short: "-n",
               long: "--name",
-              help: "Comb name (defaults to directory name)",
+              help: "Sector name (defaults to directory name)",
               parser: :string,
               required: false
             ],
@@ -3477,7 +3483,7 @@ defmodule GiTF.CLI do
             sector: [
               short: "-c",
               long: "--sector",
-              help: "Comb ID for baseline management",
+              help: "Sector ID for baseline management",
               parser: :string,
               required: false
             ]
@@ -3504,7 +3510,7 @@ defmodule GiTF.CLI do
             sector: [
               short: "-c",
               long: "--sector",
-              help: "Comb ID for insights or learning",
+              help: "Sector ID for insights or learning",
               parser: :string,
               required: false
             ]
@@ -3541,7 +3547,7 @@ defmodule GiTF.CLI do
             sector: [
               short: "-c",
               long: "--sector",
-              help: "Comb ID for issue prediction",
+              help: "Sector ID for issue prediction",
               parser: :string,
               required: false
             ]
@@ -3588,7 +3594,7 @@ defmodule GiTF.CLI do
                 ghost: [
                   short: "-b",
                   long: "--ghost",
-                  help: "Bee ID to create transfer for",
+                  help: "Ghost ID to create transfer for",
                   parser: :string,
                   required: true
                 ]
@@ -3601,7 +3607,7 @@ defmodule GiTF.CLI do
                 ghost: [
                   short: "-b",
                   long: "--ghost",
-                  help: "Bee ID to show transfer for",
+                  help: "Ghost ID to show transfer for",
                   parser: :string,
                   required: true
                 ]
@@ -3611,7 +3617,7 @@ defmodule GiTF.CLI do
         ],
         brief: [
           name: "brief",
-          about: "Output context prompt for a Major or Bee session",
+          about: "Output context prompt for a Major or Ghost session",
           flags: [
             queen: [
               long: "--queen",
@@ -3622,7 +3628,7 @@ defmodule GiTF.CLI do
             ghost: [
               short: "-b",
               long: "--ghost",
-              help: "Bee ID to brief with op context",
+              help: "Ghost ID to brief with op context",
               parser: :string,
               required: false
             ]
@@ -3656,7 +3662,7 @@ defmodule GiTF.CLI do
                 ghost: [
                   short: "-b",
                   long: "--ghost",
-                  help: "Bee ID to check (optional, checks all if omitted)",
+                  help: "Ghost ID to check (optional, checks all if omitted)",
                   parser: :string,
                   required: false
                 ]
@@ -3671,7 +3677,7 @@ defmodule GiTF.CLI do
             ghost: [
               short: "-b",
               long: "--ghost",
-              help: "Bee ID to validate",
+              help: "Ghost ID to validate",
               parser: :string,
               required: true
             ]
@@ -3688,7 +3694,7 @@ defmodule GiTF.CLI do
                 ghost: [
                   short: "-b",
                   long: "--ghost",
-                  help: "Bee ID to create PR for",
+                  help: "Ghost ID to create PR for",
                   parser: :string,
                   required: true
                 ]
@@ -3701,7 +3707,7 @@ defmodule GiTF.CLI do
                 sector: [
                   short: "-c",
                   long: "--sector",
-                  help: "Comb ID (defaults to current sector)",
+                  help: "Sector ID (defaults to current sector)",
                   parser: :string,
                   required: false
                 ]
@@ -3714,7 +3720,7 @@ defmodule GiTF.CLI do
                 sector: [
                   short: "-c",
                   long: "--sector",
-                  help: "Comb ID to sync (defaults to current sector)",
+                  help: "Sector ID to sync (defaults to current sector)",
                   parser: :string,
                   required: false
                 ]

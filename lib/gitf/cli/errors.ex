@@ -70,7 +70,7 @@ defmodule GiTF.CLI.Errors do
 
   def format_error(:bee_not_found, %{ghost_id: id}) do
     """
-    Error: Bee not found: #{id}
+    Error: Ghost not found: #{id}
 
     The ghost may have already stopped or crashed.
 
@@ -84,7 +84,7 @@ defmodule GiTF.CLI.Errors do
 
   def format_error(:comb_not_found, %{sector_id: id}) do
     """
-    Error: Comb not found: #{id}
+    Error: Sector not found: #{id}
 
     The sector doesn't exist or may have been removed.
 
@@ -130,7 +130,7 @@ defmodule GiTF.CLI.Errors do
 
   def format_error(:context_overflow, %{ghost_id: id, percentage: pct}) do
     """
-    Warning: Bee context usage critical: #{id}
+    Warning: Ghost context usage critical: #{id}
 
     Context usage: #{Float.round(pct, 1)}% (threshold: 45%)
 

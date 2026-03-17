@@ -1,5 +1,5 @@
 defmodule GiTF do
-  @moduledoc "The GiTF - Multi-agent orchestration for Claude Code."
+  @moduledoc "The GiTF - Multi-agent orchestration for AI coding assistants."
 
   @version Mix.Project.config()[:version]
 

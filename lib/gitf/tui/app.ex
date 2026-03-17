@@ -38,7 +38,10 @@ defmodule GiTF.TUI.App do
 
   @impl true
   def init(_context) do
-    %{
+    planning_mission = Application.get_env(:gitf, :tui_planning_mission)
+    Application.delete_env(:gitf, :tui_planning_mission)
+
+    model = %{
       input: Input.new(),
       chat: Chat.new(),
       activity: Activity.new(),
@@ -58,8 +61,25 @@ defmodule GiTF.TUI.App do
       agent_identities: [],
       event_store_events: [],
       stats: nil,
-      refresh_count: 0
+      refresh_count: 0,
+      # Planning mode
+      planning_mission: planning_mission,
+      select: nil
     }
+
+    if planning_mission do
+      # Auto-start the planning conversation
+      chat = Chat.add_message(model.chat, :system,
+        "Planning: #{planning_mission.goal || planning_mission.name}")
+      prompt = "I want to plan: \"#{planning_mission.goal}\". " <>
+        "Start by exploring the codebase to understand the current state, " <>
+        "then ask me clarifying questions about what I need."
+      model = %{model | chat: chat, busy: true, chat_scroll: 0}
+      cmd = Command.new(fn -> query_claude(prompt, nil) end, :chat_response)
+      {model, cmd}
+    else
+      model
+    end
   end
 
   @impl true
@@ -284,6 +304,24 @@ defmodule GiTF.TUI.App do
   defp handle_plan_confirm(model) do
     specs = Plan.to_confirmed_specs(model.plan)
     mission_id = model.plan.mission_id
+
+    # If launched from CLI planning, store the result for the CLI to pick up
+    if model.planning_mission do
+      plan_result = %{
+        name: model.plan.goal || "",
+        summary: "",
+        ops: Enum.map(specs, fn spec ->
+          %{
+            "title" => spec["title"] || spec[:title] || "",
+            "description" => spec["description"] || spec[:description] || "",
+            "op_type" => spec["op_type"] || spec[:op_type] || "implementation",
+            "depends_on" => spec["depends_on_indices"] || spec[:depends_on_indices] || []
+          }
+        end)
+      }
+      Application.put_env(:gitf, :tui_plan_result, {:ok, plan_result})
+    end
+
     chat = Chat.add_message(model.chat, :system, "Confirming plan...")
     plan = %{model.plan | mode: :confirmed}
     model = %{model | chat: chat, plan: plan, busy: true, chat_scroll: chat_bottom(chat)}
@@ -495,10 +533,10 @@ defmodule GiTF.TUI.App do
     IMPORTANT: Do NOT use markdown, tables, bold, headers, or emojis. Plain text only.
 
     GiTF concepts:
-    - Comb: a managed git repository (has id, name, path, repo_url)
+    - Sector: a managed git repository (has id, name, path, repo_url)
     - Quest: a high-level objective broken into phases (research > requirements > design > review > planning > implementation > validation)
     - Job: a discrete unit of work within a mission
-    - Bee: an autonomous AI coding agent that works on ops in isolated git worktrees (shells)
+    - Ghost: an autonomous AI coding agent that works on ops in isolated git worktrees (shells)
     - Link: a message between agents (like ghost-to-queen status updates)
     - Major: the central coordinator that manages missions, spawns ghosts, handles retries
     - Tachikoma: autonomous watchdog that monitors quality
@@ -515,7 +553,7 @@ defmodule GiTF.TUI.App do
     Workspace: #{cwd}
 
     Current section state:
-    Bees: #{bee_summary}
+    Ghosts: #{bee_summary}
     Quests: #{quest_summary}
     Jobs: #{job_summary}
 

@@ -137,14 +137,14 @@ defmodule GiTF.Dashboard.CostsLive do
       </div>
 
       <div class="panel">
-        <div class="panel-title">By Bee</div>
+        <div class="panel-title">By Ghost</div>
         <%= if @summary.by_bee == %{} do %>
           <div class="empty">No cost data recorded yet.</div>
         <% else %>
           <table>
             <thead>
               <tr>
-                <th>Bee ID</th>
+                <th>Ghost ID</th>
                 <th style="text-align:right">Cost</th>
                 <th style="text-align:right">Input Tokens</th>
                 <th style="text-align:right">Output Tokens</th>

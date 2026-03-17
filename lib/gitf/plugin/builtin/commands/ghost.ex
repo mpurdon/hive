@@ -33,7 +33,7 @@ defmodule GiTF.Plugin.Builtin.Commands.Bee do
   defp do_list(ctx) do
     case GiTF.Ghosts.list() do
       [] ->
-        send_output(ctx, "No ghosts. Bees are spawned when ops are assigned.")
+        send_output(ctx, "No ghosts. Ghosts are spawned when ops are assigned.")
 
       ghosts ->
         lines =
@@ -41,7 +41,7 @@ defmodule GiTF.Plugin.Builtin.Commands.Bee do
             "  #{b.id}  #{b.name}  [#{b.status}]  #{b.op_id || "-"}"
           end)
 
-        send_output(ctx, ["Bees:", "" | lines] |> Enum.join("\n"))
+        send_output(ctx, ["Ghosts:", "" | lines] |> Enum.join("\n"))
     end
   end
 
@@ -51,7 +51,7 @@ defmodule GiTF.Plugin.Builtin.Commands.Bee do
          sector_id when is_binary(sector_id) <- op.sector_id do
       case GiTF.Ghosts.spawn_detached(op_id, sector_id, gitf_root) do
         {:ok, ghost} ->
-          send_output(ctx, "Bee \"#{ghost.name}\" spawned (#{ghost.id})")
+          send_output(ctx, "Ghost \"#{ghost.name}\" spawned (#{ghost.id})")
 
         {:error, reason} ->
           send_output(ctx, "Failed to spawn: #{inspect(reason)}")
@@ -64,8 +64,8 @@ defmodule GiTF.Plugin.Builtin.Commands.Bee do
 
   defp do_stop(ghost_id, ctx) do
     case GiTF.Ghosts.stop(ghost_id) do
-      :ok -> send_output(ctx, "Bee #{ghost_id} stopped.")
-      {:error, :not_found} -> send_output(ctx, "Bee not found: #{ghost_id}")
+      :ok -> send_output(ctx, "Ghost #{ghost_id} stopped.")
+      {:error, :not_found} -> send_output(ctx, "Ghost not found: #{ghost_id}")
     end
   end
 

@@ -28,7 +28,7 @@ defmodule GiTF.AuditContract do
   Builds a contract for a op by merging layers:
 
   1. Defaults
-  2. Comb-level `quality_thresholds`
+  2. Sector-level `quality_thresholds`
   3. Job-level `verification_contract`
   4. Risk-based adjustments (high/critical adds :performance, raises thresholds 10%)
   """

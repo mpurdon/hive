@@ -7,7 +7,7 @@ defmodule GiTF.Runtime.Claude do
 
   - **Interactive** (`spawn_interactive/2`): for the Major, which runs
     Claude in an interactive terminal session.
-  - **Headless** (`spawn_headless/3`): for Bees, which pipe a prompt to
+  - **Headless** (`spawn_headless/3`): for Ghosts, which pipe a prompt to
     Claude and collect the output when it finishes.
 
   No GenServer here -- this is a utility module that creates and manages

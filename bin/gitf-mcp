@@ -1,0 +1,5 @@
+#!/bin/sh
+# MCP server wrapper for gitf.
+# Filters boot-time log noise from stdout, passing only JSON-RPC lines.
+# Uses grep --line-buffered for unbuffered streaming.
+exec gitf mcp-serve 2>/dev/null | grep --line-buffered '^{'

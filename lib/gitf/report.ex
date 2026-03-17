@@ -190,7 +190,7 @@ defmodule GiTF.Report do
           }
         end)
 
-      headers = ["Job", "Bee", "Status", "Duration", "Parallel?"]
+      headers = ["Job", "Ghost", "Status", "Duration", "Parallel?"]
 
       rows =
         Enum.map(job_data, fn j ->

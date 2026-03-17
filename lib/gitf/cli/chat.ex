@@ -64,7 +64,7 @@ defmodule GiTF.CLI.Chat do
     # In CLI mode, warn and use API anyway; in ollama mode, use local models via API.
     if ModelResolver.execution_mode() == :cli do
       IO.puts(IO.ANSI.yellow() <> "[WARN] Planning chat requires API access (tool calling). " <>
-        "Bees will use Claude CLI, but planning uses API." <> IO.ANSI.reset())
+        "Ghosts will use Claude CLI, but planning uses API." <> IO.ANSI.reset())
     end
 
     model = opts[:model] || ModelResolver.resolve("opus")
@@ -803,13 +803,13 @@ defmodule GiTF.CLI.Chat do
           files = list_files(path, 3) |> Enum.sort() |> Enum.take(150)
 
           """
-          Comb: #{Map.get(sector, :name, "unknown")} (#{path})
+          Sector: #{Map.get(sector, :name, "unknown")} (#{path})
 
           File tree:
           #{Enum.join(files, "\n")}
           """
         else
-          "Comb: #{Map.get(sector, :name, "unknown")} (#{path}, not accessible)"
+          "Sector: #{Map.get(sector, :name, "unknown")} (#{path}, not accessible)"
         end
     end
   rescue

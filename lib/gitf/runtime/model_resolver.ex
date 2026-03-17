@@ -211,6 +211,29 @@ defmodule GiTF.Runtime.ModelResolver do
   end
 
   @doc """
+  Returns a more capable model for the given model spec.
+
+  Escalates: haiku → sonnet → opus. Returns nil if already at opus.
+  Used when retrying failed ops with a stronger model.
+  """
+  @spec escalate(String.t()) :: String.t() | nil
+  def escalate(model_spec) do
+    resolved = resolve(model_spec)
+    models = configured_models()
+
+    tier = Enum.find_value(models, fn {tier_name, spec} ->
+      if spec == resolved, do: tier_name
+    end)
+
+    case tier do
+      "haiku" -> resolve("sonnet")
+      "fast" -> resolve("sonnet")
+      "sonnet" -> resolve("opus")
+      _ -> nil
+    end
+  end
+
+  @doc """
   Returns the provider name from a model spec string.
 
   ## Examples

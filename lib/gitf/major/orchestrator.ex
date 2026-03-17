@@ -834,7 +834,7 @@ defmodule GiTF.Major.Orchestrator do
     end
   end
 
-  # -- Bee Spawning ------------------------------------------------------------
+  # -- Ghost Spawning ----------------------------------------------------------
 
   defp spawn_phase_ghost(mission, phase, prompt, opts) do
     model = Keyword.get(opts, :model, "sonnet")

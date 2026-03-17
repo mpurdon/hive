@@ -4,6 +4,7 @@ defmodule GiTF.Intel.SuccessPatterns do
   """
 
   alias GiTF.Archive
+  alias GiTF.Runtime.ModelResolver
 
   @doc """
   Analyze a successful op to identify success factors.
@@ -80,13 +81,13 @@ defmodule GiTF.Intel.SuccessPatterns do
     
     if Enum.empty?(common_factors) do
       %{
-        model: "claude-sonnet",
+        model: ModelResolver.resolve("sonnet"),
         confidence: :low,
         suggestions: ["No historical data available"]
       }
     else
       %{
-        model: best_practices.recommended_model || "claude-sonnet",
+        model: best_practices.recommended_model || ModelResolver.resolve("sonnet"),
         confidence: :medium,
         suggestions: generate_suggestions(best_practices),
         quality_expectation: best_practices.average_quality

@@ -49,12 +49,12 @@ defmodule GiTF.QuickStart do
 
     with {:ok, section_path} <- GiTF.Init.init(expanded, force: force?) do
       env = detect_environment(expanded)
-      registered_combs = register_discovered_repos(env.git_repos)
+      registered_sectors = register_discovered_repos(env.git_repos)
 
       summary = %{
         section_path: section_path,
         environment: env,
-        combs_registered: registered_combs
+        sectors_registered: registered_sectors
       }
 
       {:ok, summary}

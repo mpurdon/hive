@@ -15,7 +15,7 @@ defmodule GiTF.Override do
 
   Criteria:
   - Any non-phase op has `:high` or `:critical` risk level
-  - Comb config has `require_human_approval: true`
+  - Sector config has `require_human_approval: true`
   """
   @spec requires_approval?(map()) :: boolean()
   def requires_approval?(mission) do

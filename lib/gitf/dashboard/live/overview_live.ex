@@ -9,6 +9,8 @@ defmodule GiTF.Dashboard.OverviewLive do
 
   use Phoenix.LiveView
 
+  import GiTF.Dashboard.Helpers
+
   @refresh_interval :timer.seconds(5)
 
   @impl true
@@ -61,6 +63,19 @@ defmodule GiTF.Dashboard.OverviewLive do
     planning_quests = Enum.count(missions, &(Map.get(&1, :current_phase) == "planning"))
     implementation_quests = Enum.count(missions, &(Map.get(&1, :current_phase) == "implementation"))
 
+    # Approvals & sectors
+    pending_approvals = try do
+      length(GiTF.Override.pending_approvals())
+    rescue
+      _ -> 0
+    end
+
+    sector_count = try do
+      length(GiTF.Sector.list())
+    rescue
+      _ -> 0
+    end
+
     socket
     |> assign(:page_title, "Overview")
     |> assign(:current_path, "/")
@@ -81,6 +96,8 @@ defmodule GiTF.Dashboard.OverviewLive do
     |> assign(:research_quests, research_quests)
     |> assign(:planning_quests, planning_quests)
     |> assign(:implementation_quests, implementation_quests)
+    |> assign(:pending_approvals, pending_approvals)
+    |> assign(:sector_count, sector_count)
   end
 
   defp safe_active_count do
@@ -146,6 +163,30 @@ defmodule GiTF.Dashboard.OverviewLive do
         </div>
       </div>
 
+      <div class="cards">
+        <div class="card">
+          <div class="card-label">Pending Approvals</div>
+          <div class={"card-value #{if @pending_approvals > 0, do: "yellow"}"}>
+            {@pending_approvals}
+          </div>
+          <div class="card-label" style="margin-top:0.25rem">
+            <a href="/dashboard/approvals" style="color:#58a6ff; font-size:0.8rem">View queue</a>
+          </div>
+        </div>
+        <div class="card">
+          <div class="card-label">Sectors</div>
+          <div class="card-value">{@sector_count}</div>
+          <div class="card-label" style="margin-top:0.25rem">
+            <a href="/dashboard/sectors" style="color:#58a6ff; font-size:0.8rem">Manage</a>
+          </div>
+        </div>
+      </div>
+
+      <div style="display:flex; gap:0.5rem; margin-bottom:1.5rem">
+        <a href="/dashboard/missions/new" class="btn btn-green">New Mission</a>
+        <a href="/dashboard/autonomy" class="btn btn-blue">Self-Heal</a>
+      </div>
+
       <div class="panel">
         <div class="panel-title">Recent Links</div>
         <%= if @recent_waggles == [] do %>
@@ -171,24 +212,4 @@ defmodule GiTF.Dashboard.OverviewLive do
     """
   end
 
-  defp format_cost(cost) when is_float(cost), do: "$#{:erlang.float_to_binary(cost, decimals: 4)}"
-  defp format_cost(_), do: "$0.0000"
-
-  defp format_tokens(count) when count >= 1_000_000 do
-    "#{Float.round(count / 1_000_000, 1)}M"
-  end
-
-  defp format_tokens(count) when count >= 1_000 do
-    "#{Float.round(count / 1_000, 1)}K"
-  end
-
-  defp format_tokens(count), do: "#{count}"
-
-  defp format_timestamp(nil), do: "-"
-
-  defp format_timestamp(%DateTime{} = dt) do
-    Calendar.strftime(dt, "%Y-%m-%d %H:%M")
-  end
-
-  defp format_timestamp(_), do: "-"
 end

@@ -20,10 +20,38 @@ defmodule GiTF.Web.Router do
     plug :require_local_or_api_key
   end
 
+  pipeline :dashboard do
+    plug :accepts, ["html"]
+    plug :fetch_session
+    plug :fetch_live_flash
+    plug :put_root_layout, html: {GiTF.Dashboard.Layouts, :root}
+    plug :protect_from_forgery
+    plug :put_secure_browser_headers
+  end
+
   scope "/", GiTF.Web do
     pipe_through :browser
 
     live "/", Live.Dashboard
+  end
+
+  scope "/dashboard", GiTF.Dashboard do
+    pipe_through :dashboard
+
+    live "/", OverviewLive
+    live "/missions/new", MissionNewLive
+    live "/missions/:id/diagnostics", MissionDiagnosticsLive
+    live "/missions/:id/plan", PlanLive
+    live "/missions/:id", MissionDetailLive
+    live "/missions", MissionsLive
+    live "/ghosts", GhostsLive
+    live "/costs", CostsLive
+    live "/links", LinksLive
+    live "/progress", ProgressLive
+    live "/approvals", ApprovalsLive
+    live "/ops/:id", OpDetailLive
+    live "/sectors", SectorsLive
+    live "/autonomy", AutonomyLive
   end
 
   # Health endpoint — no auth required (monitoring)
@@ -61,13 +89,13 @@ defmodule GiTF.Web.Router do
     post "/ops/:id/reset", ApiController, :reset_job
     delete "/ops/:id", ApiController, :kill_job
 
-    # Bees
+    # Ghosts
     get "/ghosts", ApiController, :list_bees
     post "/ghosts/:id/stop", ApiController, :stop_ghost
     post "/ghosts/:id/complete", ApiController, :complete_bee
     post "/ghosts/:id/fail", ApiController, :fail_bee
 
-    # Combs
+    # Sectors
     post "/sectors", ApiController, :add_comb
     get "/sectors", ApiController, :list_combs
     get "/sectors/:id", ApiController, :show_comb

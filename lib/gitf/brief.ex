@@ -4,7 +4,7 @@ defmodule GiTF.Brief do
 
   Priming is the act of feeding Claude its initial context at session start.
   The Major gets the MAJOR.md instructions plus a snapshot of the current
-  section state. A Bee gets its specific op description, relevant links,
+  section state. A Ghost gets its specific op description, relevant links,
   and information about the sector it is working on.
 
   Output is Markdown text, ready for Claude to parse.
@@ -15,7 +15,7 @@ defmodule GiTF.Brief do
   # -- Public API ------------------------------------------------------------
 
   @doc """
-  Briefs a Major or Bee with context for a Claude Code session.
+  Briefs a Major or Ghost with context for a Claude Code session.
 
   - `brief(:major, gitf_root)` reads MAJOR.md and appends current section state
   - `brief(:ghost, ghost_id)` builds a briefing from the ghost's op, shell, and links
@@ -65,7 +65,7 @@ defmodule GiTF.Brief do
       format_quests(pending_quests),
       "",
       quest_specs_section,
-      "### Active Bees (#{length(active_ghosts)})",
+      "### Active Ghosts (#{length(active_ghosts)})",
       format_bees(active_ghosts),
       "",
       "### Pending Jobs (#{length(pending_jobs)})",
@@ -178,7 +178,7 @@ defmodule GiTF.Brief do
     end
   end
 
-  # -- Private: Bee ----------------------------------------------------------
+  # -- Private: Ghost ---------------------------------------------------------
 
   defp fetch_bee(ghost_id) do
     case Archive.get(:ghosts, ghost_id) do
@@ -195,7 +195,7 @@ defmodule GiTF.Brief do
     quest_context = build_quest_context(op)
 
     sections = [
-      "# Bee Briefing: #{ghost.name} (#{ghost.id})",
+      "# Ghost Briefing: #{ghost.name} (#{ghost.id})",
       "",
       "## Your Job",
       format_job_detail(op),

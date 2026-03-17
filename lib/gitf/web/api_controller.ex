@@ -371,7 +371,7 @@ defmodule GiTF.Web.ApiController do
     end
   end
 
-  # -- Bees --------------------------------------------------------------------
+  # -- Ghosts ------------------------------------------------------------------
 
   def list_bees(conn, params) do
     ghosts = GiTF.Ghosts.list()
@@ -442,7 +442,7 @@ defmodule GiTF.Web.ApiController do
     end
   end
 
-  # -- Combs -------------------------------------------------------------------
+  # -- Sectors -----------------------------------------------------------------
 
   def add_comb(conn, params) do
     path = params["path"]

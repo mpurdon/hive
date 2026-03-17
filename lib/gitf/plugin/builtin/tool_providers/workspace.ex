@@ -56,7 +56,7 @@ defmodule GiTF.Plugin.Builtin.ToolProviders.Workspace do
       name: "comb_info",
       description: "Get detailed information about a specific sector by ID or name.",
       parameter_schema: [
-        sector_id: [type: :string, required: true, doc: "Comb ID or name"]
+        sector_id: [type: :string, required: true, doc: "Sector ID or name"]
       ],
       callback: &comb_info/1
     )
@@ -81,7 +81,7 @@ defmodule GiTF.Plugin.Builtin.ToolProviders.Workspace do
         {:ok, info}
 
       {:error, :not_found} ->
-        {:ok, "Comb not found: #{sector_id}"}
+        {:ok, "Sector not found: #{sector_id}"}
     end
   rescue
     e -> {:ok, "Error: #{Exception.message(e)}"}

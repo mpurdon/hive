@@ -11,7 +11,7 @@ defmodule GiTF.Onboarding do
   Onboard a project with automatic detection and configuration.
   
   Options:
-  - :name - Comb name (defaults to directory name)
+  - :name - Sector name (defaults to directory name)
   - :skip_research - Skip initial research cache generation
   - :validation_command - Override detected validation command
   """

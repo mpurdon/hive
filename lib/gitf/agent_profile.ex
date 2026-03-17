@@ -17,7 +17,7 @@ defmodule GiTF.AgentProfile do
 
   @agents_dir ".claude/agents"
 
-  # Comb-level dependency detection: {pattern, agent_key}
+  # Sector-level dependency detection: {pattern, agent_key}
   # Used by detect_from_comb/1 to scan project manifest files.
   @pyproject_deps [
     {"strands-agents", "strands-sdk"},
@@ -185,7 +185,7 @@ defmodule GiTF.AgentProfile do
         {:ok, path}
 
       :none ->
-        # Comb-level detection first, then fall back to op-level
+        # Sector-level detection first, then fall back to op-level
         agent_key = detect_from_comb(sector_path) || detect_technology(title, description)
 
         case agent_key do

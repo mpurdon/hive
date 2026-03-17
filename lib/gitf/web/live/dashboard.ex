@@ -338,7 +338,7 @@ defmodule GiTF.Web.Live.Dashboard do
       <div class="flex items-center gap-4">
         <div>
           <h1 class="text-3xl font-bold text-yellow-500">GiTF Factory Floor</h1>
-          <p class="text-sm text-gray-400">Node: <%= @node %> | Cluster Size: <%= @cluster_size %></p>
+          <p class="text-sm text-gray-400">Node: <%= @node %> | Cluster Size: <%= @cluster_size %> | <a href="/dashboard" class="text-blue-400 hover:underline">Dashboard UI</a></p>
         </div>
         <!-- Health dots -->
         <div class="flex items-center gap-1 ml-4">
@@ -382,7 +382,7 @@ defmodule GiTF.Web.Live.Dashboard do
     ~H"""
     <div class="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-4 mb-6">
       <div class="bg-gray-800 p-3 rounded-lg shadow border border-gray-700">
-        <h3 class="text-gray-400 text-xs uppercase">Active Bees</h3>
+        <h3 class="text-gray-400 text-xs uppercase">Active Ghosts</h3>
         <p class="text-3xl font-mono text-blue-400"><%= @stats.ghosts.active %></p>
       </div>
       <div class="bg-gray-800 p-3 rounded-lg shadow border border-gray-700">
@@ -437,7 +437,7 @@ defmodule GiTF.Web.Live.Dashboard do
       else
         Enum.filter(@missions, fn q -> (q[:status] || "pending") in ["pending", "active", "failed"] end)
       end %>
-      <div class="p-3 space-y-1 max-h-48 overflow-y-auto hive-scrollbar">
+      <div class="p-3 space-y-1 max-h-48 overflow-y-auto factory-scrollbar">
         <%= if Enum.empty?(filtered_quests) do %>
           <p class="text-gray-500 text-sm italic">No missions</p>
         <% end %>
@@ -504,7 +504,7 @@ defmodule GiTF.Web.Live.Dashboard do
       else
         Enum.reject(@ops, fn j -> j[:status] in ["done"] end)
       end %>
-      <div class="p-3 space-y-1 max-h-48 overflow-y-auto hive-scrollbar">
+      <div class="p-3 space-y-1 max-h-48 overflow-y-auto factory-scrollbar">
         <%= if Enum.empty?(filtered_jobs) do %>
           <p class="text-gray-500 text-sm italic">No ops</p>
         <% end %>
@@ -527,7 +527,7 @@ defmodule GiTF.Web.Live.Dashboard do
         <div class="bg-gray-700 px-3 py-1.5 border-b border-gray-600">
           <h3 class="font-bold text-sm">Active Runs</h3>
         </div>
-        <div class="p-3 space-y-2 max-h-48 overflow-y-auto hive-scrollbar">
+        <div class="p-3 space-y-2 max-h-48 overflow-y-auto factory-scrollbar">
           <%= for run <- @runs do %>
             <% mission = Enum.find(@missions, &(&1[:id] == run.mission_id)) %>
             <div class="text-sm">
@@ -617,7 +617,7 @@ defmodule GiTF.Web.Live.Dashboard do
             <button phx-click="close_job_detail" class="text-gray-400 hover:text-white text-sm px-2 py-1 rounded hover:bg-gray-600">✕</button>
           </div>
         </div>
-        <div class="p-5 flex flex-col flex-1 min-h-0 gap-4 overflow-y-auto hive-scrollbar">
+        <div class="p-5 flex flex-col flex-1 min-h-0 gap-4 overflow-y-auto factory-scrollbar">
           <!-- Pipeline Stage Indicator -->
           <div class="flex items-center gap-1 text-xs shrink-0">
             <%= for {label, status} <- stages do %>
@@ -653,7 +653,7 @@ defmodule GiTF.Web.Live.Dashboard do
               <span class="text-gray-300"><%= @selected_job[:retry_count] || 0 %></span>
             </div>
             <div>
-              <span class="text-gray-500 block text-xs uppercase">Bee</span>
+              <span class="text-gray-500 block text-xs uppercase">Ghost</span>
               <span class="text-gray-300 font-mono text-xs"><%= @selected_job[:ghost_id] || "unassigned" %></span>
             </div>
             <div>
@@ -705,7 +705,7 @@ defmodule GiTF.Web.Live.Dashboard do
           <%= if @selected_job[:scout_findings] do %>
             <details class="shrink-0">
               <summary class="text-gray-500 text-xs uppercase cursor-pointer hover:text-gray-300">Recon Findings</summary>
-              <div class="bg-gray-900 rounded p-3 mt-1 whitespace-pre-wrap font-mono text-xs text-gray-300 max-h-48 overflow-y-auto hive-scrollbar">
+              <div class="bg-gray-900 rounded p-3 mt-1 whitespace-pre-wrap font-mono text-xs text-gray-300 max-h-48 overflow-y-auto factory-scrollbar">
                 <%= if is_binary(@selected_job[:scout_findings]), do: @selected_job[:scout_findings], else: inspect(@selected_job[:scout_findings], pretty: true, limit: :infinity) %>
               </div>
             </details>
@@ -715,7 +715,7 @@ defmodule GiTF.Web.Live.Dashboard do
           <%= if @selected_job[:description] do %>
             <div class="flex flex-col flex-1 min-h-0">
               <span class="text-gray-500 text-xs uppercase block mb-1 shrink-0">Description</span>
-              <div class="bg-gray-900 rounded p-3 whitespace-pre-wrap overflow-y-auto font-mono text-xs text-gray-300 flex-1 min-h-0 hive-scrollbar"><%= @selected_job[:description] %></div>
+              <div class="bg-gray-900 rounded p-3 whitespace-pre-wrap overflow-y-auto font-mono text-xs text-gray-300 flex-1 min-h-0 factory-scrollbar"><%= @selected_job[:description] %></div>
             </div>
           <% end %>
 
@@ -723,7 +723,7 @@ defmodule GiTF.Web.Live.Dashboard do
           <%= if @selected_job[:audit_result] do %>
             <div class="shrink-0">
               <span class="text-gray-500 text-xs uppercase block mb-1">Audit Result</span>
-              <div class="bg-gray-900 rounded p-3 whitespace-pre-wrap max-h-32 overflow-y-auto font-mono text-xs text-gray-300 hive-scrollbar"><%= inspect(@selected_job[:audit_result], pretty: true, limit: :infinity) %></div>
+              <div class="bg-gray-900 rounded p-3 whitespace-pre-wrap max-h-32 overflow-y-auto font-mono text-xs text-gray-300 factory-scrollbar"><%= inspect(@selected_job[:audit_result], pretty: true, limit: :infinity) %></div>
             </div>
           <% end %>
 
@@ -757,7 +757,7 @@ defmodule GiTF.Web.Live.Dashboard do
               <button phx-click="select_quest" phx-value-id={@selected_quest[:id]} class="text-gray-400 hover:text-white text-sm px-2 py-1 rounded hover:bg-gray-600">✕</button>
             </div>
           </div>
-          <div class="p-5 flex flex-col flex-1 min-h-0 gap-4 overflow-y-auto hive-scrollbar">
+          <div class="p-5 flex flex-col flex-1 min-h-0 gap-4 overflow-y-auto factory-scrollbar">
             <div>
               <h4 class="text-lg text-white font-semibold"><%= @selected_quest[:name] || @selected_quest[:goal] || "untitled" %></h4>
               <p class="text-xs text-gray-500 font-mono mt-1"><%= @selected_quest[:id] %></p>
@@ -773,7 +773,7 @@ defmodule GiTF.Web.Live.Dashboard do
                 <span class="text-gray-300"><%= @selected_quest[:current_phase] || "—" %></span>
               </div>
               <div>
-                <span class="text-gray-500 block text-xs uppercase">Comb</span>
+                <span class="text-gray-500 block text-xs uppercase">Sector</span>
                 <span class="text-gray-300 font-mono text-xs"><%= @selected_quest[:sector_id] || "—" %></span>
               </div>
             </div>
@@ -834,7 +834,7 @@ defmodule GiTF.Web.Live.Dashboard do
             <%= if @selected_quest[:research_summary] do %>
               <div class="flex flex-col flex-1 min-h-0">
                 <span class="text-gray-500 text-xs uppercase block mb-1 shrink-0">Research Summary</span>
-                <div class="bg-gray-900 rounded p-3 whitespace-pre-wrap overflow-y-auto font-mono text-xs text-gray-300 flex-1 min-h-0 hive-scrollbar"><%= @selected_quest[:research_summary] %></div>
+                <div class="bg-gray-900 rounded p-3 whitespace-pre-wrap overflow-y-auto font-mono text-xs text-gray-300 flex-1 min-h-0 factory-scrollbar"><%= @selected_quest[:research_summary] %></div>
               </div>
             <% end %>
 
@@ -842,7 +842,7 @@ defmodule GiTF.Web.Live.Dashboard do
             <%= if @selected_quest[:implementation_plan] do %>
               <div class="flex flex-col flex-1 min-h-0">
                 <span class="text-gray-500 text-xs uppercase block mb-1 shrink-0">Implementation Plan</span>
-                <div class="bg-gray-900 rounded p-3 whitespace-pre-wrap overflow-y-auto font-mono text-xs text-gray-300 flex-1 min-h-0 hive-scrollbar"><%= @selected_quest[:implementation_plan] %></div>
+                <div class="bg-gray-900 rounded p-3 whitespace-pre-wrap overflow-y-auto font-mono text-xs text-gray-300 flex-1 min-h-0 factory-scrollbar"><%= @selected_quest[:implementation_plan] %></div>
               </div>
             <% end %>
           </div>
@@ -880,14 +880,14 @@ defmodule GiTF.Web.Live.Dashboard do
       <div class="bg-gray-700 px-4 py-2 border-b border-gray-600 shrink-0">
         <h3 class="font-bold text-sm">Pipeline Stages</h3>
       </div>
-      <div class="overflow-auto flex-1 hive-scrollbar">
+      <div class="overflow-auto flex-1 factory-scrollbar">
         <table class="w-full text-sm">
           <thead class="text-xs text-gray-400 uppercase bg-gray-900 sticky top-0">
             <tr>
               <th class="px-3 py-2 text-left">Job</th>
               <th class="px-3 py-2 text-center">Recon</th>
               <th class="px-3 py-2 text-center">Triage</th>
-              <th class="px-3 py-2 text-center">Bee</th>
+              <th class="px-3 py-2 text-center">Ghost</th>
               <th class="px-3 py-2 text-center">Tachikoma</th>
               <th class="px-3 py-2 text-center">Sync</th>
             </tr>
@@ -932,7 +932,7 @@ defmodule GiTF.Web.Live.Dashboard do
           </select>
         </form>
       </div>
-      <div class="overflow-y-auto flex-1 p-3 font-mono text-xs hive-scrollbar">
+      <div class="overflow-y-auto flex-1 p-3 font-mono text-xs factory-scrollbar">
         <%= if Enum.empty?(@event_store_events) do %>
           <p class="text-gray-500 italic text-center py-8">No events recorded yet</p>
         <% end %>
@@ -955,7 +955,7 @@ defmodule GiTF.Web.Live.Dashboard do
 
   defp render_merges_tab(assigns) do
     ~H"""
-    <div class="bg-gray-800 rounded-lg shadow border border-gray-700 h-full flex flex-col overflow-y-auto hive-scrollbar">
+    <div class="bg-gray-800 rounded-lg shadow border border-gray-700 h-full flex flex-col overflow-y-auto factory-scrollbar">
       <div class="p-4 space-y-4">
         <!-- Active -->
         <div>
@@ -1019,7 +1019,7 @@ defmodule GiTF.Web.Live.Dashboard do
 
   defp render_models_tab(assigns) do
     ~H"""
-    <div class="bg-gray-800 rounded-lg shadow border border-gray-700 h-full overflow-y-auto hive-scrollbar">
+    <div class="bg-gray-800 rounded-lg shadow border border-gray-700 h-full overflow-y-auto factory-scrollbar">
       <div class="p-4 space-y-3">
         <%= if Enum.empty?(@agent_identities) do %>
           <p class="text-gray-500 text-sm italic text-center py-8">No model data yet. Models appear after tachikoma scoring.</p>
@@ -1197,7 +1197,7 @@ defmodule GiTF.Web.Live.Dashboard do
         true -> :skip
       end
 
-    [{"Recon", recon}, {"Triage", triage}, {"Bee", ghost}, {"Tachikoma", tachikoma}, {"Sync", sync}]
+    [{"Recon", recon}, {"Triage", triage}, {"Ghost", ghost}, {"Tachikoma", tachikoma}, {"Sync", sync}]
   end
 
   defp merge_active?(%{active: nil}, _op_id), do: false

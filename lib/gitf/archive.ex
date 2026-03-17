@@ -3,7 +3,7 @@ defmodule GiTF.Archive do
   Pure-Elixir key-value store backed by an ETF (Erlang Term Format) file.
 
   Provides a Repo-like CRUD interface for GiTF entities using plain maps.
-  Data is stored as a single `.gitf/store/hive.etf` file.
+  Data is stored as a single `.gitf/store/section.etf` file.
 
   Concurrent cross-process safety is achieved via:
   - `mkdir`-based advisory locking (POSIX `mkdir` is atomic)

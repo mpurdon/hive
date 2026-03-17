@@ -1,107 +1,248 @@
 defmodule GiTF.CLI.Select do
   @moduledoc """
-  Arrow-key driven selection prompts for the CLI.
+  Interactive text-based selection prompts for the CLI.
+
+  For interactive arrow-key selection, uses raw terminal mode.
+  Provides simple numbered-list fallbacks for non-interactive contexts.
 
   Options can be plain strings or structured maps with `:label`, `:description`,
-  and `:recommended` keys. Structured options get a description panel below the
-  list that updates as you navigate, and a ★ badge on recommended choices.
+  and `:recommended` keys.
   """
 
-  @colors [:cyan, :green, :magenta, :yellow, :light_blue, :light_green]
-  @panel_lines 3
-
   @doc """
-  Single-select: arrow keys to navigate, enter to confirm.
-
-  Options can be strings or maps: `%{"label" => "...", "description" => "...", "recommended" => true}`
-
+  Single-select: displays options, user navigates with arrows, selects with Enter.
   Returns the selected label string, or nil if cancelled.
   """
   def select(prompt, options) when is_list(options) and options != [] do
     opts = normalize(options)
-    count = length(opts)
-    lines = total_lines(opts)
 
-    IO.puts("")
-    IO.puts("  " <> IO.ANSI.bright() <> IO.ANSI.cyan() <> prompt <> IO.ANSI.reset())
-    IO.puts(hint("↑/↓ navigate · enter select · esc cancel"))
-    IO.puts("")
-    for _ <- 1..lines, do: IO.write("\n")
-
-    result =
-      with_raw_mode(fn tty ->
-        IO.write("\e[?25l")
-        result = select_loop(tty, opts, 0, count, lines)
-        IO.write("\e[?25h")
-        result
-      end)
-
-    clear_menu(lines)
-
-    case result do
-      {:ok, idx} ->
-        selected = Enum.at(opts, idx)
-        color = color_for(idx)
-        IO.puts("  " <> color <> "→ " <> selected.label <> IO.ANSI.reset())
-        selected.label
-
-      :cancelled ->
-        nil
+    if tty?() do
+      case do_interactive(prompt, opts, false) do
+        {:ok, selected} -> selected.label
+        _ -> nil
+      end
+    else
+      fallback_select(prompt, opts)
     end
   end
 
   def select(_prompt, _options), do: nil
 
   @doc """
-  Multi-select: arrow keys to navigate, space to toggle, enter to confirm.
-
-  Options can be strings or maps (same as `select/2`).
-
+  Multi-select: displays options, user navigates with arrows, toggles with Space, selects with Enter.
   Returns list of selected label strings, or nil if cancelled.
   """
   def multi_select(prompt, options) when is_list(options) and options != [] do
     opts = normalize(options)
-    count = length(opts)
-    lines = total_lines(opts)
 
-    IO.puts("")
-    IO.puts("  " <> IO.ANSI.bright() <> IO.ANSI.cyan() <> prompt <> IO.ANSI.reset())
-    IO.puts(hint("↑/↓ navigate · space toggle · enter confirm · esc cancel"))
-    IO.puts("")
-    for _ <- 1..lines, do: IO.write("\n")
-
-    result =
-      with_raw_mode(fn tty ->
-        IO.write("\e[?25l")
-        result = multi_loop(tty, opts, 0, MapSet.new(), count, lines)
-        IO.write("\e[?25h")
-        result
-      end)
-
-    clear_menu(lines)
-
-    case result do
-      {:ok, selected_set} ->
-        items =
-          selected_set
-          |> MapSet.to_list()
-          |> Enum.sort()
-          |> Enum.map(fn idx -> {idx, Enum.at(opts, idx)} end)
-
-        Enum.each(items, fn {idx, item} ->
-          color = color_for(idx)
-          IO.puts("  " <> color <> "→ " <> item.label <> IO.ANSI.reset())
-        end)
-
-        labels = Enum.map(items, fn {_, item} -> item.label end)
-        if labels == [], do: nil, else: labels
-
-      :cancelled ->
-        nil
+    if tty?() do
+      case do_interactive(prompt, opts, true) do
+        {:ok, selected} -> Enum.map(selected, & &1.label)
+        _ -> nil
+      end
+    else
+      fallback_multi_select(prompt, opts)
     end
   end
 
   def multi_select(_prompt, _options), do: nil
+
+  # -- Interactive Implementation ----------------------------------------------
+
+  defp tty? do
+    IO.ANSI.enabled?()
+  end
+
+  defp do_interactive(prompt, opts, multi?) do
+    IO.write("\e[?25l") # hide cursor
+    stty_save = System.cmd("stty", ["-g"], stderr_to_stdout: true) |> elem(0) |> String.trim()
+    System.cmd("stty", ["raw", "-echo"], stderr_to_stdout: true)
+
+    try do
+      IO.write("\r\n")
+      IO.write("\r  \e[1;36m#{prompt}\e[0m\r\n")
+      IO.write("\r\n")
+
+      lines_to_clear = length(opts)
+
+      # Initial render
+      render_options(opts, 0, MapSet.new(), multi?)
+
+      result = loop(opts, 0, MapSet.new(), multi?, lines_to_clear)
+
+      # Clear menu
+      IO.write("\r\e[#{lines_to_clear}A\e[J")
+      IO.write("\e[1A\e[J") # clear empty line above
+      IO.write("\e[1A\e[J") # clear prompt line
+
+      case result do
+        {:ok, selected} ->
+          if multi? do
+            labels = Enum.map(selected, & &1.label)
+            IO.write("\r  \e[1;36m#{prompt}\e[0m\r\n")
+            IO.write("\r  \e[32m→ \e[0m#{Enum.join(labels, ", ")}\r\n\r\n")
+          else
+            IO.write("\r  \e[1;36m#{prompt}\e[0m\r\n")
+            IO.write("\r  \e[32m→ \e[0m#{selected.label}\r\n\r\n")
+          end
+          {:ok, selected}
+
+        :cancel ->
+          IO.write("\r  \e[1;36m#{prompt}\e[0m\r\n")
+          IO.write("\r  \e[31mCancelled\e[0m\r\n\r\n")
+          :cancel
+      end
+    after
+      System.cmd("stty", [stty_save], stderr_to_stdout: true)
+      IO.write("\e[?25h") # show cursor
+    end
+  end
+
+  defp loop(opts, cursor, selected, multi?, lines_to_clear) do
+    count = length(opts)
+    case IO.getn(:stdio, "", 1) do
+      "\r" ->
+        if multi? do
+          {:ok, Enum.filter(Enum.with_index(opts), fn {_, i} -> MapSet.member?(selected, i) end) |> Enum.map(&elem(&1, 0))}
+        else
+          {:ok, Enum.at(opts, cursor)}
+        end
+      "\n" ->
+        if multi? do
+          {:ok, Enum.filter(Enum.with_index(opts), fn {_, i} -> MapSet.member?(selected, i) end) |> Enum.map(&elem(&1, 0))}
+        else
+          {:ok, Enum.at(opts, cursor)}
+        end
+      " " ->
+        if multi? do
+          new_selected = if MapSet.member?(selected, cursor), do: MapSet.delete(selected, cursor), else: MapSet.put(selected, cursor)
+          IO.write("\r\e[#{lines_to_clear}A")
+          render_options(opts, cursor, new_selected, multi?)
+          loop(opts, cursor, new_selected, multi?, lines_to_clear)
+        else
+          loop(opts, cursor, selected, multi?, lines_to_clear)
+        end
+      "q" -> :cancel
+      "\e" ->
+        case IO.getn(:stdio, "", 2) do
+          "[A" ->
+            new_cursor = max(0, cursor - 1)
+            IO.write("\r\e[#{lines_to_clear}A")
+            render_options(opts, new_cursor, selected, multi?)
+            loop(opts, new_cursor, selected, multi?, lines_to_clear)
+          "[B" ->
+            new_cursor = min(count - 1, cursor + 1)
+            IO.write("\r\e[#{lines_to_clear}A")
+            render_options(opts, new_cursor, selected, multi?)
+            loop(opts, new_cursor, selected, multi?, lines_to_clear)
+          _ ->
+            loop(opts, cursor, selected, multi?, lines_to_clear)
+        end
+      <<3>> -> :cancel # Ctrl+C
+      <<4>> -> :cancel # Ctrl+D
+      _ ->
+        loop(opts, cursor, selected, multi?, lines_to_clear)
+    end
+  end
+
+  defp render_options(opts, cursor, selected, multi?) do
+    Enum.with_index(opts)
+    |> Enum.each(fn {opt, idx} ->
+      is_active = idx == cursor
+      is_selected = MapSet.member?(selected, idx)
+
+      pointer = if is_active, do: "\e[36m❯\e[0m", else: " "
+
+      checkbox = cond do
+        multi? and is_selected -> "\e[32m◉\e[0m"
+        multi? -> "◯"
+        true -> ""
+      end
+
+      star = if opt.recommended, do: " \e[33m★\e[0m", else: ""
+
+      color = if is_active, do: "\e[36m", else: "\e[0m"
+
+      prefix = if multi?, do: "#{pointer} #{checkbox} ", else: "#{pointer} "
+
+      IO.write("\r  #{prefix}#{color}#{opt.label}\e[0m#{star}\e[K\r\n")
+    end)
+  end
+
+  # -- Fallbacks ---------------------------------------------------------------
+
+  defp fallback_select(prompt, opts) do
+    IO.puts("")
+    IO.puts("  " <> IO.ANSI.bright() <> IO.ANSI.cyan() <> prompt <> IO.ANSI.reset())
+    IO.puts("")
+
+    Enum.with_index(opts, 1)
+    |> Enum.each(fn {opt, idx} ->
+      star = if opt.recommended, do: " " <> IO.ANSI.yellow() <> "★" <> IO.ANSI.reset(), else: ""
+      label = IO.ANSI.bright() <> opt.label <> IO.ANSI.reset()
+      IO.puts("  #{idx}. #{label}#{star}")
+
+      if opt.description do
+        IO.puts("     " <> IO.ANSI.faint() <> opt.description <> IO.ANSI.reset())
+      end
+    end)
+
+    IO.puts("")
+    answer = IO.gets("  Select [1-#{length(opts)}]: ") |> to_string() |> String.trim()
+
+    case Integer.parse(answer) do
+      {n, _} when n >= 1 and n <= length(opts) ->
+        selected = Enum.at(opts, n - 1)
+        IO.puts("  " <> IO.ANSI.green() <> "→ " <> selected.label <> IO.ANSI.reset())
+        selected.label
+
+      _ ->
+        default = Enum.find(opts, List.first(opts), & &1.recommended)
+        IO.puts("  " <> IO.ANSI.green() <> "→ " <> default.label <> IO.ANSI.reset())
+        default.label
+    end
+  end
+
+  defp fallback_multi_select(prompt, opts) do
+    IO.puts("")
+    IO.puts("  " <> IO.ANSI.bright() <> IO.ANSI.cyan() <> prompt <> IO.ANSI.reset())
+    IO.puts("  " <> IO.ANSI.faint() <> "(Enter numbers separated by commas)" <> IO.ANSI.reset())
+    IO.puts("")
+
+    Enum.with_index(opts, 1)
+    |> Enum.each(fn {opt, idx} ->
+      star = if opt.recommended, do: " " <> IO.ANSI.yellow() <> "★" <> IO.ANSI.reset(), else: ""
+      label = IO.ANSI.bright() <> opt.label <> IO.ANSI.reset()
+      IO.puts("  #{idx}. #{label}#{star}")
+
+      if opt.description do
+        IO.puts("     " <> IO.ANSI.faint() <> opt.description <> IO.ANSI.reset())
+      end
+    end)
+
+    IO.puts("")
+    answer = IO.gets("  Select [1-#{length(opts)}]: ") |> to_string() |> String.trim()
+
+    selected =
+      answer
+      |> String.split(~r/[,\s]+/)
+      |> Enum.flat_map(fn s ->
+        case Integer.parse(String.trim(s)) do
+          {n, _} when n >= 1 and n <= length(opts) -> [Enum.at(opts, n - 1)]
+          _ -> []
+        end
+      end)
+
+    if selected == [] do
+      nil
+    else
+      Enum.each(selected, fn opt ->
+        IO.puts("  " <> IO.ANSI.green() <> "→ " <> opt.label <> IO.ANSI.reset())
+      end)
+
+      Enum.map(selected, & &1.label)
+    end
+  end
 
   # -- Option normalization ----------------------------------------------------
 
@@ -124,276 +265,5 @@ defmodule GiTF.CLI.Select do
           recommended: opt[:recommended] == true
         }
     end)
-  end
-
-  defp has_details?(opts) do
-    Enum.any?(opts, fn o -> o.description != nil or o.recommended end)
-  end
-
-  defp total_lines(opts) do
-    count = length(opts)
-    if has_details?(opts), do: count + 1 + @panel_lines, else: count
-  end
-
-  # -- Single select loop ------------------------------------------------------
-
-  defp select_loop(tty, opts, cursor, count, lines) do
-    render_single(opts, cursor, lines)
-
-    case read_key(tty) do
-      :up -> select_loop(tty, opts, max(cursor - 1, 0), count, lines)
-      :down -> select_loop(tty, opts, min(cursor + 1, count - 1), count, lines)
-      :enter -> {:ok, cursor}
-      :escape -> :cancelled
-      _ -> select_loop(tty, opts, cursor, count, lines)
-    end
-  end
-
-  # -- Multi select loop -------------------------------------------------------
-
-  defp multi_loop(tty, opts, cursor, selected, count, lines) do
-    render_multi(opts, cursor, selected, lines)
-
-    case read_key(tty) do
-      :up ->
-        multi_loop(tty, opts, max(cursor - 1, 0), selected, count, lines)
-
-      :down ->
-        multi_loop(tty, opts, min(cursor + 1, count - 1), selected, count, lines)
-
-      :space ->
-        toggled =
-          if MapSet.member?(selected, cursor),
-            do: MapSet.delete(selected, cursor),
-            else: MapSet.put(selected, cursor)
-
-        multi_loop(tty, opts, cursor, toggled, count, lines)
-
-      :enter ->
-        {:ok, selected}
-
-      :escape ->
-        :cancelled
-
-      _ ->
-        multi_loop(tty, opts, cursor, selected, count, lines)
-    end
-  end
-
-  # -- Rendering ---------------------------------------------------------------
-
-  defp render_single(opts, cursor, lines) do
-    IO.write("\e[#{lines}A")
-    has_panel = has_details?(opts)
-
-    Enum.with_index(opts, fn opt, idx ->
-      render_option_line(opt, idx, idx == cursor)
-    end)
-
-    if has_panel do
-      render_panel(Enum.at(opts, cursor), cursor)
-    end
-  end
-
-  defp render_multi(opts, cursor, selected, lines) do
-    IO.write("\e[#{lines}A")
-    has_panel = has_details?(opts)
-
-    Enum.with_index(opts, fn opt, idx ->
-      active = idx == cursor
-      checked = MapSet.member?(selected, idx)
-      color = color_for(idx)
-
-      {box, label, star} =
-        if active do
-          bx =
-            if checked,
-              do: IO.ANSI.reverse() <> color <> " ✓ " <> IO.ANSI.reset() <> " ",
-              else: IO.ANSI.reverse() <> IO.ANSI.faint() <> "   " <> IO.ANSI.reset() <> " "
-
-          lb = IO.ANSI.bright() <> color <> opt.label
-          st = if opt.recommended, do: " " <> IO.ANSI.yellow() <> "★", else: ""
-          {bx, lb, st}
-        else
-          bx =
-            if checked,
-              do: color <> "[" <> IO.ANSI.bright() <> "✓" <> IO.ANSI.reset() <> color <> "]" <> IO.ANSI.reset() <> " ",
-              else: IO.ANSI.faint() <> "[ ]" <> IO.ANSI.reset() <> " "
-
-          lb = IO.ANSI.faint() <> opt.label
-          st = if opt.recommended, do: " " <> IO.ANSI.faint() <> IO.ANSI.yellow() <> "★", else: ""
-          {bx, lb, st}
-        end
-
-      IO.write("\r\e[2K    " <> box <> label <> star <> IO.ANSI.reset() <> "\r\n")
-    end)
-
-    if has_panel do
-      render_panel(Enum.at(opts, cursor), cursor)
-    end
-  end
-
-  defp render_option_line(opt, idx, active) do
-    color = color_for(idx)
-
-    if active do
-      star = if opt.recommended, do: " " <> IO.ANSI.yellow() <> "★", else: ""
-
-      IO.write(
-        "\r\e[2K  " <>
-          IO.ANSI.reverse() <> color <> " " <> opt.label <> " " <> IO.ANSI.reset() <>
-          star <> IO.ANSI.reset() <> "\r\n"
-      )
-    else
-      star =
-        if opt.recommended,
-          do: " " <> IO.ANSI.faint() <> IO.ANSI.yellow() <> "★" <> IO.ANSI.reset(),
-          else: ""
-
-      IO.write(
-        "\r\e[2K    " <> IO.ANSI.faint() <> opt.label <> IO.ANSI.reset() <> star <> "\r\n"
-      )
-    end
-  end
-
-  defp render_panel(opt, cursor_idx) do
-    color = color_for(cursor_idx)
-    width = max(term_width() - 8, 40)
-
-    # Separator
-    sep = String.duplicate("─", min(width, 50))
-    IO.write("\r\e[2K    " <> IO.ANSI.faint() <> sep <> IO.ANSI.reset() <> "\r\n")
-
-    # Build content lines
-    content =
-      build_panel_content(opt, color, width)
-      |> Enum.take(@panel_lines)
-
-    # Render exactly @panel_lines lines
-    Enum.each(0..(@panel_lines - 1), fn i ->
-      line = Enum.at(content, i, "")
-      IO.write("\r\e[2K" <> line <> "\r\n")
-    end)
-  end
-
-  defp build_panel_content(opt, color, width) do
-    badge =
-      if opt.recommended,
-        do: [
-          "    " <>
-            IO.ANSI.yellow() <>
-            IO.ANSI.bright() <> "★ Recommended" <> IO.ANSI.reset()
-        ],
-        else: []
-
-    desc =
-      if opt.description do
-        opt.description
-        |> wrap_text(width)
-        |> Enum.map(fn line ->
-          "    " <> color <> line <> IO.ANSI.reset()
-        end)
-      else
-        []
-      end
-
-    badge ++ desc
-  end
-
-  # -- Helpers -----------------------------------------------------------------
-
-  defp color_for(idx) do
-    color_name = Enum.at(@colors, rem(idx, length(@colors)))
-    apply(IO.ANSI, color_name, [])
-  end
-
-  defp hint(text) do
-    "  " <> IO.ANSI.faint() <> IO.ANSI.italic() <> text <> IO.ANSI.reset()
-  end
-
-  defp wrap_text(text, width) do
-    text
-    |> String.split(" ")
-    |> Enum.reduce([""], fn word, [current | rest] ->
-      if current == "" do
-        [word | rest]
-      else
-        if String.length(current) + 1 + String.length(word) > width do
-          [word, current | rest]
-        else
-          [current <> " " <> word | rest]
-        end
-      end
-    end)
-    |> Enum.reverse()
-  end
-
-  defp term_width do
-    case :io.columns() do
-      {:ok, cols} -> cols
-      _ -> 80
-    end
-  end
-
-  # -- Terminal control --------------------------------------------------------
-
-  defp clear_menu(count) do
-    IO.write("\e[#{count}A")
-    for _ <- 1..count, do: IO.write("\e[2K\n")
-    IO.write("\e[#{count}A")
-  end
-
-  defp with_raw_mode(fun) do
-    saved = :os.cmd(~c"stty -g </dev/tty") |> List.to_string() |> String.trim()
-
-    if saved != "" do
-      :os.cmd(~c"stty raw -echo </dev/tty")
-
-      case :file.open(~c"/dev/tty", [:read, :raw, :binary]) do
-        {:ok, tty} ->
-          try do
-            fun.(tty)
-          after
-            :file.close(tty)
-            :os.cmd(String.to_charlist("stty #{saved} </dev/tty"))
-          end
-
-        {:error, _} ->
-          :os.cmd(String.to_charlist("stty #{saved} </dev/tty"))
-          fun.(nil)
-      end
-    else
-      fun.(nil)
-    end
-  end
-
-  defp read_key(nil), do: :unknown
-
-  defp read_key(tty) do
-    case :file.read(tty, 1) do
-      {:ok, <<27>>} ->
-        # Arrow keys send ESC [ X almost instantly in raw mode
-        case :file.read(tty, 1) do
-          {:ok, <<?[>>} ->
-            case :file.read(tty, 1) do
-              {:ok, <<?A>>} -> :up
-              {:ok, <<?B>>} -> :down
-              _ -> :unknown
-            end
-
-          _ ->
-            :escape
-        end
-
-      {:ok, <<13>>} -> :enter
-      {:ok, <<10>>} -> :enter
-      {:ok, <<32>>} -> :space
-      {:ok, <<3>>} -> :escape
-      {:ok, <<"j">>} -> :down
-      {:ok, <<"k">>} -> :up
-      {:ok, _} -> :unknown
-      :eof -> :escape
-      {:error, _} -> :escape
-    end
   end
 end
