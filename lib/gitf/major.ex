@@ -307,6 +307,27 @@ defmodule GiTF.Major do
     {:noreply, state}
   end
 
+  def handle_info({:delayed_retry, op_id, feedback}, state) do
+    Logger.info("Executing delayed retry for op #{op_id}")
+
+    # Re-check that the op still needs retry (may have been manually reset/killed)
+    case GiTF.Ops.get(op_id) do
+      {:ok, %{status: status}} when status in ["failed", "pending"] ->
+        case try_intelligent_retry(op_id, feedback, state) do
+          {:ok, _} -> {:noreply, state}
+          {:error, _} -> {:noreply, simple_retry(op_id, feedback, state)}
+        end
+
+      {:ok, %{status: status}} ->
+        Logger.debug("Delayed retry skipped for op #{op_id}: status is #{status}")
+        {:noreply, state}
+
+      {:error, _} ->
+        Logger.debug("Delayed retry skipped for op #{op_id}: op not found")
+        {:noreply, state}
+    end
+  end
+
   def handle_info(msg, state) do
     Logger.debug("Major received unexpected message: #{inspect(msg)}")
     {:noreply, state}
@@ -703,13 +724,12 @@ defmodule GiTF.Major do
           end
 
         if attempts < state.max_retries do
-          Logger.info("Retrying op #{op_id} (attempt #{attempts + 1}/#{state.max_retries})")
+          # Exponential backoff: 30s, 2min, 8min
+          delay_ms = retry_backoff_ms(attempts)
+          Logger.info("Scheduling retry for op #{op_id} in #{div(delay_ms, 1000)}s (attempt #{attempts + 1}/#{state.max_retries})")
 
-          # Try intelligent retry first, fall back to simple retry
-          case try_intelligent_retry(op_id, feedback, state) do
-            {:ok, _} -> state
-            {:error, _} -> simple_retry(op_id, feedback, state)
-          end
+          Process.send_after(self(), {:delayed_retry, op_id, feedback}, delay_ms)
+          state
         else
           Logger.warning("Job #{op_id} exhausted #{state.max_retries} retries")
           # Unblock dependents so downstream work isn't permanently stuck
@@ -723,6 +743,15 @@ defmodule GiTF.Major do
       _ ->
         state
     end
+  end
+
+  # Exponential backoff: 30s * 2^attempt with jitter
+  # attempt 0 → ~30s, attempt 1 → ~2min, attempt 2 → ~8min
+  defp retry_backoff_ms(attempt) do
+    base = :timer.seconds(30)
+    backoff = base * Integer.pow(4, attempt)
+    jitter = :rand.uniform(div(base, 2))
+    min(backoff + jitter, :timer.minutes(10))
   end
 
   defp try_intelligent_retry(op_id, feedback, state) do
