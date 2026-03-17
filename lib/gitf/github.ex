@@ -129,6 +129,54 @@ defmodule GiTF.GitHub do
     end
   end
 
+  @doc "Lists repositories for the authenticated user."
+  @spec list_repos(keyword()) :: {:ok, [map()]} | {:error, term()}
+  def list_repos(opts \\ []) do
+    token = github_token()
+
+    if is_nil(token) do
+      {:error, :no_github_token}
+    else
+      headers = [
+        {"accept", "application/vnd.github+json"},
+        {"authorization", "Bearer #{token}"}
+      ]
+
+      sort = Keyword.get(opts, :sort, "updated")
+      per_page = Keyword.get(opts, :per_page, 30)
+
+      case Req.get(Req.new(base_url: @api_base, headers: headers),
+             url: "/user/repos",
+             params: [sort: sort, per_page: per_page, type: "owner"]
+           ) do
+        {:ok, %{status: 200, body: repos}} ->
+          {:ok,
+           Enum.map(repos, fn r ->
+             %{
+               full_name: r["full_name"],
+               name: r["name"],
+               clone_url: r["clone_url"],
+               ssh_url: r["ssh_url"],
+               html_url: r["html_url"],
+               description: r["description"],
+               private: r["private"],
+               language: r["language"],
+               updated_at: r["updated_at"]
+             }
+           end)}
+
+        {:ok, %{status: 401}} ->
+          {:error, :unauthorized}
+
+        {:ok, %{status: status, body: resp}} ->
+          {:error, "GitHub API error #{status}: #{inspect(resp)}"}
+
+        {:error, reason} ->
+          {:error, reason}
+      end
+    end
+  end
+
   @doc "Builds a Req client with GitHub auth."
   @spec client(GiTF.Schema.Sector.t()) :: {:ok, Req.Request.t()} | {:error, :no_github_config}
   def client(sector) do
