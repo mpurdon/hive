@@ -29,14 +29,33 @@ defmodule GiTF.Dashboard.MissionNewLive do
     attrs =
       %{goal: String.trim(params["goal"])}
       |> maybe_put(:name, params["name"])
-      |> maybe_put(:sector, params["sector"])
+      |> maybe_put(:sector_id, params["sector"])
+
+    quick = params["quick"] == "true"
 
     case GiTF.Missions.create(attrs) do
       {:ok, mission} ->
-        {:noreply,
-         socket
-         |> put_flash(:info, "Mission created successfully.")
-         |> push_navigate(to: "/dashboard/missions/#{mission.id}")}
+        if quick do
+          # Quick mode: fast-path immediately
+          case GiTF.Major.Orchestrator.start_quest(mission.id, force_fast_path: true) do
+            {:ok, _} ->
+              {:noreply,
+               socket
+               |> put_flash(:info, "Quick task started — ghost is working.")
+               |> push_navigate(to: "/dashboard/missions/#{mission.id}")}
+
+            {:error, reason} ->
+              {:noreply,
+               socket
+               |> put_flash(:error, "Created mission but failed to start: #{inspect(reason)}")
+               |> push_navigate(to: "/dashboard/missions/#{mission.id}")}
+          end
+        else
+          {:noreply,
+           socket
+           |> put_flash(:info, "Mission created. Use the Plan page to generate and review plans.")
+           |> push_navigate(to: "/dashboard/missions/#{mission.id}")}
+        end
 
       {:error, reason} ->
         {:noreply, put_flash(socket, :error, "Failed to create mission: #{inspect(reason)}")}
@@ -55,11 +74,6 @@ defmodule GiTF.Dashboard.MissionNewLive do
         <h1 class="page-title">New Mission</h1>
 
         <div class="panel">
-          <p style="color:#8b949e; margin-bottom:1.25rem; font-size:0.9rem">
-            A mission defines a high-level goal. The Major will research, plan, and
-            orchestrate ghost agents to accomplish it across multiple phases.
-          </p>
-
           <form phx-submit="create" phx-change="validate">
             <div class="form-group">
               <label class="form-label">Goal *</label>
@@ -67,9 +81,27 @@ defmodule GiTF.Dashboard.MissionNewLive do
                 name="mission[goal]"
                 class="form-textarea"
                 placeholder="Describe what you want to accomplish..."
-                style="min-height:140px"
+                style="min-height:120px"
                 required
               >{@form["goal"]}</textarea>
+            </div>
+
+            <!-- Mode toggle -->
+            <div class="form-group" style="display:flex; gap:1.5rem; padding:0.75rem 1rem; background:#1c2128; border-radius:6px; border:1px solid #30363d">
+              <label style="display:flex; align-items:center; gap:0.5rem; cursor:pointer; color:#c9d1d9; font-size:0.85rem">
+                <input type="radio" name="mission[quick]" value="true" checked={@form["quick"] == "true"} style="accent-color:#3fb950" />
+                <span>
+                  <strong style="color:#3fb950">Quick Run</strong>
+                  <span style="color:#8b949e"> — single ghost, no pipeline (bug fixes, focused tasks)</span>
+                </span>
+              </label>
+              <label style="display:flex; align-items:center; gap:0.5rem; cursor:pointer; color:#c9d1d9; font-size:0.85rem">
+                <input type="radio" name="mission[quick]" value="false" checked={@form["quick"] != "true"} style="accent-color:#58a6ff" />
+                <span>
+                  <strong style="color:#58a6ff">Full Pipeline</strong>
+                  <span style="color:#8b949e"> — research, plan, implement, verify (greenfield projects)</span>
+                </span>
+              </label>
             </div>
 
             <div class="form-group">
@@ -84,11 +116,11 @@ defmodule GiTF.Dashboard.MissionNewLive do
             </div>
 
             <div class="form-group">
-              <label class="form-label">Sector (optional)</label>
+              <label class="form-label">Sector</label>
               <select name="mission[sector]" class="form-select">
                 <option value="">— Default sector —</option>
                 <%= for sector <- @sectors do %>
-                  <option value={sector.name} selected={@form["sector"] == sector.name}>
+                  <option value={sector.id} selected={@form["sector"] == sector.id}>
                     {sector.name} — {Map.get(sector, :path, "")}
                   </option>
                 <% end %>
@@ -98,7 +130,7 @@ defmodule GiTF.Dashboard.MissionNewLive do
             <div class="action-bar">
               <a href="/dashboard/missions" class="btn btn-grey">Cancel</a>
               <button type="submit" class="btn btn-green" disabled={String.trim(@form["goal"] || "") == ""}>
-                Create Mission
+                {if @form["quick"] == "true", do: "Run Task", else: "Create Mission"}
               </button>
             </div>
           </form>

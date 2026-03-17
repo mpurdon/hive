@@ -34,6 +34,41 @@ defmodule GiTF.Dashboard.OverviewLive do
     {:noreply, assign_data(socket)}
   end
 
+  @impl true
+  def handle_event("quick_run", %{"task" => %{"goal" => goal}}, socket) do
+    goal = String.trim(goal)
+
+    if goal == "" do
+      {:noreply, put_flash(socket, :error, "Goal cannot be empty")}
+    else
+      sectors = GiTF.Sector.list()
+      sector_id = case sectors do
+        [s] -> s.id
+        _ -> nil
+      end
+
+      attrs = %{goal: goal}
+      attrs = if sector_id, do: Map.put(attrs, :sector_id, sector_id), else: attrs
+
+      case GiTF.Missions.create(attrs) do
+        {:ok, mission} ->
+          case GiTF.Major.Orchestrator.start_quest(mission.id, force_fast_path: true) do
+            {:ok, _phase} ->
+              {:noreply,
+               socket
+               |> put_flash(:info, "Task started — ghost is working on it.")
+               |> push_navigate(to: "/dashboard/missions/#{mission.id}")}
+
+            {:error, reason} ->
+              {:noreply, put_flash(socket, :error, "Failed to start: #{inspect(reason)}")}
+          end
+
+        {:error, reason} ->
+          {:noreply, put_flash(socket, :error, "Failed: #{inspect(reason)}")}
+      end
+    end
+  end
+
   defp assign_data(socket) do
     ghosts = GiTF.Ghosts.list()
     missions = GiTF.Missions.list()
@@ -182,15 +217,33 @@ defmodule GiTF.Dashboard.OverviewLive do
         </div>
       </div>
 
+      <!-- Quick Run -->
+      <div class="panel" style="margin-bottom:1.5rem">
+        <div class="panel-title">Quick Run</div>
+        <p style="color:#8b949e; font-size:0.8rem; margin-bottom:0.75rem">
+          Run a focused task (bug fix, single feature) — skips the full pipeline, spawns one ghost immediately.
+        </p>
+        <form phx-submit="quick_run" style="display:flex; gap:0.5rem; align-items:flex-end">
+          <input
+            type="text"
+            name="task[goal]"
+            class="form-input"
+            placeholder="e.g. fix the login timeout bug"
+            style="flex:1"
+          />
+          <button type="submit" class="btn btn-green" style="white-space:nowrap">Run</button>
+        </form>
+      </div>
+
       <div style="display:flex; gap:0.5rem; margin-bottom:1.5rem">
-        <a href="/dashboard/missions/new" class="btn btn-green">New Mission</a>
-        <a href="/dashboard/autonomy" class="btn btn-blue">Self-Heal</a>
+        <a href="/dashboard/missions/new" class="btn btn-blue">New Mission (Full Pipeline)</a>
+        <a href="/dashboard/autonomy" class="btn btn-grey">Self-Heal</a>
       </div>
 
       <div class="panel">
-        <div class="panel-title">Recent Links</div>
+        <div class="panel-title">Recent Messages</div>
         <%= if @recent_waggles == [] do %>
-          <div class="empty">No link_msg messages yet.</div>
+          <div class="empty">No messages yet.</div>
         <% else %>
           <%= for link_msg <- @recent_waggles do %>
             <div class={"link_msg-item #{unless link_msg.read, do: "link_msg-unread"}"}>
