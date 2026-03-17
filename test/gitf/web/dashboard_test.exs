@@ -39,6 +39,6 @@ defmodule GiTF.Web.DashboardTest do
     conn = Phoenix.ConnTest.build_conn()
     {:ok, _view, html} = live(conn, "/")
     assert html =~ "GiTF Control Plane"
-    assert html =~ "Active Bees"
+    assert html =~ "Active Ghosts"
   end
 end

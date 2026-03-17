@@ -61,7 +61,7 @@ defmodule GiTF.E2E.FailureRetryTest do
 
     # Major should still be alive after processing retry logic
     # (retry spawn may fail without real Claude, but Major shouldn't crash)
-    assert Process.alive?(env.major_pid)
+    assert Process.alive?(env.queen_pid)
   end
 
   scenario "Major marks mission failed after retry exhaustion" do

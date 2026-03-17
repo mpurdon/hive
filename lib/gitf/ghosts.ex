@@ -10,6 +10,8 @@ defmodule GiTF.Ghosts do
   and supervised processes.
   """
 
+  require Logger
+
   alias GiTF.Archive
 
   # -- Public API --------------------------------------------------------------
@@ -35,11 +37,12 @@ defmodule GiTF.Ghosts do
     name = Keyword.get(opts, :name, generate_ghost_name())
 
     # Atomic check: reject if op already has a ghost assigned (prevents duplicate spawning)
-    with :ok <- check_not_already_assigned(op_id),
-         :ok <- check_job_ready(op_id),
-         {:ok, ghost} <- create_ghost_record(name, op_id),
-         :ok <- assign_job(op_id, ghost.id),
-         {:ok, _pid} <- start_worker(ghost.id, op_id, sector_id, gitf_root, opts) do
+    with {:check_ready, :ok} <- {:check_ready, check_not_already_assigned(op_id)},
+         {:check_ready, :ok} <- {:check_ready, check_job_ready(op_id)},
+         {:create_ghost, {:ok, ghost}} <- {:create_ghost, create_ghost_record(name, op_id)},
+         {:assign, :ok} <- {:assign, assign_job(op_id, ghost.id)},
+         {:start_worker, {:ok, _pid}} <-
+           {:start_worker, start_worker(ghost.id, op_id, sector_id, gitf_root, opts)} do
       GiTF.Telemetry.emit([:gitf, :ghost, :spawned], %{}, %{
         ghost_id: ghost.id,
         op_id: op_id,
@@ -48,7 +51,21 @@ defmodule GiTF.Ghosts do
 
       {:ok, ghost}
     else
-      {:error, reason} -> {:error, reason}
+      {step, {:error, reason}} ->
+        Logger.error("Ghost spawn failed at step #{step} for op #{op_id}: #{inspect(reason)}")
+
+        ghost_id = if match?({:ok, ghost} when is_map(ghost), {:ok, nil}), do: nil, else: get_ghost_id_from_op(op_id)
+        cleanup_orphaned_ghost(ghost_id, op_id)
+
+        GiTF.Telemetry.emit([:gitf, :ghost, :spawn_failed], %{}, %{
+          ghost_id: ghost_id,
+          op_id: op_id,
+          sector_id: sector_id,
+          step: step,
+          reason: inspect(reason)
+        })
+
+        {:error, reason}
     end
   end
 
@@ -82,18 +99,42 @@ defmodule GiTF.Ghosts do
   defp spawn_detached_cli(op_id, sector_id, gitf_root, opts) do
     name = Keyword.get(opts, :name, generate_ghost_name())
 
-    with :ok <- check_job_ready(op_id),
-         {:ok, ghost} <- create_ghost_record(name, op_id),
-         :ok <- assign_job(op_id, ghost.id),
-         {:ok, shell} <- GiTF.Shell.create(sector_id, ghost.id, gitf_root: gitf_root),
-         :ok <- update_bee_working(ghost.id, shell),
-         :ok <- maybe_transition_job(op_id),
-         :ok <- maybe_ensure_agent(op_id, sector_id, shell),
-         :ok <- write_pre_dispatch(shell.worktree_path, op_id),
-         {:ok, _os_pid} <- spawn_model_detached(ghost.id, op_id, shell, gitf_root) do
+    with {:check_ready, :ok} <- {:check_ready, check_job_ready(op_id)},
+         {:create_ghost, {:ok, ghost}} <- {:create_ghost, create_ghost_record(name, op_id)},
+         {:assign, :ok} <- {:assign, assign_job(op_id, ghost.id)},
+         {:shell, {:ok, shell}} <-
+           {:shell, GiTF.Shell.create(sector_id, ghost.id, gitf_root: gitf_root)},
+         {:update, :ok} <- {:update, update_bee_working(ghost.id, shell)},
+         {:transition, :ok} <- {:transition, maybe_transition_job(op_id)},
+         {:agent, :ok} <- {:agent, maybe_ensure_agent(op_id, sector_id, shell)},
+         {:dispatch, :ok} <- {:dispatch, write_pre_dispatch(shell.worktree_path, op_id)},
+         {:spawn, {:ok, _os_pid}} <-
+           {:spawn, spawn_model_detached(ghost.id, op_id, shell, gitf_root)} do
+      GiTF.Telemetry.emit([:gitf, :ghost, :spawned], %{}, %{
+        ghost_id: ghost.id,
+        op_id: op_id,
+        sector_id: sector_id
+      })
+
       {:ok, ghost}
     else
-      {:error, reason} -> {:error, reason}
+      {step, {:error, reason}} ->
+        Logger.error(
+          "Ghost CLI spawn failed at step #{step} for op #{op_id}: #{inspect(reason)}"
+        )
+
+        ghost_id = get_ghost_id_from_op(op_id)
+        cleanup_orphaned_ghost(ghost_id, op_id)
+
+        GiTF.Telemetry.emit([:gitf, :ghost, :spawn_failed], %{}, %{
+          ghost_id: ghost_id,
+          op_id: op_id,
+          sector_id: sector_id,
+          step: step,
+          reason: inspect(reason)
+        })
+
+        {:error, reason}
     end
   end
 
@@ -188,13 +229,15 @@ defmodule GiTF.Ghosts do
 
   defp create_ghost_record(name, op_id) do
     # Get op to determine model assignment
+    default_model = GiTF.Runtime.ModelResolver.resolve("sonnet")
+
     model =
       case GiTF.Ops.get(op_id) do
         {:ok, op} ->
-          op.assigned_model || op.recommended_model || "claude-sonnet"
+          op.assigned_model || op.recommended_model || default_model
 
         _ ->
-          "claude-sonnet"
+          default_model
       end
 
     record = %{
@@ -442,6 +485,27 @@ defmodule GiTF.Ghosts do
     rescue
       _ -> :ok
     end
+  end
+
+  defp get_ghost_id_from_op(op_id) do
+    case GiTF.Ops.get(op_id) do
+      {:ok, %{ghost_id: gid}} when is_binary(gid) and gid != "" -> gid
+      _ -> nil
+    end
+  end
+
+  defp cleanup_orphaned_ghost(nil, _op_id), do: :ok
+
+  defp cleanup_orphaned_ghost(ghost_id, op_id) do
+    case Archive.get(:ghosts, ghost_id) do
+      nil -> :ok
+      ghost -> Archive.put(:ghosts, %{ghost | status: "crashed"})
+    end
+
+    GiTF.Ops.reset(op_id)
+    :ok
+  rescue
+    _ -> :ok
   end
 
   # -- Revive helpers ----------------------------------------------------------

@@ -12,15 +12,15 @@ defmodule GiTF.Runtime.KeysTest do
   end
 
   describe "status/0" do
-    test "returns a keyword list of provider availability" do
+    test "returns a list of provider availability tuples" do
       status = Keys.status()
       assert is_list(status)
 
-      # Should include known providers
-      providers = Keyword.keys(status)
-      assert :anthropic in providers
-      assert :google in providers
-      assert :openai in providers
+      # Should include known providers (string keys)
+      providers = Enum.map(status, fn {name, _} -> name end)
+      assert "anthropic" in providers
+      assert "google" in providers
+      assert "openai" in providers
 
       # Values are booleans
       Enum.each(status, fn {_provider, available} ->

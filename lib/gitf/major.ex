@@ -389,7 +389,7 @@ defmodule GiTF.Major do
   # will move to dedicated context modules as the system grows.
 
   defp handle_waggle(%{subject: "job_complete"} = link_msg, state) do
-    Logger.info("Bee #{link_msg.from} reports op complete. Initiating verification...")
+    Logger.info("Ghost #{link_msg.from} reports op complete. Initiating verification...")
 
     # We remove from active_ghosts immediately so Major doesn't think it's still "working"
     # but we don't advance mission yet.
@@ -441,7 +441,7 @@ defmodule GiTF.Major do
   end
 
   defp handle_waggle(%{subject: "job_failed"} = link_msg, state) do
-    Logger.warning("Bee #{link_msg.from} reports op failed: #{link_msg.body}")
+    Logger.warning("Ghost #{link_msg.from} reports op failed: #{link_msg.body}")
     state = update_in(state.active_ghosts, &Map.delete(&1, link_msg.from))
 
     op_id = find_job_for_bee(link_msg.from)
@@ -451,7 +451,7 @@ defmodule GiTF.Major do
   end
 
   defp handle_waggle(%{subject: "validation_failed"} = link_msg, state) do
-    Logger.warning("Bee #{link_msg.from} reports validation failed: #{link_msg.body}")
+    Logger.warning("Ghost #{link_msg.from} reports validation failed: #{link_msg.body}")
     state = update_in(state.active_ghosts, &Map.delete(&1, link_msg.from))
     maybe_retry_job(link_msg, state)
   end
@@ -966,7 +966,21 @@ defmodule GiTF.Major do
           state
 
         {:error, reason} ->
-          Logger.warning("Failed to auto-spawn ghost for op #{op.id}: #{inspect(reason)}")
+          {step, raw_reason} =
+            case reason do
+              {s, r} when is_atom(s) -> {s, r}
+              other -> {nil, other}
+            end
+
+          Logger.warning("Failed to auto-spawn ghost for op #{op.id} (step: #{inspect(step)}): #{inspect(raw_reason)}")
+
+          GiTF.Telemetry.emit([:gitf, :ghost, :spawn_failed], %{}, %{
+            op_id: op.id,
+            sector_id: op.sector_id,
+            step: step,
+            reason: inspect(raw_reason)
+          })
+
           state
       end
     end
@@ -1112,7 +1126,7 @@ defmodule GiTF.Major do
           link_msg = %{
             from: ghost.id,
             subject: "stall_timeout",
-            body: "Bee stalled for #{seconds_since}s without backup. Auto-failed for retry."
+            body: "Ghost stalled for #{seconds_since}s without backup. Auto-failed for retry."
           }
           maybe_retry_job(link_msg, state)
         end

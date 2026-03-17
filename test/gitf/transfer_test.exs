@@ -191,7 +191,7 @@ defmodule GiTF.TransferTest do
 
       # Check all sections are present
       assert markdown =~ "# Transfer Context"
-      assert markdown =~ "## Bee Status"
+      assert markdown =~ "## Ghost Status"
       assert markdown =~ "## Job"
       assert markdown =~ "## Workspace"
       assert markdown =~ "## Recent Messages Sent"

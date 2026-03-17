@@ -68,7 +68,7 @@ defmodule GiTF.QuickStartTest do
 
       assert summary.section_path == path
       assert File.dir?(Path.join(path, ".gitf"))
-      assert summary.combs_registered == []
+      assert summary.sectors_registered == []
     end
 
     test "auto-discovers and registers git repos" do
@@ -78,9 +78,9 @@ defmodule GiTF.QuickStartTest do
 
       assert {:ok, summary} = QuickStart.quick_init(parent)
 
-      assert length(summary.combs_registered) == 2
+      assert length(summary.sectors_registered) == 2
 
-      names = Enum.map(summary.combs_registered, fn {:ok, name} -> name end)
+      names = Enum.map(summary.sectors_registered, fn {:ok, name} -> name end)
       assert "project-one" in names
       assert "project-two" in names
 

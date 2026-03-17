@@ -35,7 +35,7 @@ defmodule GiTF.BriefTest do
       assert {:ok, markdown} = Brief.brief(:major, gitf_root)
       assert markdown =~ "Major Instructions"
       assert markdown =~ "Current GiTF State"
-      assert markdown =~ "Active Bees"
+      assert markdown =~ "Active Ghosts"
       assert markdown =~ "Pending Jobs"
     end
 
@@ -111,7 +111,7 @@ defmodule GiTF.BriefTest do
       {:ok, ghost} = Archive.insert(:ghosts, %{name: "worker-ghost", status: "starting"})
 
       assert {:ok, markdown} = Brief.brief(:ghost, ghost.id)
-      assert markdown =~ "Bee Briefing"
+      assert markdown =~ "Ghost Briefing"
       assert markdown =~ "worker-ghost"
       assert markdown =~ "Your Job"
       assert markdown =~ "Your Workspace"

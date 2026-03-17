@@ -55,12 +55,12 @@ defmodule GiTF.OverrideTest do
       refute Override.requires_approval?(mission)
     end
 
-    test "returns true when a op has high risk" do
+    test "returns false when a op has high risk (only critical triggers)" do
       mission = create_quest()
       add_job(mission, %{risk_level: :high})
       {:ok, mission} = GiTF.Missions.get(mission.id)
 
-      assert Override.requires_approval?(mission)
+      refute Override.requires_approval?(mission)
     end
 
     test "returns true when a op has critical risk" do

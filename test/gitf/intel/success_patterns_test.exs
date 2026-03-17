@@ -129,7 +129,7 @@ defmodule GiTF.Intel.SuccessPatternsTest do
     test "provides default recommendation with no data" do
       recommendation = SuccessPatterns.recommend_approach("nonexistent", "test")
       
-      assert recommendation.model == "claude-sonnet"
+      assert recommendation.model == GiTF.Runtime.ModelResolver.resolve("sonnet")
       assert recommendation.confidence == :low
       assert "No historical data available" in recommendation.suggestions
     end

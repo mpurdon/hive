@@ -55,7 +55,7 @@ defmodule GiTF.Dashboard.EndpointTest do
       conn = request(:get, "/ghosts")
 
       assert conn.status == 200
-      assert String.contains?(conn.resp_body, "Bee Agents")
+      assert String.contains?(conn.resp_body, "Ghost Agents")
     end
 
     test "serves the costs page at /costs" do

@@ -67,8 +67,8 @@ defmodule GiTF.TestDriver.Harness do
   """
   @spec teardown(env()) :: :ok
   def teardown(env) do
-    if env.major_pid && Process.alive?(env.major_pid) do
-      GenServer.stop(env.major_pid, :normal)
+    if env.queen_pid && Process.alive?(env.queen_pid) do
+      GenServer.stop(env.queen_pid, :normal)
     end
   catch
     :exit, _ -> :ok

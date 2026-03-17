@@ -1,0 +1,376 @@
+defmodule GiTF.MCPServer.Handlers do
+  @moduledoc "Tool execution handlers for the MCP server."
+
+  def call("factory_status", _args) do
+    missions = GiTF.Missions.list()
+    active_missions = Enum.reject(missions, &(&1[:status] in ["completed", "closed", "killed"]))
+    ghosts = GiTF.Ghosts.list()
+    active_ghosts = Enum.reject(ghosts, &(&1.status in ["stopped", "crashed"]))
+    summary = GiTF.Costs.summary()
+    health = GiTF.Observability.Health.check()
+
+    recent_failures =
+      GiTF.EventStore.list(type: :bee_failed, limit: 10)
+      |> Enum.map(fn event ->
+        %{
+          entity_id: event.entity_id,
+          timestamp: to_string(event.timestamp),
+          step: get_in(event, [:data, :step]),
+          reason: get_in(event, [:data, :reason]) || get_in(event, [:data, :error]),
+          op_id: get_in(event, [:metadata, :op_id])
+        }
+      end)
+
+    result = %{
+      missions: %{
+        total: length(missions),
+        active: length(active_missions),
+        items: Enum.map(active_missions, &summarize_mission/1)
+      },
+      ghosts: %{
+        total: length(ghosts),
+        active: length(active_ghosts),
+        items: Enum.map(active_ghosts, &summarize_ghost/1)
+      },
+      costs: %{
+        total_usd: summary.total_cost,
+        total_input_tokens: summary.total_input_tokens,
+        total_output_tokens: summary.total_output_tokens
+      },
+      health: to_string(health.status),
+      version: GiTF.version(),
+      recent_failures: recent_failures
+    }
+
+    {:ok, json_text(result)}
+  end
+
+  def call("list_missions", args) do
+    opts =
+      case args["status"] do
+        nil -> []
+        status -> [status: status]
+      end
+
+    missions = GiTF.Missions.list(opts)
+
+    missions =
+      if args["all"] do
+        missions
+      else
+        case args["status"] do
+          nil -> Enum.reject(missions, &(&1[:status] in ["completed", "closed"]))
+          _ -> missions
+        end
+      end
+
+    {:ok, json_text(Enum.map(missions, &serialize_mission/1))}
+  end
+
+  def call("show_mission", %{"id" => id}) do
+    case GiTF.Missions.get(id) do
+      {:ok, mission} -> {:ok, json_text(serialize_mission(mission))}
+      {:error, :not_found} -> {:error, "Mission not found: #{id}"}
+    end
+  end
+
+  def call("show_mission", _), do: {:error, "Missing required parameter: id"}
+
+  def call("list_ops", args) do
+    opts =
+      case args["mission_id"] do
+        nil -> []
+        id -> [mission_id: id]
+      end
+
+    ops = GiTF.Ops.list(opts)
+
+    ops =
+      if args["all"] do
+        ops
+      else
+        case args["status"] do
+          nil -> Enum.reject(ops, &(&1.status in ["done", "failed"]))
+          status -> Enum.filter(ops, &(&1.status == status))
+        end
+      end
+
+    {:ok, json_text(Enum.map(ops, &serialize_op/1))}
+  end
+
+  def call("show_op", %{"id" => id}) do
+    case GiTF.Ops.get(id) do
+      {:ok, op} -> {:ok, json_text(serialize_op(op))}
+      {:error, :not_found} -> {:error, "Op not found: #{id}"}
+    end
+  end
+
+  def call("show_op", _), do: {:error, "Missing required parameter: id"}
+
+  def call("list_ghosts", args) do
+    ghosts = GiTF.Ghosts.list()
+
+    ghosts =
+      if args["all"] do
+        ghosts
+      else
+        case args["status"] do
+          nil -> Enum.reject(ghosts, &(&1.status in ["stopped", "crashed"]))
+          status -> Enum.filter(ghosts, &(&1.status == status))
+        end
+      end
+
+    {:ok, json_text(Enum.map(ghosts, &serialize_ghost/1))}
+  end
+
+  def call("list_sectors", _args) do
+    sectors = GiTF.Sector.list()
+    {:ok, json_text(Enum.map(sectors, &serialize_sector/1))}
+  end
+
+  def call("costs_summary", _args) do
+    summary = GiTF.Costs.summary()
+
+    result = %{
+      total_cost_usd: summary.total_cost,
+      total_input_tokens: summary.total_input_tokens,
+      total_output_tokens: summary.total_output_tokens,
+      by_model: summary.by_model,
+      by_ghost: summary.by_bee,
+      by_category: summary.by_category
+    }
+
+    {:ok, json_text(result)}
+  end
+
+  def call("list_links", args) do
+    opts =
+      Enum.reduce(args, [], fn
+        {"to", v}, acc when is_binary(v) -> [{:to, v} | acc]
+        {"from", v}, acc when is_binary(v) -> [{:from, v} | acc]
+        _, acc -> acc
+      end)
+
+    links = GiTF.Link.list(opts)
+    limit = args["limit"] || 20
+    links = Enum.take(links, limit)
+
+    {:ok, json_text(Enum.map(links, &serialize_link/1))}
+  end
+
+  def call("mission_report", %{"id" => id}) do
+    case GiTF.Report.generate(id) do
+      {:ok, report} -> {:ok, GiTF.Report.format(report)}
+      {:error, :not_found} -> {:error, "Mission not found: #{id}"}
+      {:error, reason} -> {:error, inspect(reason)}
+    end
+  end
+
+  def call("mission_report", _), do: {:error, "Missing required parameter: id"}
+
+  def call("health_check", _args) do
+    health = GiTF.Observability.Health.check()
+
+    checks =
+      Map.new(health.checks, fn {k, v} ->
+        {to_string(k), to_string(v)}
+      end)
+
+    result = %{
+      status: to_string(health.status),
+      checks: checks,
+      timestamp: DateTime.to_iso8601(health.timestamp)
+    }
+
+    {:ok, json_text(result)}
+  end
+
+  # -- Write operations (require confirm: true) -------------------------------
+
+  def call("create_mission", %{"goal" => goal} = args) do
+    with :ok <- require_confirm(args) do
+      attrs = %{goal: goal}
+      attrs = if args["sector_id"], do: Map.put(attrs, :sector_id, args["sector_id"]), else: attrs
+      attrs = if args["name"], do: Map.put(attrs, :name, args["name"]), else: attrs
+
+      case GiTF.Missions.create(attrs) do
+        {:ok, mission} -> {:ok, json_text(serialize_mission(mission))}
+        {:error, reason} -> {:error, inspect(reason)}
+      end
+    end
+  end
+
+  def call("create_mission", _), do: {:error, "Missing required parameter: goal"}
+
+  def call("kill_mission", %{"id" => id} = args) do
+    with :ok <- require_confirm(args) do
+      case GiTF.Missions.kill(id) do
+        :ok -> {:ok, json_text(%{id: id, status: "killed"})}
+        {:error, :not_found} -> {:error, "Mission not found: #{id}"}
+      end
+    end
+  end
+
+  def call("kill_mission", _), do: {:error, "Missing required parameter: id"}
+
+  def call("close_mission", %{"id" => id} = args) do
+    with :ok <- require_confirm(args) do
+      case GiTF.Missions.close(id) do
+        {:ok, mission} -> {:ok, json_text(serialize_mission(mission))}
+        {:error, :not_found} -> {:error, "Mission not found: #{id}"}
+      end
+    end
+  end
+
+  def call("close_mission", _), do: {:error, "Missing required parameter: id"}
+
+  def call("delete_mission", %{"id" => id} = args) do
+    with :ok <- require_confirm(args) do
+      case GiTF.Missions.delete(id) do
+        :ok -> {:ok, json_text(%{id: id, deleted: true})}
+        {:error, :not_found} -> {:error, "Mission not found: #{id}"}
+      end
+    end
+  end
+
+  def call("delete_mission", _), do: {:error, "Missing required parameter: id"}
+
+  def call("reset_op", %{"id" => id} = args) do
+    with :ok <- require_confirm(args) do
+      case GiTF.Ops.reset(id) do
+        {:ok, op} -> {:ok, json_text(serialize_op(op))}
+        {:error, :not_found} -> {:error, "Op not found: #{id}"}
+        {:error, reason} -> {:error, inspect(reason)}
+      end
+    end
+  end
+
+  def call("reset_op", _), do: {:error, "Missing required parameter: id"}
+
+  def call("kill_op", %{"id" => id} = args) do
+    with :ok <- require_confirm(args) do
+      case GiTF.Ops.kill(id) do
+        :ok -> {:ok, json_text(%{id: id, status: "killed"})}
+        {:error, :not_found} -> {:error, "Op not found: #{id}"}
+      end
+    end
+  end
+
+  def call("kill_op", _), do: {:error, "Missing required parameter: id"}
+
+  def call("stop_ghost", %{"id" => id} = args) do
+    with :ok <- require_confirm(args) do
+      case GiTF.Ghosts.stop(id) do
+        :ok ->
+          {:ok, json_text(%{id: id, status: "stopped"})}
+
+        {:error, :not_found} ->
+          # Worker process already gone — update the archive record directly
+          case GiTF.Archive.get(:ghosts, id) do
+            nil ->
+              {:error, "Ghost not found: #{id}"}
+
+            ghost ->
+              GiTF.Archive.put(:ghosts, %{ghost | status: "stopped"})
+              {:ok, json_text(%{id: id, status: "stopped", note: "Process already exited, record updated"})}
+          end
+      end
+    end
+  end
+
+  def call("stop_ghost", _), do: {:error, "Missing required parameter: id"}
+
+  def call("send_link", %{"from" => from, "to" => to, "subject" => subject, "body" => body} = args) do
+    with :ok <- require_confirm(args) do
+      case GiTF.Link.send(from, to, subject, body) do
+        {:ok, link} -> {:ok, json_text(serialize_link(link))}
+        {:error, reason} -> {:error, inspect(reason)}
+      end
+    end
+  end
+
+  def call("send_link", _), do: {:error, "Missing required parameters: from, to, subject, body"}
+
+  def call(tool_name, _args), do: {:error, "Unknown tool: #{tool_name}"}
+
+  defp require_confirm(%{"confirm" => true}), do: :ok
+  defp require_confirm(_), do: {:error, "Write operation requires confirm: true"}
+
+  # -- Serializers -------------------------------------------------------------
+
+  defp json_text(data) do
+    Jason.encode!(data, pretty: true)
+  end
+
+  defp summarize_mission(m) do
+    %{id: m[:id], name: m[:name], status: m[:status] || "pending", goal: m[:goal]}
+  end
+
+  defp summarize_ghost(g) do
+    %{id: g.id, name: g.name, status: g.status, op_id: g[:op_id]}
+  end
+
+  defp serialize_mission(m) do
+    ops =
+      case m[:ops] do
+        nil -> GiTF.Ops.list(mission_id: m[:id])
+        ops -> ops
+      end
+
+    %{
+      id: m[:id],
+      name: m[:name],
+      status: m[:status] || "pending",
+      goal: m[:goal],
+      sector_id: m[:sector_id],
+      current_phase: m[:current_phase],
+      inserted_at: to_string(m[:inserted_at]),
+      ops: Enum.map(ops, &serialize_op/1)
+    }
+  end
+
+  defp serialize_op(j) do
+    %{
+      id: j.id,
+      title: j.title,
+      status: j.status,
+      mission_id: j.mission_id,
+      sector_id: j[:sector_id],
+      ghost_id: j[:ghost_id],
+      description: j[:description],
+      inserted_at: to_string(j[:inserted_at])
+    }
+  end
+
+  defp serialize_ghost(g) do
+    %{
+      id: g.id,
+      name: g.name,
+      status: g.status,
+      op_id: g[:op_id],
+      context_percentage: g[:context_percentage]
+    }
+  end
+
+  defp serialize_sector(s) do
+    %{
+      id: s.id,
+      name: s.name,
+      path: s[:path],
+      repo_url: s[:repo_url],
+      sync_strategy: s[:sync_strategy]
+    }
+  end
+
+  defp serialize_link(l) do
+    %{
+      id: l.id,
+      from: l.from,
+      to: l.to,
+      subject: l.subject,
+      body: l.body,
+      read: l[:read],
+      inserted_at: to_string(l[:inserted_at])
+    }
+  end
+end

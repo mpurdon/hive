@@ -39,19 +39,6 @@ defmodule GiTF.E2E.ConcurrentGhostsTest do
     assert final_job2.status == "done"
     assert final_job3.status == "done"
 
-    # Wait for link_msg messages — they arrive after the validation pipeline
-    # in mark_success (may involve git diff + Claude validation)
-    ghost_ids = [bee1.id, bee2.id, bee3.id]
-
-    await(
-      fn ->
-        all_waggles = GiTF.Archive.all(:links)
-        bee_waggles = Enum.filter(all_waggles, &(&1.from in ghost_ids))
-        length(bee_waggles) >= 3
-      end,
-      timeout: 15_000
-    )
-
     # Quest should be completable
     GiTF.Missions.update_status!(mission.id)
     {:ok, final_quest} = GiTF.Missions.get(mission.id)

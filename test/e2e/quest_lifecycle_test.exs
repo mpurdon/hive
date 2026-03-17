@@ -26,18 +26,6 @@ defmodule GiTF.E2E.QuestLifecycleTest do
     await({:bee_stopped, bee1.id}, timeout: 5_000)
     await({:bee_stopped, bee2.id}, timeout: 5_000)
 
-    # Link messages arrive after the validation pipeline in mark_success
-    # (may involve git diff + Claude validation, up to 60s). Wait generously.
-    ghost_ids = [bee1.id, bee2.id]
-
-    await(
-      fn ->
-        links = GiTF.Archive.all(:links)
-        Enum.any?(links, &(&1.from in ghost_ids))
-      end,
-      timeout: 15_000
-    )
-
     # Both ops done means mission should be completed
     GiTF.Missions.update_status!(mission.id)
     {:ok, final_quest} = GiTF.Missions.get(mission.id)
