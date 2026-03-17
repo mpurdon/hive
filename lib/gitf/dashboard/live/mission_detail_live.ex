@@ -107,11 +107,17 @@ defmodule GiTF.Dashboard.MissionDetailLive do
   end
 
   def handle_event("remove", _params, socket) do
-    case GiTF.Missions.delete(socket.assigns.mission.id) do
+    mission_id = socket.assigns.mission.id
+
+    # Kill first to clean up all child artifacts (ops, ghosts, shells, deps)
+    # then delete residual data (links, events, costs, phase transitions)
+    case GiTF.Missions.kill(mission_id) do
       :ok ->
+        cleanup_mission_artifacts(mission_id)
+
         {:noreply,
          socket
-         |> put_flash(:info, "Mission removed.")
+         |> put_flash(:info, "Mission and all associated data removed.")
          |> push_navigate(to: "/dashboard/missions")}
 
       {:error, reason} ->
@@ -173,6 +179,43 @@ defmodule GiTF.Dashboard.MissionDetailLive do
       {:error, _} ->
         socket
     end
+  end
+
+  defp cleanup_mission_artifacts(mission_id) do
+    # Clean up links referencing this mission's ghosts/ops
+    GiTF.Archive.all(:links)
+    |> Enum.filter(fn l ->
+      String.contains?(l.body || "", mission_id) or
+        String.contains?(l.from || "", "ghost-")
+    end)
+    |> Enum.each(fn l -> GiTF.Archive.delete(:links, l.id) end)
+
+    # Clean up events for this mission
+    GiTF.EventStore.list(mission_id: mission_id, limit: 500)
+    |> Enum.each(fn e -> GiTF.Archive.delete(:events, e.id) end)
+
+    # Clean up phase transitions
+    GiTF.Archive.filter(:mission_phase_transitions, fn t -> t.mission_id == mission_id end)
+    |> Enum.each(fn t -> GiTF.Archive.delete(:mission_phase_transitions, t.id) end)
+
+    # Clean up approval requests
+    GiTF.Archive.filter(:approval_requests, fn r -> r.mission_id == mission_id end)
+    |> Enum.each(fn r -> GiTF.Archive.delete(:approval_requests, r.id) end)
+
+    # Clean up costs for ghosts that worked on this mission's ops
+    GiTF.Archive.filter(:costs, fn c ->
+      case GiTF.Archive.get(:ghosts, c.ghost_id) do
+        %{op_id: op_id} when is_binary(op_id) ->
+          case GiTF.Archive.get(:ops, op_id) do
+            %{mission_id: ^mission_id} -> true
+            _ -> false
+          end
+        _ -> false
+      end
+    end)
+    |> Enum.each(fn c -> GiTF.Archive.delete(:costs, c.id) end)
+  rescue
+    _ -> :ok
   end
 
   defp load_sectors do
