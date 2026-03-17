@@ -294,7 +294,7 @@ defmodule GiTF.CLI do
   defp dispatch([:onboard], result) do
     path = result_get(result, :args, :path)
     name = result_get(result, :options, :name)
-    quick = result_get(result, :options, :quick) || false
+    quick = result_get(result, :flags, :quick) || false
     preview = result_get(result, :options, :preview) || false
     validation_cmd = result_get(result, :options, :validation_command)
 
@@ -1745,7 +1745,7 @@ defmodule GiTF.CLI do
         {:ok, mission} ->
           Format.success("Quest \"#{mission.name}\" created (#{mission.id})")
 
-          if result_get(result, :options, :quick) do
+          if result_get(result, :flags, :quick) do
             # Quick mode: fast path, no interactive planning
             case GiTF.Major.Orchestrator.start_quest(mission.id, force_fast_path: true) do
               {:ok, phase} ->
@@ -3050,13 +3050,13 @@ defmodule GiTF.CLI do
                   help: "Sector ID (defaults to current sector)",
                   parser: :string,
                   required: false
-                ],
+                ]
+              ],
+              flags: [
                 quick: [
                   short: "-q",
                   long: "--quick",
-                  help: "Skip full pipeline — create a single op and go (for bug fixes, focused tasks)",
-                  parser: :boolean,
-                  required: false
+                  help: "Skip full pipeline — create a single op and go (for bug fixes, focused tasks)"
                 ]
               ]
             ],
