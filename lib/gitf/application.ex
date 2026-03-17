@@ -47,6 +47,7 @@ defmodule GiTF.Application do
       {Phoenix.PubSub, name: GiTF.PubSub},
       {GiTF.Archive, data_dir: Application.get_env(:gitf, :store_dir, Path.join(File.cwd!, ".gitf/store"))},
       {Registry, keys: :unique, name: GiTF.Registry},
+      {Task.Supervisor, name: GiTF.TaskSupervisor},
       {GiTF.RateLimiter, name: GiTF.RateLimiter, max_tokens: 30, refill_rate: 30, refill_interval: 1_000},
       # The Major is the brain of the factory - starts automatically now
       {GiTF.Major, gitf_root: Application.get_env(:gitf, :store_dir, File.cwd!)},

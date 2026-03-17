@@ -144,8 +144,8 @@ defmodule GiTF.Tachikoma do
   def handle_info({:review_job, op_id, ghost_id, shell_id}, state) do
     Logger.info("Tachikoma received review request for op #{op_id} (ghost #{ghost_id})")
 
-    # Run verification in a fire-and-forget Task to avoid blocking patrols
-    Task.start(fn ->
+    # Run verification under TaskSupervisor for proper supervision and crash isolation
+    Task.Supervisor.start_child(GiTF.TaskSupervisor, fn ->
       try do
         do_review_job(op_id, ghost_id, shell_id)
       rescue

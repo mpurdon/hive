@@ -207,14 +207,44 @@ defmodule GiTF.Major do
     {:noreply, %{state | port: nil, status: :idle, awaiter: nil}}
   end
 
-  def handle_info({:DOWN, ref, :process, _pid, reason}, state) when is_reference(ref) do
-    Logger.warning("Major's API session process died: #{inspect(reason)}")
+  def handle_info({:DOWN, _ref, :process, pid, reason}, state) when is_pid(pid) do
+    # Check if this is a ghost worker dying — look up via Registry
+    ghost_id =
+      GiTF.Registry
+      |> Registry.select([{{{:ghost, :"$1"}, pid, :_}, [], [:"$1"]}])
+      |> List.first()
 
-    if state[:awaiter] do
-      GenServer.reply(state.awaiter, :ok)
+    if ghost_id do
+      # Ghost worker died — check if it already sent a link_msg
+      unless reason == :normal do
+        Logger.warning("Ghost worker #{ghost_id} died unexpectedly: #{inspect(reason)}")
+
+        case GiTF.Ghosts.get(ghost_id) do
+          {:ok, %{status: status, op_id: op_id}} when status in ["working", "starting"] and not is_nil(op_id) ->
+            # Worker died without completing — mark as crashed and fail the op
+            GiTF.Archive.put(:ghosts, %{GiTF.Archive.get(:ghosts, ghost_id) | status: "crashed"})
+            GiTF.Ops.fail(op_id)
+
+            GiTF.Link.send(ghost_id, "major", "job_failed",
+              "Ghost #{ghost_id} worker process died: #{inspect(reason)}")
+
+          _ ->
+            # Ghost already in terminal state, nothing to do
+            :ok
+        end
+      end
+
+      {:noreply, update_in(state.active_ghosts, &Map.delete(&1, ghost_id))}
+    else
+      # Not a ghost worker — likely the API session process
+      Logger.warning("Major's API session process died: #{inspect(reason)}")
+
+      if state[:awaiter] do
+        GenServer.reply(state.awaiter, :ok)
+      end
+
+      {:noreply, %{state | port: nil, status: :idle, awaiter: nil}}
     end
-
-    {:noreply, %{state | port: nil, status: :idle, awaiter: nil}}
   end
 
   def handle_info({ref, {:verification_passed, ghost_id, op_id}}, state) do
@@ -1056,6 +1086,11 @@ defmodule GiTF.Major do
         {:ok, ghost} ->
           Logger.info("Auto-spawned ghost #{ghost.id} for op #{op.id} (#{op.title})")
           register_with_run(run, ghost.id, op.id)
+
+          # Monitor the worker process for immediate failure detection
+          # (supplements the timer-based recover_stuck_jobs)
+          monitor_ghost_worker(ghost.id)
+
           state
 
         {:error, reason} ->
@@ -1076,6 +1111,13 @@ defmodule GiTF.Major do
 
           state
       end
+    end
+  end
+
+  defp monitor_ghost_worker(ghost_id) do
+    case GiTF.Ghost.Worker.lookup(ghost_id) do
+      {:ok, pid} -> Process.monitor(pid)
+      :error -> nil
     end
   end
 
