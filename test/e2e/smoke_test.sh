@@ -132,7 +132,7 @@ print_step "Creating quest..."
 QUEST_OUTPUT=$(hive quest new "Implement the multiply function in calculator.py and make test_multiply pass" --comb "$COMB_ID" 2>&1) || true
 echo "  $QUEST_OUTPUT"
 
-QUEST_ID=$(echo "$QUEST_OUTPUT" | grep -oE 'qst-[a-f0-9]+' | head -1 || true)
+QUEST_ID=$(echo "$QUEST_OUTPUT" | grep -oE 'msn-[a-f0-9]+' | head -1 || true)
 if [ -z "$QUEST_ID" ]; then
   print_err "Could not extract quest ID"
   exit 1

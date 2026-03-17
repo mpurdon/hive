@@ -122,7 +122,7 @@ defmodule GiTF.MajorTest do
 
       # Simulate receiving a link_msg message directly (plain map now)
       link_msg = %{
-        id: "wag-test1",
+        id: "lnk-test1",
         from: "ghost-abc123",
         to: "major",
         subject: "job_complete",
@@ -143,7 +143,7 @@ defmodule GiTF.MajorTest do
       Major.start_session()
 
       link_msg = %{
-        id: "wag-test2",
+        id: "lnk-test2",
         from: "ghost-def456",
         to: "major",
         subject: "job_failed",
@@ -196,7 +196,7 @@ defmodule GiTF.MajorTest do
       # Simulate the failed link_msg -- retry will attempt to spawn a ghost
       # which may fail (no worktree), but the retry count should still be tracked
       link_msg = %{
-        id: "wag-retry-1",
+        id: "lnk-retry-1",
         from: ghost.id,
         to: "major",
         subject: "job_failed",
@@ -240,7 +240,7 @@ defmodule GiTF.MajorTest do
       Major.start_session()
 
       link_msg = %{
-        id: "wag-adv-1",
+        id: "lnk-adv-1",
         from: ghost.id,
         to: "major",
         subject: "job_complete",
@@ -269,11 +269,11 @@ defmodule GiTF.MajorTest do
       GiTF.Link.subscribe("link:major")
 
       {:ok, sector} =
-        Archive.insert(:sectors, %{name: "wag-sector-#{:erlang.unique_integer([:positive])}"})
+        Archive.insert(:sectors, %{name: "lnk-sector-#{:erlang.unique_integer([:positive])}"})
 
       {:ok, mission} =
         Archive.insert(:missions, %{
-          name: "wag-mission-#{:erlang.unique_integer([:positive])}",
+          name: "lnk-mission-#{:erlang.unique_integer([:positive])}",
           status: "active"
         })
 
@@ -285,7 +285,7 @@ defmodule GiTF.MajorTest do
         })
 
       {:ok, ghost} =
-        Archive.insert(:ghosts, %{name: "wag-ghost", status: "working", op_id: op.id})
+        Archive.insert(:ghosts, %{name: "lnk-ghost", status: "working", op_id: op.id})
 
       {:ok, _} = GiTF.Ops.assign(op.id, ghost.id)
       {:ok, _} = GiTF.Ops.start(op.id)
@@ -294,7 +294,7 @@ defmodule GiTF.MajorTest do
       Major.start_session()
 
       link_msg = %{
-        id: "wag-complete-1",
+        id: "lnk-complete-1",
         from: ghost.id,
         to: "major",
         subject: "job_complete",
@@ -355,7 +355,7 @@ defmodule GiTF.MajorTest do
       Major.start_session()
 
       link_msg = %{
-        id: "wag-spawn-1",
+        id: "lnk-spawn-1",
         from: ghost.id,
         to: "major",
         subject: "job_complete",
@@ -411,7 +411,7 @@ defmodule GiTF.MajorTest do
       Archive.put(:ops, Map.put(exhausted_job, :retry_count, 3))
 
       link_msg = %{
-        id: "wag-exhaust-1",
+        id: "lnk-exhaust-1",
         from: ghost.id,
         to: "major",
         subject: "validation_failed",
@@ -455,7 +455,7 @@ defmodule GiTF.MajorTest do
       Major.start_session()
 
       link_msg = %{
-        id: "wag-val-1",
+        id: "lnk-val-1",
         from: ghost.id,
         to: "major",
         subject: "validation_failed",

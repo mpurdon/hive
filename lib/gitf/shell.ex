@@ -22,7 +22,7 @@ defmodule GiTF.Shell do
     gitf_root = Keyword.get(opts, :gitf_root)
 
     with {:ok, sector} <- GiTF.Sector.get(sector_id),
-         :ok <- validate_comb_path(sector),
+         :ok <- validate_sector_path(sector),
          worktree_path = build_worktree_path(sector.path, ghost_id),
          {:ok, _path} <- Git.worktree_add(sector.path, worktree_path, branch),
          :ok <- maybe_generate_settings(ghost_id, gitf_root, worktree_path),
@@ -145,9 +145,9 @@ defmodule GiTF.Shell do
 
   # -- Private helpers -------------------------------------------------------
 
-  defp validate_comb_path(%{path: nil}), do: {:error, :comb_has_no_path}
-  defp validate_comb_path(%{path: path}) when is_binary(path), do: :ok
-  defp validate_comb_path(_comb), do: {:error, :comb_has_no_path}
+  defp validate_sector_path(%{path: nil}), do: {:error, :sector_has_no_path}
+  defp validate_sector_path(%{path: path}) when is_binary(path), do: :ok
+  defp validate_sector_path(_sector), do: {:error, :sector_has_no_path}
 
   defp build_worktree_path(sector_path, ghost_id) do
     Path.join([sector_path, "ghosts", ghost_id])

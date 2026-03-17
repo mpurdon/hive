@@ -18,7 +18,7 @@ defmodule GiTF.Conflict do
   @spec check(String.t()) :: {:ok, :clean} | {:error, :conflicts, [String.t()]} | {:error, term()}
   def check(shell_id) do
     with {:ok, shell} <- fetch_cell(shell_id),
-         {:ok, sector} <- fetch_comb(shell.sector_id),
+         {:ok, sector} <- fetch_sector(shell.sector_id),
          {:ok, main_branch} <- detect_main_branch(sector.path) do
       check_conflicts(sector.path, shell.branch, main_branch)
     end
@@ -57,7 +57,7 @@ defmodule GiTF.Conflict do
 
   def resolve(shell_id, :rebase) do
     with {:ok, shell} <- fetch_cell(shell_id),
-         {:ok, sector} <- fetch_comb(shell.sector_id),
+         {:ok, sector} <- fetch_sector(shell.sector_id),
          {:ok, main_branch} <- detect_main_branch(sector.path) do
       worktree_path = shell.worktree_path
 
@@ -123,7 +123,7 @@ defmodule GiTF.Conflict do
   def check_between_cells(cell_id_a, cell_id_b) do
     with {:ok, cell_a} <- fetch_cell(cell_id_a),
          {:ok, cell_b} <- fetch_cell(cell_id_b),
-         {:ok, sector} <- fetch_comb(cell_a.sector_id),
+         {:ok, sector} <- fetch_sector(cell_a.sector_id),
          {:ok, main_branch} <- detect_main_branch(sector.path) do
       files_a = changed_files(sector.path, cell_a.branch, main_branch)
       files_b = changed_files(sector.path, cell_b.branch, main_branch)
@@ -223,7 +223,7 @@ defmodule GiTF.Conflict do
     end
   end
 
-  defp fetch_comb(sector_id) do
+  defp fetch_sector(sector_id) do
     case Archive.get(:sectors, sector_id) do
       nil -> {:error, :comb_not_found}
       sector -> {:ok, sector}

@@ -57,7 +57,7 @@ defmodule GiTF.SyncTest do
   describe "sync_back/1 with pr_branch strategy" do
     test "returns {:ok, \"pr_branch\"} for a sector with pr_branch sync_strategy", ctx do
       # Create a sector with pr_branch strategy
-      {:ok, pr_comb} =
+      {:ok, pr_sector} =
         Archive.insert(:sectors, %{
           name: "pr-sector-#{:erlang.unique_integer([:positive])}",
           sync_strategy: "pr_branch"
@@ -67,7 +67,7 @@ defmodule GiTF.SyncTest do
       {:ok, pr_cell} =
         Archive.insert(:shells, %{
           ghost_id: ctx.ghost.id,
-          sector_id: pr_comb.id,
+          sector_id: pr_sector.id,
           worktree_path: "/tmp/pr-worktree",
           branch: "ghost/pr-test",
           status: "active"
@@ -86,8 +86,8 @@ defmodule GiTF.SyncTest do
   describe "sync_back/1 with nil sync_strategy on sector" do
     test "defaults to manual when sector has nil sync_strategy", ctx do
       # Set sync_strategy to nil directly, simulating an older sector record
-      updated_comb = %{ctx.sector | sync_strategy: nil}
-      Archive.put(:sectors, updated_comb)
+      updated_sector = %{ctx.sector | sync_strategy: nil}
+      Archive.put(:sectors, updated_sector)
 
       assert {:ok, "manual"} = Sync.sync_back(ctx.shell.id)
     end
@@ -96,7 +96,7 @@ defmodule GiTF.SyncTest do
   describe "auto_merge rollback" do
     test "auto_merge with invalid repo path returns error", ctx do
       # Create a sector with auto_merge strategy but no valid git repo
-      {:ok, auto_comb} =
+      {:ok, auto_sector} =
         Archive.insert(:sectors, %{
           name: "auto-sector-#{:erlang.unique_integer([:positive])}",
           sync_strategy: "auto_merge",
@@ -106,7 +106,7 @@ defmodule GiTF.SyncTest do
       {:ok, auto_cell} =
         Archive.insert(:shells, %{
           ghost_id: ctx.ghost.id,
-          sector_id: auto_comb.id,
+          sector_id: auto_sector.id,
           worktree_path: "/tmp/nonexistent-worktree",
           branch: "ghost/auto-test",
           status: "active"

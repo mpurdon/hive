@@ -31,7 +31,7 @@ defmodule GiTF.Web.GameChannel do
   @impl true
   def handle_in("spawn_quest", %{"goal" => goal} = payload, socket) do
     # Default to first sector if not provided (demo mode)
-    sector_id = Map.get(payload, "sector_id") || default_comb_id()
+    sector_id = Map.get(payload, "sector_id") || default_sector_id()
     
     case GiTF.Missions.create(%{goal: goal, sector_id: sector_id, source: "game_ui"}) do
       {:ok, mission} ->
@@ -86,7 +86,7 @@ defmodule GiTF.Web.GameChannel do
     {:noreply, socket}
   end
   
-  defp default_comb_id do
+  defp default_sector_id do
     case GiTF.Sector.list() do
       [first | _] -> first.id
       _ -> nil

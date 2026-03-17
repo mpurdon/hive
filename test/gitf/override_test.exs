@@ -23,8 +23,8 @@ defmodule GiTF.OverrideTest do
     sector_id = Map.get(opts, :sector_id, "cmb_test")
 
     # Create sector
-    comb_attrs = Map.get(opts, :sector, %{})
-    sector = Map.merge(%{id: sector_id, path: "/tmp/test", name: "test"}, comb_attrs)
+    sector_attrs = Map.get(opts, :sector, %{})
+    sector = Map.merge(%{id: sector_id, path: "/tmp/test", name: "test"}, sector_attrs)
     Archive.insert(:sectors, sector)
 
     {:ok, mission} = GiTF.Missions.create(%{goal: goal, sector_id: sector_id})

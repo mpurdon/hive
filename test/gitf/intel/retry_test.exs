@@ -33,7 +33,7 @@ defmodule GiTF.Intel.RetryTest do
     test "creates retry op with strategy" do
       op = %{
         id: "op-retry",
-        mission_id: "qst-123",
+        mission_id: "msn-123",
         sector_id: "sector-test",
         title: "Test op",
         description: "Test",

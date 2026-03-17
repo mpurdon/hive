@@ -74,19 +74,19 @@ defmodule GiTF.ShellTest do
     end
 
     test "returns error for nonexistent sector", %{ghost: ghost} do
-      assert {:error, :not_found} = Shell.create("cmb-000000", ghost.id)
+      assert {:error, :not_found} = Shell.create("sec-000000", ghost.id)
     end
 
     test "returns error for sector without a path", %{ghost: ghost} do
       # Insert a sector with nil path
-      {:ok, remote_comb} =
+      {:ok, remote_sector} =
         Archive.insert(:sectors, %{
           name: "remote-only-#{:erlang.unique_integer([:positive])}",
           repo_url: "https://example.com/repo",
           path: nil
         })
 
-      assert {:error, :comb_has_no_path} = Shell.create(remote_comb.id, ghost.id)
+      assert {:error, :sector_has_no_path} = Shell.create(remote_sector.id, ghost.id)
     end
   end
 

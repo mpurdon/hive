@@ -13,7 +13,7 @@ defmodule GiTF.Config do
     "llm" => %{"keys" => %{"google" => "", "anthropic" => ""}},
     "github" => %{"token" => ""},
     "server" => %{"url" => ""},
-    "session" => %{"current_comb" => ""}
+    "session" => %{"current_sector" => ""}
   }
 
   @doc """

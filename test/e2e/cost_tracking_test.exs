@@ -2,7 +2,7 @@ defmodule GiTF.E2E.CostTrackingTest do
   use GiTF.TestDriver.Scenario
 
   scenario "cost data is recorded from mock Claude output" do
-    {:ok, env, sector} = Harness.add_comb(env)
+    {:ok, env, sector} = Harness.add_sector(env)
 
     {:ok, _quest, [job1]} =
       Harness.create_quest(env,
@@ -42,7 +42,7 @@ defmodule GiTF.E2E.CostTrackingTest do
   end
 
   scenario "cost summary aggregates across ghosts" do
-    {:ok, env, sector} = Harness.add_comb(env)
+    {:ok, env, sector} = Harness.add_sector(env)
 
     {:ok, _quest, [job1, job2]} =
       Harness.create_quest(env,

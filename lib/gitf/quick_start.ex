@@ -67,8 +67,8 @@ defmodule GiTF.QuickStart do
   The generated markdown tells a ghost how to communicate with the major
   and other ghosts via link messages.
   """
-  @spec generate_comb_claude_md(String.t(), String.t()) :: String.t()
-  def generate_comb_claude_md(sector_name, sector_path) do
+  @spec generate_sector_claude_md(String.t(), String.t()) :: String.t()
+  def generate_sector_claude_md(sector_name, sector_path) do
     """
     # #{sector_name} - GiTF Worker Instructions
 

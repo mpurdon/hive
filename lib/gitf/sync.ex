@@ -28,11 +28,11 @@ defmodule GiTF.Sync do
   @spec sync_back(String.t(), keyword()) :: {:ok, String.t()} | {:error, term()}
   def sync_back(shell_id, _opts \\ []) do
     with {:ok, shell} <- fetch_cell(shell_id),
-         {:ok, sector} <- fetch_comb(shell.sector_id) do
+         {:ok, sector} <- fetch_sector(shell.sector_id) do
       strategy = sector.sync_strategy || "manual"
 
       if strategy == "auto_merge" do
-        with_comb_lock(sector.id, fn -> apply_strategy(strategy, shell, sector) end)
+        with_sector_lock(sector.id, fn -> apply_strategy(strategy, shell, sector) end)
       else
         apply_strategy(strategy, shell, sector)
       end
@@ -51,8 +51,8 @@ defmodule GiTF.Sync do
     with {:ok, mission} <- GiTF.Missions.get(mission_id),
          shells <- cells_for_quest(mission),
          true <- shells != [] || {:error, :no_cells},
-         {:ok, sector} <- fetch_comb_for_cells(shells) do
-      with_comb_lock(sector.id, fn ->
+         {:ok, sector} <- fetch_sector_for_cells(shells) do
+      with_sector_lock(sector.id, fn ->
         with {:ok, main_branch} <- detect_main_branch(sector.path),
              quest_branch = "mission/#{mission.name}",
              :ok <- create_quest_branch(sector.path, quest_branch, main_branch) do
@@ -65,7 +65,7 @@ defmodule GiTF.Sync do
   # -- Private: per-sector sync lock --------------------------------------------
 
   @doc false
-  def with_comb_lock(sector_id, fun) do
+  def with_sector_lock(sector_id, fun) do
     lock_key = {:sync_lock, sector_id}
     acquire_lock(lock_key, @lock_timeout, fun)
   end
@@ -92,7 +92,7 @@ defmodule GiTF.Sync do
 
   # -- Private: strategy dispatch ----------------------------------------------
 
-  defp apply_strategy("manual", shell, _comb) do
+  defp apply_strategy("manual", shell, _sector) do
     Logger.info("Sync strategy: manual. Branch #{shell.branch} ready for manual sync.")
     {:ok, "manual"}
   end
@@ -129,7 +129,7 @@ defmodule GiTF.Sync do
     {:ok, "pr_branch"}
   end
 
-  defp apply_strategy(unknown, _cell, _comb) do
+  defp apply_strategy(unknown, _cell, _sector) do
     {:error, {:unknown_strategy, unknown}}
   end
 
@@ -142,8 +142,8 @@ defmodule GiTF.Sync do
   @spec sync_back_with_rebase(String.t(), keyword()) :: {:ok, String.t()} | {:error, term()}
   def sync_back_with_rebase(shell_id, _opts \\ []) do
     with {:ok, shell} <- fetch_cell(shell_id),
-         {:ok, sector} <- fetch_comb(shell.sector_id) do
-      with_comb_lock(sector.id, fn ->
+         {:ok, sector} <- fetch_sector(shell.sector_id) do
+      with_sector_lock(sector.id, fn ->
         with {:ok, main_branch} <- detect_main_branch(sector.path),
              :ok <- rebase_branch(shell.worktree_path, main_branch),
              :ok <- GiTF.Git.checkout(sector.path, main_branch),
@@ -168,7 +168,7 @@ defmodule GiTF.Sync do
     end
   end
 
-  defp fetch_comb(sector_id) do
+  defp fetch_sector(sector_id) do
     case Archive.get(:sectors, sector_id) do
       nil -> {:error, :comb_not_found}
       sector -> {:ok, sector}
@@ -220,8 +220,8 @@ defmodule GiTF.Sync do
     end)
   end
 
-  defp fetch_comb_for_cells([shell | _]) do
-    fetch_comb(shell.sector_id)
+  defp fetch_sector_for_cells([shell | _]) do
+    fetch_sector(shell.sector_id)
   end
 
   defp create_quest_branch(repo_path, quest_branch, main_branch) do

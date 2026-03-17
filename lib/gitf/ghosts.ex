@@ -313,7 +313,7 @@ defmodule GiTF.Ghosts do
     end
   end
 
-  defp maybe_ensure_agent(op_id, _comb_id, shell) do
+  defp maybe_ensure_agent(op_id, _sector_id, shell) do
     # Best-effort, don't block spawn on agent generation
     try do
       case GiTF.Ops.get(op_id) do
@@ -332,7 +332,7 @@ defmodule GiTF.Ghosts do
               GiTF.AgentProfile.install_agents(sector.path, shell.worktree_path)
               :ok
 
-            _comb ->
+            _sector ->
               :ok
           end
 

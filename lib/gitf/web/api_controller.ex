@@ -444,7 +444,7 @@ defmodule GiTF.Web.ApiController do
 
   # -- Sectors -----------------------------------------------------------------
 
-  def add_comb(conn, params) do
+  def add_sector(conn, params) do
     path = params["path"]
     opts_map = params["opts"] || %{}
 
@@ -458,33 +458,33 @@ defmodule GiTF.Web.ApiController do
       end)
 
     case GiTF.Sector.add(path, opts) do
-      {:ok, sector} -> json(conn, %{data: serialize_comb(sector)})
+      {:ok, sector} -> json(conn, %{data: serialize_sector(sector)})
       {:error, reason} -> error(conn, 422, reason)
     end
   end
 
-  def list_combs(conn, _params) do
+  def list_sectors(conn, _params) do
     sectors = GiTF.Sector.list()
-    json(conn, %{data: Enum.map(sectors, &serialize_comb/1)})
+    json(conn, %{data: Enum.map(sectors, &serialize_sector/1)})
   end
 
-  def show_comb(conn, %{"id" => id}) do
+  def show_sector(conn, %{"id" => id}) do
     case GiTF.Sector.get(id) do
-      {:ok, sector} -> json(conn, %{data: serialize_comb(sector)})
+      {:ok, sector} -> json(conn, %{data: serialize_sector(sector)})
       {:error, :not_found} -> error(conn, 404, :not_found)
     end
   end
 
-  def remove_comb(conn, %{"id" => id}) do
+  def remove_sector(conn, %{"id" => id}) do
     case GiTF.Sector.remove(id) do
-      {:ok, _comb} -> json(conn, %{data: %{deleted: true}})
+      {:ok, _sector} -> json(conn, %{data: %{deleted: true}})
       {:error, :not_found} -> error(conn, 404, :not_found)
     end
   end
 
-  def use_comb(conn, %{"id" => id}) do
+  def use_sector(conn, %{"id" => id}) do
     case GiTF.Sector.set_current(id) do
-      {:ok, sector} -> json(conn, %{data: serialize_comb(sector)})
+      {:ok, sector} -> json(conn, %{data: serialize_sector(sector)})
       {:error, :not_found} -> error(conn, 404, :not_found)
       {:error, reason} -> error(conn, 422, reason)
     end
@@ -663,7 +663,7 @@ defmodule GiTF.Web.ApiController do
     }
   end
 
-  defp serialize_comb(c) do
+  defp serialize_sector(c) do
     %{
       id: c.id,
       name: c.name,

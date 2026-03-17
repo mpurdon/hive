@@ -26,7 +26,7 @@ defmodule GiTF.Major.PlannerReplanTest do
       })
 
     # Create a sector
-    {:ok, _comb} =
+    {:ok, _sector} =
       Archive.insert(:sectors, %{id: "sector-1", name: "test", path: "/tmp/test"})
 
     {:ok, mission: mission}

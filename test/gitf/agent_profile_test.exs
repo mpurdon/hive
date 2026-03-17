@@ -124,7 +124,7 @@ defmodule GiTF.AgentProfileTest do
     end
   end
 
-  describe "detect_from_comb/1" do
+  describe "detect_from_sector/1" do
     test "detects strands-sdk from pyproject.toml with strands-agents dependency" do
       tmp =
         Path.join(System.tmp_dir!(), "gitf_comb_detect_#{:erlang.unique_integer([:positive])}")
@@ -141,7 +141,7 @@ defmodule GiTF.AgentProfileTest do
       ]
       """)
 
-      assert AgentProfile.detect_from_comb(tmp) == "strands-sdk"
+      assert AgentProfile.detect_from_sector(tmp) == "strands-sdk"
     end
 
     test "detects fastapi from pyproject.toml" do
@@ -156,7 +156,7 @@ defmodule GiTF.AgentProfileTest do
       dependencies = ["fastapi", "uvicorn"]
       """)
 
-      assert AgentProfile.detect_from_comb(tmp) == "fastapi"
+      assert AgentProfile.detect_from_sector(tmp) == "fastapi"
     end
 
     test "detects react from package.json with react dependency" do
@@ -173,7 +173,7 @@ defmodule GiTF.AgentProfileTest do
         })
       )
 
-      assert AgentProfile.detect_from_comb(tmp) == "react"
+      assert AgentProfile.detect_from_sector(tmp) == "react"
     end
 
     test "detects nextjs from package.json (framework beats library)" do
@@ -190,7 +190,7 @@ defmodule GiTF.AgentProfileTest do
         })
       )
 
-      assert AgentProfile.detect_from_comb(tmp) == "nextjs"
+      assert AgentProfile.detect_from_sector(tmp) == "nextjs"
     end
 
     test "detects phoenix from mix.exs" do
@@ -208,7 +208,7 @@ defmodule GiTF.AgentProfileTest do
       end
       """)
 
-      assert AgentProfile.detect_from_comb(tmp) == "phoenix"
+      assert AgentProfile.detect_from_sector(tmp) == "phoenix"
     end
 
     test "returns nil for empty directory" do
@@ -218,7 +218,7 @@ defmodule GiTF.AgentProfileTest do
       File.mkdir_p!(tmp)
       on_exit(fn -> File.rm_rf!(tmp) end)
 
-      assert AgentProfile.detect_from_comb(tmp) == nil
+      assert AgentProfile.detect_from_sector(tmp) == nil
     end
   end
 
@@ -284,21 +284,21 @@ defmodule GiTF.AgentProfileTest do
       File.mkdir_p!(tmp)
       on_exit(fn -> File.rm_rf!(tmp) end)
 
-      # Comb has strands-agents in pyproject.toml → detect_from_comb returns "strands-sdk"
+      # Comb has strands-agents in pyproject.toml → detect_from_sector returns "strands-sdk"
       File.write!(Path.join(tmp, "pyproject.toml"), """
       [project]
       dependencies = ["strands-agents>=0.1.0"]
       """)
 
       # Job title says "Python" which would detect "python" at priority 3 via detect_technology
-      # Comb-level should take priority: detect_from_comb returns "strands-sdk"
-      comb_key = AgentProfile.detect_from_comb(tmp)
+      # Comb-level should take priority: detect_from_sector returns "strands-sdk"
+      sector_key = AgentProfile.detect_from_sector(tmp)
       job_key = AgentProfile.detect_technology("Python helper script", "Write a utility")
 
-      assert comb_key == "strands-sdk"
+      assert sector_key == "strands-sdk"
       assert job_key == "python"
-      # ensure_agent uses: detect_from_comb || detect_technology — sector wins
-      assert comb_key != nil
+      # ensure_agent uses: detect_from_sector || detect_technology — sector wins
+      assert sector_key != nil
     end
   end
 
@@ -310,8 +310,8 @@ defmodule GiTF.AgentProfileTest do
       worktree =
         Path.join(System.tmp_dir!(), "gitf_install_wt_#{:erlang.unique_integer([:positive])}")
 
-      comb_agents = Path.join(sector, ".claude/agents")
-      File.mkdir_p!(comb_agents)
+      sector_agents = Path.join(sector, ".claude/agents")
+      File.mkdir_p!(sector_agents)
       File.mkdir_p!(worktree)
 
       on_exit(fn ->
@@ -319,8 +319,8 @@ defmodule GiTF.AgentProfileTest do
         File.rm_rf!(worktree)
       end)
 
-      File.write!(Path.join(comb_agents, "elixir-expert.md"), "# Elixir Expert")
-      File.write!(Path.join(comb_agents, "rust-expert.md"), "# Rust Expert")
+      File.write!(Path.join(sector_agents, "elixir-expert.md"), "# Elixir Expert")
+      File.write!(Path.join(sector_agents, "rust-expert.md"), "# Rust Expert")
 
       assert :ok = AgentProfile.install_agents(sector, worktree)
 
@@ -339,9 +339,9 @@ defmodule GiTF.AgentProfileTest do
           "gitf_install_noover_wt_#{:erlang.unique_integer([:positive])}"
         )
 
-      comb_agents = Path.join(sector, ".claude/agents")
+      sector_agents = Path.join(sector, ".claude/agents")
       wt_agents = Path.join(worktree, ".claude/agents")
-      File.mkdir_p!(comb_agents)
+      File.mkdir_p!(sector_agents)
       File.mkdir_p!(wt_agents)
 
       on_exit(fn ->
@@ -349,7 +349,7 @@ defmodule GiTF.AgentProfileTest do
         File.rm_rf!(worktree)
       end)
 
-      File.write!(Path.join(comb_agents, "elixir-expert.md"), "# Comb Version")
+      File.write!(Path.join(sector_agents, "elixir-expert.md"), "# Comb Version")
       File.write!(Path.join(wt_agents, "elixir-expert.md"), "# Worktree Version")
 
       assert :ok = AgentProfile.install_agents(sector, worktree)

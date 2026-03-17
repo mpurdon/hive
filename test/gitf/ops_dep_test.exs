@@ -46,7 +46,7 @@ defmodule GiTF.OpsDepTest do
       assert {:ok, dep} = Ops.add_dependency(job_b.id, job_a.id)
       assert dep.op_id == job_b.id
       assert dep.depends_on_id == job_a.id
-      assert String.starts_with?(dep.id, "jdp-")
+      assert String.starts_with?(dep.id, "dep-")
     end
 
     test "rejects self-dependency", %{mission: q, sector: c} do

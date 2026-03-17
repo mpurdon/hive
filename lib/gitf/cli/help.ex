@@ -109,7 +109,7 @@ defmodule GiTF.CLI.Help do
       $ section verify --op op-abc123
 
       # Verify all ops in a mission
-      $ section verify --mission qst-xyz789
+      $ section verify --mission msn-xyz789
 
       # Start automatic verification
       $ section tachikoma --verify

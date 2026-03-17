@@ -216,7 +216,7 @@ defmodule GiTF.Major.Orchestrator do
     sector_id = Map.get(mission, :sector_id)
 
     if is_nil(sector_id) do
-      {:error, :no_comb_assigned}
+      {:error, :no_sector_assigned}
     else
       with {:ok, _} <- GiTF.Missions.transition_phase(mission.id, "research", "Quest started") do
         sector = Archive.get(:sectors, sector_id)
@@ -1146,9 +1146,53 @@ defmodule GiTF.Major.Orchestrator do
 
   defp validate_quest_ready(mission) do
     cond do
-      is_nil(Map.get(mission, :sector_id)) -> {:error, :no_comb_assigned}
-      Map.get(mission, :status) not in ["pending", "active", "planning"] -> {:error, :quest_not_pending}
-      true -> :ok
+      is_nil(Map.get(mission, :sector_id)) ->
+        # Try to assign the default sector
+        case auto_assign_sector(mission) do
+          :ok -> :ok
+          {:error, reason} -> {:error, reason}
+        end
+
+      Map.get(mission, :status) not in ["pending", "active", "planning"] ->
+        {:error, :mission_not_pending}
+
+      true ->
+        :ok
+    end
+  end
+
+  defp auto_assign_sector(mission) do
+    sectors = GiTF.Sector.list()
+
+    case sectors do
+      [] ->
+        {:error, :no_sector_assigned}
+
+      [single] ->
+        # Only one sector — auto-assign it
+        case GiTF.Archive.get(:missions, mission.id) do
+          nil -> {:error, :no_sector_assigned}
+          record ->
+            GiTF.Archive.put(:missions, Map.put(record, :sector_id, single.id))
+            Logger.info("Auto-assigned sector #{single.name} to mission #{mission.id}")
+            :ok
+        end
+
+      _multiple ->
+        # Multiple sectors — try to use the current default
+        case GiTF.Sector.current() do
+          {:ok, current} ->
+            case GiTF.Archive.get(:missions, mission.id) do
+              nil -> {:error, :no_sector_assigned}
+              record ->
+                GiTF.Archive.put(:missions, Map.put(record, :sector_id, current.id))
+                Logger.info("Auto-assigned current sector #{current.name} to mission #{mission.id}")
+                :ok
+            end
+
+          _ ->
+            {:error, :no_sector_assigned}
+        end
     end
   end
 

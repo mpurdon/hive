@@ -461,16 +461,16 @@ defmodule GiTF.Archive do
     Map.put(record, :id, GiTF.ID.generate(prefix))
   end
 
-  defp collection_prefix(:sectors), do: :cmb
+  defp collection_prefix(:sectors), do: :sec
   defp collection_prefix(:ghosts), do: :ghost
   defp collection_prefix(:ops), do: :op
-  defp collection_prefix(:missions), do: :qst
-  defp collection_prefix(:links), do: :wag
+  defp collection_prefix(:missions), do: :msn
+  defp collection_prefix(:links), do: :lnk
   defp collection_prefix(:costs), do: :cst
   defp collection_prefix(:shells), do: :cel
-  defp collection_prefix(:op_dependencies), do: :jdp
-  defp collection_prefix(:mission_phase_transitions), do: :qpt
-  defp collection_prefix(:sector_research_cache), do: :crc
+  defp collection_prefix(:op_dependencies), do: :dep
+  defp collection_prefix(:mission_phase_transitions), do: :mpt
+  defp collection_prefix(:sector_research_cache), do: :src
   defp collection_prefix(:research_file_index), do: :rfi
   defp collection_prefix(:audit_results), do: :vrf
   defp collection_prefix(:context_snapshots), do: :ctx
@@ -482,7 +482,7 @@ defmodule GiTF.Archive do
   defp collection_prefix(:events), do: :evt
   defp collection_prefix(:agent_identities), do: :agi
   defp collection_prefix(:runs), do: :run
-  defp collection_prefix(_), do: :hiv
+  defp collection_prefix(_), do: :gtf
 
   defp ensure_timestamps(record) do
     now = DateTime.utc_now() |> DateTime.truncate(:second)

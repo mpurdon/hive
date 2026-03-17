@@ -2,7 +2,7 @@ defmodule GiTF.E2E.FailureRetryTest do
   use GiTF.TestDriver.Scenario
 
   scenario "failed ghost sends job_failed link_msg" do
-    {:ok, env, sector} = Harness.add_comb(env)
+    {:ok, env, sector} = Harness.add_sector(env)
 
     {:ok, _quest, [job1]} =
       Harness.create_quest(env,
@@ -30,7 +30,7 @@ defmodule GiTF.E2E.FailureRetryTest do
   end
 
   scenario "Major receives failure link_msg and stays alive" do
-    {:ok, env, sector} = Harness.add_comb(env)
+    {:ok, env, sector} = Harness.add_sector(env)
     env = Harness.start_major(env)
 
     {:ok, _quest, [job1]} =
@@ -65,7 +65,7 @@ defmodule GiTF.E2E.FailureRetryTest do
   end
 
   scenario "Major marks mission failed after retry exhaustion" do
-    {:ok, env, sector} = Harness.add_comb(env)
+    {:ok, env, sector} = Harness.add_sector(env)
     env = Harness.start_major(env)
 
     {:ok, mission, [job1]} =
@@ -89,7 +89,7 @@ defmodule GiTF.E2E.FailureRetryTest do
 
     # Send failure link_msg directly to Major
     link_msg = %{
-      id: "wag-exhaust-#{:erlang.unique_integer([:positive])}",
+      id: "lnk-exhaust-#{:erlang.unique_integer([:positive])}",
       from: ghost.id,
       to: "major",
       subject: "job_failed",

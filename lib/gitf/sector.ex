@@ -85,18 +85,18 @@ defmodule GiTF.Sector do
   @doc """
   Returns the current sector from the session config.
 
-  Returns `{:ok, sector}` or `{:error, :no_current_comb}`.
+  Returns `{:ok, sector}` or `{:error, :no_current_sector}`.
   """
-  @spec current() :: {:ok, map()} | {:error, :no_current_comb}
+  @spec current() :: {:ok, map()} | {:error, :no_current_sector}
   def current do
     with {:ok, gitf_root} <- GiTF.gitf_dir(),
          config_path = Path.join([gitf_root, ".gitf", "config.toml"]),
          {:ok, config} <- GiTF.Config.read_config(config_path),
-         id when is_binary(id) and id != "" <- get_in(config, ["session", "current_comb"]),
+         id when is_binary(id) and id != "" <- get_in(config, ["session", "current_sector"]),
          {:ok, sector} <- get(id) do
       {:ok, sector}
     else
-      _ -> {:error, :no_current_comb}
+      _ -> {:error, :no_current_sector}
     end
   end
 
@@ -112,8 +112,8 @@ defmodule GiTF.Sector do
          config_path = Path.join([gitf_root, ".gitf", "config.toml"]),
          {:ok, config} <- GiTF.Config.read_config(config_path) do
       updated =
-        Map.update(config, "session", %{"current_comb" => sector.id}, fn session ->
-          Map.put(session, "current_comb", sector.id)
+        Map.update(config, "session", %{"current_sector" => sector.id}, fn session ->
+          Map.put(session, "current_sector", sector.id)
         end)
 
       case GiTF.Config.write_config(config_path, updated) do

@@ -3,7 +3,7 @@ defmodule GiTF.Major.PhasePromptsTest do
 
   alias GiTF.Major.PhasePrompts
 
-  @mission %{id: "q-1", goal: "Add user authentication", sector_id: "cmb-1"}
+  @mission %{id: "q-1", goal: "Add user authentication", sector_id: "sec-1"}
 
   describe "research_prompt/2" do
     test "includes mission goal" do

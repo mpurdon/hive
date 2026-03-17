@@ -132,7 +132,7 @@ defmodule GiTF.TransferTest do
     end
 
     test "returns error for non-existent link_msg" do
-      assert {:error, :transfer_not_found} = Transfer.resume("ghost-123", "wag-nonexistent")
+      assert {:error, :transfer_not_found} = Transfer.resume("ghost-123", "lnk-nonexistent")
     end
   end
 

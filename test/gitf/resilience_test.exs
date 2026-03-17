@@ -62,7 +62,7 @@ defmodule GiTF.ResilienceTest do
 
   describe "detect_deadlock/1" do
     test "detects no deadlock in linear dependencies" do
-      mission_id = "qst-linear"
+      mission_id = "msn-linear"
       
       # Create ops with linear dependencies
       job1 = %{id: "op-1", mission_id: mission_id, depends_on: [], created_at: DateTime.utc_now(), updated_at: DateTime.utc_now()}
@@ -75,7 +75,7 @@ defmodule GiTF.ResilienceTest do
     end
 
     test "detects circular dependency deadlock" do
-      mission_id = "qst-circular"
+      mission_id = "msn-circular"
       
       # Create ops with circular dependencies
       job1 = %{id: "op-a", mission_id: mission_id, depends_on: ["op-b"], created_at: DateTime.utc_now(), updated_at: DateTime.utc_now()}

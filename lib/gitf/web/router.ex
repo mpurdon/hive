@@ -96,11 +96,11 @@ defmodule GiTF.Web.Router do
     post "/ghosts/:id/fail", ApiController, :fail_bee
 
     # Sectors
-    post "/sectors", ApiController, :add_comb
-    get "/sectors", ApiController, :list_combs
-    get "/sectors/:id", ApiController, :show_comb
-    delete "/sectors/:id", ApiController, :remove_comb
-    post "/sectors/:id/use", ApiController, :use_comb
+    post "/sectors", ApiController, :add_sector
+    get "/sectors", ApiController, :list_sectors
+    get "/sectors/:id", ApiController, :show_sector
+    delete "/sectors/:id", ApiController, :remove_sector
+    post "/sectors/:id/use", ApiController, :use_sector
 
     # Costs
     get "/costs/summary", ApiController, :costs_summary

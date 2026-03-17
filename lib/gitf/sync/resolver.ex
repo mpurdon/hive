@@ -33,7 +33,7 @@ defmodule GiTF.Sync.Resolver do
           {:ok, :merged, non_neg_integer()} | {:error, term(), non_neg_integer()}
   def resolve(op_id, shell_id) do
     with {:ok, shell} <- fetch_cell(shell_id),
-         {:ok, sector} <- fetch_comb(shell.sector_id),
+         {:ok, sector} <- fetch_sector(shell.sector_id),
          {:ok, target} <- determine_target_branch(op_id, sector) do
       attempt_tiers(op_id, shell_id, shell, sector, target, 0)
     else
@@ -43,7 +43,7 @@ defmodule GiTF.Sync.Resolver do
 
   # -- Private: tier escalation ------------------------------------------------
 
-  defp attempt_tiers(op_id, _cell_id, _cell, _comb, _target, tier) when tier > 3 do
+  defp attempt_tiers(op_id, _cell_id, _cell, _sector, _target, tier) when tier > 3 do
     Logger.error("All sync tiers exhausted for op #{op_id}")
 
     GiTF.Telemetry.emit([:gitf, :sync, :exhausted], %{}, %{
@@ -286,7 +286,7 @@ defmodule GiTF.Sync.Resolver do
 
   # -- Private: auto-resolve helpers -------------------------------------------
 
-  defp auto_resolve_files(repo, conflicted, shell, _comb, target) do
+  defp auto_resolve_files(repo, conflicted, shell, _sector, target) do
     Enum.count(conflicted, fn file ->
       cond do
         additive_file?(file) ->
@@ -442,9 +442,9 @@ defmodule GiTF.Sync.Resolver do
           mission -> Map.get(mission, :target_branch)
         end
 
-      comb_branch = Map.get(sector, :target_branch)
+      sector_branch = Map.get(sector, :target_branch)
 
-      case quest_branch || comb_branch do
+      case quest_branch || sector_branch do
         nil -> detect_main_branch(sector.path)
         branch -> {:ok, branch}
       end
@@ -610,7 +610,7 @@ defmodule GiTF.Sync.Resolver do
     end
   end
 
-  defp fetch_comb(sector_id) do
+  defp fetch_sector(sector_id) do
     case Archive.get(:sectors, sector_id) do
       nil -> {:error, :comb_not_found}
       sector -> {:ok, sector}

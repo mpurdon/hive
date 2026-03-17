@@ -12,7 +12,7 @@ defmodule GiTF.TestDriver.Scenario do
         use GiTF.TestDriver.Scenario
 
         scenario "mission completes with two ops" do
-          {:ok, env, sector} = Harness.add_comb(env)
+          {:ok, env, sector} = Harness.add_sector(env)
           {:ok, mission, [job1, job2]} = Harness.create_quest(env,
             ops: [%{title: "Job 1"}, %{title: "Job 2"}]
           )

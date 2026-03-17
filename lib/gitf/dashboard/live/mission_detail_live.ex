@@ -41,7 +41,8 @@ defmodule GiTF.Dashboard.MissionDetailLive do
          |> assign(:selected_phase, nil)
          |> assign(:artifact, nil)
          |> assign(:report, nil)
-         |> assign(:report_loading, false)}
+         |> assign(:report_loading, false)
+         |> assign(:sectors, load_sectors())}
 
       {:error, _} ->
         {:ok,
@@ -89,6 +90,19 @@ defmodule GiTF.Dashboard.MissionDetailLive do
 
       {:error, reason} ->
         {:noreply, put_flash(socket, :error, "Failed to start: #{inspect(reason)}")}
+    end
+  end
+
+  def handle_event("assign_sector", %{"sector_id" => sector_id}, socket) do
+    mission = socket.assigns.mission
+
+    case GiTF.Archive.get(:missions, mission.id) do
+      nil ->
+        {:noreply, put_flash(socket, :error, "Mission not found")}
+
+      record ->
+        GiTF.Archive.put(:missions, Map.put(record, :sector_id, sector_id))
+        {:noreply, socket |> put_flash(:info, "Sector assigned.") |> reload()}
     end
   end
 
@@ -141,10 +155,18 @@ defmodule GiTF.Dashboard.MissionDetailLive do
     case GiTF.Missions.get(id) do
       {:ok, mission} ->
         ops = GiTF.Ops.list(mission_id: id)
-        assign(socket, mission: mission, ops: ops)
+        assign(socket, mission: mission, ops: ops, sectors: load_sectors())
 
       {:error, _} ->
         socket
+    end
+  end
+
+  defp load_sectors do
+    try do
+      GiTF.Sector.list()
+    rescue
+      _ -> []
     end
   end
 
@@ -179,6 +201,18 @@ defmodule GiTF.Dashboard.MissionDetailLive do
           </div>
         </div>
         <div style="display:flex; gap:0.5rem; flex-wrap:wrap">
+          <!-- Sector assignment (if none assigned) -->
+          <%= if is_nil(Map.get(@mission, :sector_id)) and @sectors != [] do %>
+            <form phx-submit="assign_sector" style="display:flex; gap:0.5rem; align-items:center">
+              <select name="sector_id" class="form-select" style="font-size:0.8rem; padding:0.3rem 0.5rem; min-width:150px">
+                <%= for sector <- @sectors do %>
+                  <option value={sector.id}>{sector.name}</option>
+                <% end %>
+              </select>
+              <button type="submit" class="btn btn-blue" style="font-size:0.8rem; padding:0.3rem 0.6rem">Assign Sector</button>
+            </form>
+          <% end %>
+
           <%= case Map.get(@mission, :status, "pending") do %>
             <% "pending" -> %>
               <button phx-click="start" class="btn btn-green">Start Mission</button>

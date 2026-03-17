@@ -58,19 +58,19 @@ defmodule GiTF.Major.ResearchTest do
     assert is_struct(cache.research.analyzed_at, DateTime)
   end
 
-  test "research_comb uses cache when valid", %{sector: sector} do
+  test "research_sector uses cache when valid", %{sector: sector} do
     # First call should create cache
-    {:ok, result1} = Research.research_comb(sector.id)
+    {:ok, result1} = Research.research_sector(sector.id)
     
     # Second call should use cache (same analyzed_at timestamp)
-    {:ok, result2} = Research.research_comb(sector.id)
+    {:ok, result2} = Research.research_sector(sector.id)
     
     assert result1.research.analyzed_at == result2.research.analyzed_at
   end
 
-  test "research_comb refreshes cache when invalid", %{sector: sector} do
+  test "research_sector refreshes cache when invalid", %{sector: sector} do
     # First call creates cache
-    {:ok, result1} = Research.research_comb(sector.id)
+    {:ok, result1} = Research.research_sector(sector.id)
     
     # Make git change to invalidate cache
     File.write!(Path.join(sector.path, "new_file.ex"), "defmodule New do\nend")
@@ -78,7 +78,7 @@ defmodule GiTF.Major.ResearchTest do
     System.cmd("git", ["commit", "-m", "Add new file"], cd: sector.path)
     
     # Second call should refresh cache
-    {:ok, result2} = Research.research_comb(sector.id)
+    {:ok, result2} = Research.research_sector(sector.id)
     
     assert result1.research.analyzed_at != result2.research.analyzed_at
     assert result2.research.structure.total_files == 5

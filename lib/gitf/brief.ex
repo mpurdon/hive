@@ -83,9 +83,9 @@ defmodule GiTF.Brief do
   defp format_quests(missions) do
     missions
     |> Enum.map(fn q ->
-      comb_label = resolve_comb_label(q[:sector_id])
+      sector_label = resolve_sector_label(q[:sector_id])
       job_count = Archive.count(:ops, fn j -> j.mission_id == q.id end)
-      line = "- **#{q.name}** (#{q.id}) [#{q.status}] — #{job_count} op(s)#{comb_label}"
+      line = "- **#{q.name}** (#{q.id}) [#{q.status}] — #{job_count} op(s)#{sector_label}"
 
       if q[:description] do
         line <> "\n  > #{q.description}"
@@ -96,9 +96,9 @@ defmodule GiTF.Brief do
     |> Enum.join("\n")
   end
 
-  defp resolve_comb_label(nil), do: ""
+  defp resolve_sector_label(nil), do: ""
 
-  defp resolve_comb_label(sector_id) do
+  defp resolve_sector_label(sector_id) do
     case Archive.get(:sectors, sector_id) do
       nil -> " | sector: #{sector_id}"
       sector -> " | sector: #{sector.name}"
@@ -359,7 +359,7 @@ defmodule GiTF.Brief do
   defp format_agent_section(nil), do: "No workspace -- cannot check agents."
 
   defp format_agent_section(shell) do
-    sector_path = get_comb_path(shell.sector_id)
+    sector_path = get_sector_path(shell.sector_id)
 
     case sector_path do
       nil ->
@@ -375,9 +375,9 @@ defmodule GiTF.Brief do
     end
   end
 
-  defp get_comb_path(nil), do: nil
+  defp get_sector_path(nil), do: nil
 
-  defp get_comb_path(sector_id) do
+  defp get_sector_path(sector_id) do
     case Archive.get(:sectors, sector_id) do
       nil -> nil
       sector -> sector.path

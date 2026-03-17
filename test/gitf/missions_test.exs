@@ -23,7 +23,7 @@ defmodule GiTF.MissionsTest do
       assert mission.goal == "Refactor the auth module"
       assert mission.name == "refactor-the-auth-module"
       assert mission.status == "pending"
-      assert String.starts_with?(mission.id, "qst-")
+      assert String.starts_with?(mission.id, "msn-")
     end
 
     test "accepts optional sector_id", %{sector: sector} do
@@ -52,7 +52,7 @@ defmodule GiTF.MissionsTest do
     end
 
     test "returns error for unknown ID" do
-      assert {:error, :not_found} = Missions.get("qst-000000")
+      assert {:error, :not_found} = Missions.get("msn-000000")
     end
   end
 
@@ -213,7 +213,7 @@ defmodule GiTF.MissionsTest do
     end
 
     test "returns error for unknown mission" do
-      assert {:error, :not_found} = Missions.close("qst-nonexistent")
+      assert {:error, :not_found} = Missions.close("msn-nonexistent")
     end
   end
 
@@ -241,7 +241,7 @@ defmodule GiTF.MissionsTest do
     end
 
     test "returns not_found for unknown mission" do
-      assert {:error, :not_found} = Missions.set_planning("qst-nonexistent")
+      assert {:error, :not_found} = Missions.set_planning("msn-nonexistent")
     end
   end
 

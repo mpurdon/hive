@@ -3,7 +3,7 @@ defmodule GiTF.IDTest do
 
   describe "generate/1" do
     test "produces an ID with the correct prefix" do
-      for prefix <- ~w(ghost op qst cmb cel wag cst)a do
+      for prefix <- ~w(ghost op msn sec cel lnk cst)a do
         id = GiTF.ID.generate(prefix)
         assert String.starts_with?(id, "#{prefix}-"), "expected #{id} to start with #{prefix}-"
       end

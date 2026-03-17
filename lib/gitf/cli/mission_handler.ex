@@ -12,8 +12,8 @@ defmodule GiTF.CLI.MissionHandler do
     goal = helpers.result_get.(result, :args, :goal)
 
     if GiTF.Client.remote?() do
-      comb_opt = helpers.result_get.(result, :options, :sector)
-      attrs = if comb_opt, do: %{goal: goal, sector_id: comb_opt}, else: %{goal: goal}
+      sector_opt = helpers.result_get.(result, :options, :sector)
+      attrs = if sector_opt, do: %{goal: goal, sector_id: sector_opt}, else: %{goal: goal}
 
       case GiTF.Client.create_quest(attrs) do
         {:ok, mission} ->
@@ -42,9 +42,9 @@ defmodule GiTF.CLI.MissionHandler do
         end
 
       quest_result =
-        case helpers.resolve_comb_id.(helpers.result_get.(result, :options, :sector)) do
+        case helpers.resolve_sector_id.(helpers.result_get.(result, :options, :sector)) do
           {:ok, cid} -> GiTF.Missions.create(%{goal: goal, sector_id: cid})
-          {:error, :no_comb} -> GiTF.Missions.create(%{goal: goal})
+          {:error, :no_sector} -> GiTF.Missions.create(%{goal: goal})
         end
 
       case quest_result do

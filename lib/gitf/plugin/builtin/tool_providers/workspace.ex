@@ -2,7 +2,7 @@ defmodule GiTF.Plugin.Builtin.ToolProviders.Workspace do
   @moduledoc """
   Built-in tool provider that exposes workspace/sector/shell info to agents.
 
-  Provides: `list_combs`, `comb_info`, `list_cells`.
+  Provides: `list_sectors`, `sector_info`, `list_cells`.
   """
 
   use GiTF.Plugin, type: :tool_provider
@@ -16,23 +16,23 @@ defmodule GiTF.Plugin.Builtin.ToolProviders.Workspace do
   @impl true
   def tools do
     [
-      list_combs_tool(),
-      comb_info_tool(),
+      list_sectors_tool(),
+      sector_info_tool(),
       list_cells_tool()
     ]
   end
 
-  # -- list_combs --------------------------------------------------------------
+  # -- list_sectors --------------------------------------------------------------
 
-  defp list_combs_tool do
+  defp list_sectors_tool do
     ReqLLM.Tool.new!(
-      name: "list_combs",
+      name: "list_sectors",
       description: "List all registered sectors (repositories/workspaces) with their IDs and paths.",
-      callback: fn _args -> list_combs() end
+      callback: fn _args -> list_sectors() end
     )
   end
 
-  defp list_combs do
+  defp list_sectors do
     sectors = GiTF.Sector.list()
 
     if sectors == [] do
@@ -49,20 +49,20 @@ defmodule GiTF.Plugin.Builtin.ToolProviders.Workspace do
     e -> {:ok, "Error listing sectors: #{Exception.message(e)}"}
   end
 
-  # -- comb_info ---------------------------------------------------------------
+  # -- sector_info ---------------------------------------------------------------
 
-  defp comb_info_tool do
+  defp sector_info_tool do
     ReqLLM.Tool.new!(
-      name: "comb_info",
+      name: "sector_info",
       description: "Get detailed information about a specific sector by ID or name.",
       parameter_schema: [
         sector_id: [type: :string, required: true, doc: "Sector ID or name"]
       ],
-      callback: &comb_info/1
+      callback: &sector_info/1
     )
   end
 
-  defp comb_info(args) do
+  defp sector_info(args) do
     sector_id = args["sector_id"] || args[:sector_id]
 
     case GiTF.Sector.get(sector_id) do

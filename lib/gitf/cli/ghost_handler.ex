@@ -48,7 +48,7 @@ defmodule GiTF.CLI.GhostHandler do
       op_id = helpers.result_get.(result, :options, :op)
       name = helpers.result_get.(result, :options, :name)
 
-      case helpers.resolve_comb_id.(helpers.result_get.(result, :options, :sector)) do
+      case helpers.resolve_sector_id.(helpers.result_get.(result, :options, :sector)) do
         {:ok, sector_id} ->
           with {:ok, gitf_root} <- GiTF.gitf_dir(),
                {:ok, sector} <- GiTF.Sector.get(sector_id) do
@@ -72,7 +72,7 @@ defmodule GiTF.CLI.GhostHandler do
               Format.error("Failed: #{inspect(reason)}")
           end
 
-        {:error, :no_comb} ->
+        {:error, :no_sector} ->
           Format.error("No sector specified. Use --sector or set one with `gitf sector use`.")
       end
     end

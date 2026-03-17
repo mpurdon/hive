@@ -19,7 +19,7 @@ defmodule GiTF.Onboarding do
     with {:ok, full_path} <- validate_path(path),
          {:ok, project_info} <- detect_project(full_path),
          {:ok, codebase_map} <- map_codebase(full_path, project_info),
-         {:ok, sector} <- create_comb(full_path, project_info, codebase_map, opts),
+         {:ok, sector} <- create_sector(full_path, project_info, codebase_map, opts),
          {:ok, _} <- maybe_generate_research(sector, opts) do
       {:ok, %{sector: sector, project_info: project_info, codebase_map: codebase_map}}
     end
@@ -70,17 +70,17 @@ defmodule GiTF.Onboarding do
     {:ok, codebase_map}
   end
 
-  defp create_comb(path, project_info, _codebase_map, opts) do
+  defp create_sector(path, project_info, _codebase_map, opts) do
     name = opts[:name] || Path.basename(path)
     validation_cmd = opts[:validation_command] || project_info.validation_command
     
-    comb_opts = [
+    sector_opts = [
       name: name,
       validation_command: validation_cmd,
       sync_strategy: suggest_sync_strategy(project_info)
     ]
     
-    case Sector.add(path, comb_opts) do
+    case Sector.add(path, sector_opts) do
       {:ok, sector} -> {:ok, sector}
       {:error, reason} -> {:error, "Failed to create sector: #{inspect(reason)}"}
     end
@@ -90,7 +90,7 @@ defmodule GiTF.Onboarding do
   defp suggest_sync_strategy(%{test_framework: nil}), do: :manual
   defp suggest_sync_strategy(_), do: :auto_merge
 
-  defp maybe_generate_research(_comb, _opts) do
+  defp maybe_generate_research(_sector, _opts) do
     {:ok, :skipped}
   end
 

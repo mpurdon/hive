@@ -2,7 +2,7 @@ defmodule GiTF.E2E.ConcurrentGhostsTest do
   use GiTF.TestDriver.Scenario
 
   scenario "three concurrent ghosts all complete without store corruption" do
-    {:ok, env, sector} = Harness.add_comb(env)
+    {:ok, env, sector} = Harness.add_sector(env)
 
     {:ok, mission, [job1, job2, job3]} =
       Harness.create_quest(env,
@@ -46,7 +46,7 @@ defmodule GiTF.E2E.ConcurrentGhostsTest do
   end
 
   scenario "concurrent ghosts produce separate cost records" do
-    {:ok, env, sector} = Harness.add_comb(env)
+    {:ok, env, sector} = Harness.add_sector(env)
 
     {:ok, _quest, [job1, job2]} =
       Harness.create_quest(env,

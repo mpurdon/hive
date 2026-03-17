@@ -18,7 +18,7 @@ defmodule GiTF.BarrierTest do
   describe "check_scope/1" do
     test "approves in-scope op" do
       mission = %{
-        id: "qst-scope",
+        id: "msn-scope",
         description: "Add feature",
         created_at: DateTime.utc_now(),
         updated_at: DateTime.utc_now()
@@ -27,7 +27,7 @@ defmodule GiTF.BarrierTest do
       
       op = %{
         id: "op-scope",
-        mission_id: "qst-scope",
+        mission_id: "msn-scope",
         title: "Implement feature",
         files_changed: 3,
         created_at: DateTime.utc_now(),
@@ -43,7 +43,7 @@ defmodule GiTF.BarrierTest do
 
     test "detects scope violations" do
       mission = %{
-        id: "qst-creep",
+        id: "msn-creep",
         description: "Simple fix",
         created_at: DateTime.utc_now(),
         updated_at: DateTime.utc_now()
@@ -52,7 +52,7 @@ defmodule GiTF.BarrierTest do
       
       op = %{
         id: "op-creep",
-        mission_id: "qst-creep",
+        mission_id: "msn-creep",
         title: "Refactor entire system",
         files_changed: 20,
         created_at: DateTime.utc_now(),

@@ -574,7 +574,7 @@ defmodule GiTF.TUI.App do
     wrap the plan in this exact format so the TUI can display it for review:
 
     <<<PLAN
-    {"mission_id": "qst-xxx", "goal": "What we're building", "tasks": [
+    {"mission_id": "msn-xxx", "goal": "What we're building", "tasks": [
       {"title": "Task title", "description": "Details", "target_files": ["file.py"], "model_recommendation": "sonnet"},
       {"title": "Another task", "description": "More details", "target_files": [], "depends_on_indices": [0], "model_recommendation": "sonnet"}
     ]}

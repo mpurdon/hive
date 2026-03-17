@@ -19,7 +19,7 @@ defmodule GiTF.Override do
   """
   @spec requires_approval?(map()) :: boolean()
   def requires_approval?(mission) do
-    comb_requires? =
+    sector_requires? =
       case Map.get(mission, :sector_id) do
         nil -> false
         sector_id ->
@@ -39,7 +39,7 @@ defmodule GiTF.Override do
         risk in [:critical] or risk in ["critical"]
       end)
 
-    comb_requires? or critical_risk_jobs?
+    sector_requires? or critical_risk_jobs?
   end
 
   @doc """

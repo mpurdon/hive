@@ -24,7 +24,7 @@ defmodule GiTF.CLI.Errors do
     """
   end
 
-  def format_error(:no_combs, _context) do
+  def format_error(:no_sectors, _context) do
     """
     Error: No sectors registered
 

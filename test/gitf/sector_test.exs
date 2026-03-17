@@ -24,7 +24,7 @@ defmodule GiTF.CombTest do
 
       assert sector.name == Path.basename(tmp)
       assert sector.path == tmp
-      assert String.starts_with?(sector.id, "cmb-")
+      assert String.starts_with?(sector.id, "sec-")
     end
 
     test "uses a custom name when provided", %{tmp: tmp} do
@@ -195,15 +195,15 @@ defmodule GiTF.CombTest do
 
     test "can create sector with specific sync_strategy" do
       # Test that valid sync strategies are accepted as plain map fields
-      {:ok, pr_comb} =
+      {:ok, pr_sector} =
         Archive.insert(:sectors, %{name: "pr-sector", sync_strategy: "pr_branch"})
 
-      assert pr_comb.sync_strategy == "pr_branch"
+      assert pr_sector.sync_strategy == "pr_branch"
 
-      {:ok, auto_comb} =
+      {:ok, auto_sector} =
         Archive.insert(:sectors, %{name: "auto-sector", sync_strategy: "auto_merge"})
 
-      assert auto_comb.sync_strategy == "auto_merge"
+      assert auto_sector.sync_strategy == "auto_merge"
     end
   end
 end

@@ -21,8 +21,8 @@ defmodule GiTF.Plugin.Builtin.ToolProviders.WorkspaceTest do
       assert length(tools) == 3
 
       names = Enum.map(tools, & &1.name)
-      assert "list_combs" in names
-      assert "comb_info" in names
+      assert "list_sectors" in names
+      assert "sector_info" in names
       assert "list_cells" in names
     end
 
@@ -34,9 +34,9 @@ defmodule GiTF.Plugin.Builtin.ToolProviders.WorkspaceTest do
     end
   end
 
-  describe "list_combs tool" do
+  describe "list_sectors tool" do
     test "returns message when no sectors" do
-      tool = find_tool("list_combs")
+      tool = find_tool("list_sectors")
       {:ok, result} = tool.callback.(%{})
 
       assert result =~ "No sectors"
@@ -45,7 +45,7 @@ defmodule GiTF.Plugin.Builtin.ToolProviders.WorkspaceTest do
     test "lists registered sectors" do
       Archive.insert(:sectors, %{id: "sector-ws-1", name: "test-sector", path: "/tmp/test"})
 
-      tool = find_tool("list_combs")
+      tool = find_tool("list_sectors")
       {:ok, result} = tool.callback.(%{})
 
       assert result =~ "test-sector"

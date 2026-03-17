@@ -957,7 +957,7 @@ defmodule GiTF.Ghost.Worker do
             GiTF.AgentProfile.install_agents(sector.path, shell.worktree_path)
             :ok
 
-          _comb ->
+          _sector ->
             :ok
         end
 

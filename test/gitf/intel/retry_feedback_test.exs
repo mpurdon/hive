@@ -69,7 +69,7 @@ defmodule GiTF.Intel.RetryFeedbackTest do
   defp insert_failed_job(id, opts) do
     op = %{
       id: id,
-      mission_id: "qst-fb",
+      mission_id: "msn-fb",
       sector_id: "sector-fb",
       title: "Feedback test op",
       description: "Test",

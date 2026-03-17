@@ -219,7 +219,7 @@ defmodule GiTF.CLI.PlanHandler do
   # -- Job creation ----------------------------------------------------------
 
   defp create_jobs_from_plan(mission, plan) do
-    sector_id = mission.sector_id || first_comb_id()
+    sector_id = mission.sector_id || first_sector_id()
 
     unless sector_id do
       Format.error("No sector available. Add a sector first with `gitf sector add <repo>`.")
@@ -296,7 +296,7 @@ defmodule GiTF.CLI.PlanHandler do
     end
   end
 
-  defp first_comb_id do
+  defp first_sector_id do
     case GiTF.Archive.all(:sectors) do
       [sector | _] -> sector.id
       _ -> nil

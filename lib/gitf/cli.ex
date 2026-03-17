@@ -272,8 +272,8 @@ defmodule GiTF.CLI do
   defp handler_helpers do
     %{
       result_get: &result_get/3,
-      resolve_comb_id: &resolve_comb_id/1,
-      resolve_comb_name: &resolve_comb_name/1
+      resolve_sector_id: &resolve_sector_id/1,
+      resolve_sector_name: &resolve_sector_name/1
     }
   end
 
@@ -994,7 +994,7 @@ defmodule GiTF.CLI do
       name = result_get(result, :options, :name)
       opts = if name, do: [name: name], else: []
 
-      case GiTF.Client.add_comb(path, opts) do
+      case GiTF.Client.add_sector(path, opts) do
         {:ok, sector} -> Format.success("Sector \"#{sector.name}\" registered (#{sector.id})")
         {:error, reason} -> Format.error("Failed to add sector: #{inspect(reason)}")
       end
@@ -1090,7 +1090,7 @@ defmodule GiTF.CLI do
   defp dispatch([:sector, :list], _result) do
     sectors =
       if GiTF.Client.remote?() do
-        case GiTF.Client.list_combs() do
+        case GiTF.Client.list_sectors() do
           {:ok, c} -> c
           {:error, reason} -> Format.error("Remote error: #{inspect(reason)}"); []
         end
@@ -1128,7 +1128,7 @@ defmodule GiTF.CLI do
 
     remove_result =
       if GiTF.Client.remote?(),
-        do: GiTF.Client.remove_comb(name),
+        do: GiTF.Client.remove_sector(name),
         else: GiTF.Sector.remove(name)
 
     case remove_result do
@@ -1152,7 +1152,7 @@ defmodule GiTF.CLI do
         System.halt(1)
       end
 
-      case GiTF.Client.use_comb(name) do
+      case GiTF.Client.use_sector(name) do
         {:ok, sector} -> Format.success("Current sector set to \"#{sector.name}\" (#{sector.id})")
         {:error, :not_found} -> show_not_found_error(:sector, name)
         {:error, reason} -> Format.error("Failed to set current sector: #{inspect(reason)}")
@@ -1172,7 +1172,7 @@ defmodule GiTF.CLI do
       else
         case GiTF.Sector.list() do
           [] ->
-            IO.puts(GiTF.CLI.Errors.format_error(:no_combs))
+            IO.puts(GiTF.CLI.Errors.format_error(:no_sectors))
 
           sectors ->
             IO.puts("Registered sectors:")
@@ -1403,7 +1403,7 @@ defmodule GiTF.CLI do
     op_id = result_get(result, :options, :op)
     name = result_get(result, :options, :name)
 
-    case resolve_comb_id(result_get(result, :options, :sector)) do
+    case resolve_sector_id(result_get(result, :options, :sector)) do
       {:ok, sector_id} ->
         with {:ok, gitf_root} <- GiTF.gitf_dir(),
              {:ok, sector} <- GiTF.Sector.get(sector_id) do
@@ -1427,7 +1427,7 @@ defmodule GiTF.CLI do
             Format.error("Failed: #{inspect(reason)}")
         end
 
-      {:error, :no_comb} ->
+      {:error, :no_sector} ->
         Format.error("No sector specified. Use --sector or set one with `gitf sector use`.")
     end
   end
@@ -1668,9 +1668,9 @@ defmodule GiTF.CLI do
     goal = result_get(result, :args, :goal)
 
     sector_id =
-      case resolve_comb_id(result_get(result, :options, :sector)) do
+      case resolve_sector_id(result_get(result, :options, :sector)) do
         {:ok, cid} -> cid
-        {:error, :no_comb} ->
+        {:error, :no_sector} ->
           # Auto-pick the first sector if only one exists
           case GiTF.Sector.list() do
             [sector] -> sector.id
@@ -1707,8 +1707,8 @@ defmodule GiTF.CLI do
     goal = result_get(result, :args, :goal)
 
     if GiTF.Client.remote?() do
-      comb_opt = result_get(result, :options, :sector)
-      attrs = if comb_opt, do: %{goal: goal, sector_id: comb_opt}, else: %{goal: goal}
+      sector_opt = result_get(result, :options, :sector)
+      attrs = if sector_opt, do: %{goal: goal, sector_id: sector_opt}, else: %{goal: goal}
 
       case GiTF.Client.create_quest(attrs) do
         {:ok, mission} ->
@@ -1736,9 +1736,9 @@ defmodule GiTF.CLI do
       end
 
       quest_result =
-        case resolve_comb_id(result_get(result, :options, :sector)) do
+        case resolve_sector_id(result_get(result, :options, :sector)) do
           {:ok, cid} -> GiTF.Missions.create(%{goal: goal, sector_id: cid})
-          {:error, :no_comb} -> GiTF.Missions.create(%{goal: goal})
+          {:error, :no_sector} -> GiTF.Missions.create(%{goal: goal})
         end
 
       case quest_result do
@@ -1815,7 +1815,7 @@ defmodule GiTF.CLI do
         rows =
           Enum.map(missions, fn q ->
             sector_name =
-              if GiTF.Client.remote?(), do: q[:sector_id] || "-", else: resolve_comb_name(q[:sector_id])
+              if GiTF.Client.remote?(), do: q[:sector_id] || "-", else: resolve_sector_name(q[:sector_id])
             phase = q[:current_phase] || "-"
             [q[:id], q[:name] || q[:goal] || "-", phase, q[:status] || "pending", sector_name]
           end)
@@ -1840,7 +1840,7 @@ defmodule GiTF.CLI do
 
         if mission[:sector_id] do
           sector_name =
-            if GiTF.Client.remote?(), do: mission[:sector_id], else: resolve_comb_name(mission[:sector_id])
+            if GiTF.Client.remote?(), do: mission[:sector_id], else: resolve_sector_name(mission[:sector_id])
           IO.puts("Sector: #{sector_name}")
         end
 
@@ -1942,7 +1942,7 @@ defmodule GiTF.CLI do
     title = result_get(result, :options, :title)
     description = result_get(result, :options, :description)
 
-    case resolve_comb_id(result_get(result, :options, :sector)) do
+    case resolve_sector_id(result_get(result, :options, :sector)) do
       {:ok, sector_id} ->
         attrs = %{
           mission_id: mission_id,
@@ -1959,7 +1959,7 @@ defmodule GiTF.CLI do
             Format.error("Failed to create op: #{inspect(reason)}")
         end
 
-      {:error, :no_comb} ->
+      {:error, :no_sector} ->
         Format.error("No sector specified. Use --sector or set one with `gitf sector use`.")
     end
   end
@@ -2446,7 +2446,7 @@ defmodule GiTF.CLI do
   end
 
   defp dispatch([:github, :issues], result) do
-    case resolve_comb_id(result_get(result, :options, :sector)) do
+    case resolve_sector_id(result_get(result, :options, :sector)) do
       {:ok, sector_id} ->
         case GiTF.Sector.get(sector_id) do
           {:ok, sector} ->
@@ -2468,7 +2468,7 @@ defmodule GiTF.CLI do
             show_not_found_error(:sector, sector_id)
         end
 
-      {:error, :no_comb} ->
+      {:error, :no_sector} ->
         Format.error("No sector specified. Use --sector or set one with `gitf sector use`.")
     end
   end
@@ -2678,18 +2678,18 @@ defmodule GiTF.CLI do
   defp show_not_found_error(:sector, id),
     do: IO.puts(GiTF.CLI.Errors.format_error(:comb_not_found, %{sector_id: id}))
 
-  defp resolve_comb_id(explicit) when is_binary(explicit), do: {:ok, explicit}
+  defp resolve_sector_id(explicit) when is_binary(explicit), do: {:ok, explicit}
 
-  defp resolve_comb_id(nil) do
+  defp resolve_sector_id(nil) do
     case GiTF.Sector.current() do
       {:ok, sector} -> {:ok, sector.id}
-      {:error, :no_current_comb} -> {:error, :no_comb}
+      {:error, :no_current_sector} -> {:error, :no_sector}
     end
   end
 
-  defp resolve_comb_name(nil), do: "-"
+  defp resolve_sector_name(nil), do: "-"
 
-  defp resolve_comb_name(sector_id) do
+  defp resolve_sector_name(sector_id) do
     case GiTF.Sector.get(sector_id) do
       {:ok, sector} -> sector.name
       _ -> sector_id

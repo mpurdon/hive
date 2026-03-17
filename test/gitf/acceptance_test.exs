@@ -18,7 +18,7 @@ defmodule GiTF.AcceptanceTest do
   describe "test_acceptance/1" do
     test "approves op meeting all criteria" do
       mission = %{
-        id: "qst-accept",
+        id: "msn-accept",
         description: "Test",
         created_at: DateTime.utc_now(),
         updated_at: DateTime.utc_now()
@@ -27,7 +27,7 @@ defmodule GiTF.AcceptanceTest do
       
       op = %{
         id: "op-accept",
-        mission_id: "qst-accept",
+        mission_id: "msn-accept",
         title: "Simple implementation",
         status: "completed",
         verification_status: "passed",
@@ -50,7 +50,7 @@ defmodule GiTF.AcceptanceTest do
 
     test "blocks op with violations" do
       mission = %{
-        id: "qst-block",
+        id: "msn-block",
         description: "Test",
         created_at: DateTime.utc_now(),
         updated_at: DateTime.utc_now()
@@ -59,7 +59,7 @@ defmodule GiTF.AcceptanceTest do
       
       op = %{
         id: "op-block",
-        mission_id: "qst-block",
+        mission_id: "msn-block",
         title: "Complex refactor",
         status: "in_progress",
         quality_score: 50,

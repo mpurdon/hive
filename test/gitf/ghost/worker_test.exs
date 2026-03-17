@@ -215,7 +215,7 @@ defmodule GiTF.Ghost.WorkerTest do
         Worker.child_spec(
           ghost_id: "ghost-test",
           op_id: "op-test",
-          sector_id: "cmb-test",
+          sector_id: "sec-test",
           gitf_root: "/tmp"
         )
 

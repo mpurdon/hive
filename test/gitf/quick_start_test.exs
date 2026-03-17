@@ -86,9 +86,9 @@ defmodule GiTF.QuickStartTest do
 
       # Verify they are actually in the database
       sectors = GiTF.Sector.list()
-      comb_names = Enum.map(sectors, & &1.name)
-      assert "project-one" in comb_names
-      assert "project-two" in comb_names
+      sector_names = Enum.map(sectors, & &1.name)
+      assert "project-one" in sector_names
+      assert "project-two" in sector_names
     end
 
     test "returns error when already initialized and not forced" do
@@ -110,9 +110,9 @@ defmodule GiTF.QuickStartTest do
     end
   end
 
-  describe "generate_comb_claude_md/2" do
+  describe "generate_sector_claude_md/2" do
     test "generates markdown with sector name and link_msg instructions" do
-      md = QuickStart.generate_comb_claude_md("my-project", "/path/to/my-project")
+      md = QuickStart.generate_sector_claude_md("my-project", "/path/to/my-project")
 
       assert md =~ "my-project"
       assert md =~ "link"

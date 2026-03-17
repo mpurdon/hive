@@ -68,15 +68,20 @@ defmodule GiTF.Major.OrchestratorTest do
       updated = Map.put(mission, :status, "completed")
       Archive.put(:missions, updated)
 
-      {:error, :quest_not_pending} = Orchestrator.start_quest(mission.id)
+      {:error, :mission_not_pending} = Orchestrator.start_quest(mission.id)
     end
 
-    test "requires sector_id to be set", %{mission: mission} do
+    test "auto-assigns sector when sector_id is nil and a sector exists", %{mission: mission} do
       # Remove sector_id
       updated = Map.put(mission, :sector_id, nil)
       Archive.put(:missions, updated)
 
-      {:error, :no_comb_assigned} = Orchestrator.start_quest(mission.id)
+      # Should auto-assign the available sector and proceed
+      {:ok, _phase} = Orchestrator.start_quest(mission.id)
+
+      # Verify sector was assigned
+      {:ok, refreshed} = GiTF.Missions.get(mission.id)
+      assert refreshed.sector_id != nil
     end
 
     test "returns error for non-existent mission" do

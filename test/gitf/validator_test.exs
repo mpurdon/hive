@@ -10,8 +10,8 @@ defmodule GiTF.ValidatorTest do
         title: "Fix the login bug",
         description: "Users can't log in when password has special chars",
         status: "done",
-        mission_id: "qst-1",
-        sector_id: "cmb-1"
+        mission_id: "msn-1",
+        sector_id: "sec-1"
       }
 
       diff = """
@@ -38,8 +38,8 @@ defmodule GiTF.ValidatorTest do
         title: "Quick fix",
         description: nil,
         status: "done",
-        mission_id: "qst-1",
-        sector_id: "cmb-1"
+        mission_id: "msn-1",
+        sector_id: "sec-1"
       }
 
       prompt = Validator.build_validation_prompt(op, "some diff")
@@ -60,7 +60,7 @@ defmodule GiTF.ValidatorTest do
         id: "cel-test",
         worktree_path: tmp_dir,
         ghost_id: "ghost-1",
-        sector_id: "cmb-1",
+        sector_id: "sec-1",
         branch: "test",
         status: "active"
       }
@@ -79,7 +79,7 @@ defmodule GiTF.ValidatorTest do
         id: "cel-test",
         worktree_path: tmp_dir,
         ghost_id: "ghost-1",
-        sector_id: "cmb-1",
+        sector_id: "sec-1",
         branch: "test",
         status: "active"
       }

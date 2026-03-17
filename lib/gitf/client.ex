@@ -73,14 +73,14 @@ defmodule GiTF.Client do
   def fail_bee(id, reason \\ "unknown"), do: post("/api/v1/ghosts/#{id}/fail", %{reason: reason}) |> unwrap_ok()
 
   # Sectors
-  def add_comb(path_or_url, opts \\ []) do
+  def add_sector(path_or_url, opts \\ []) do
     post("/api/v1/sectors", %{path: path_or_url, opts: Map.new(opts)}) |> unwrap_data()
   end
 
-  def list_combs, do: get("/api/v1/sectors") |> unwrap_data()
-  def get_comb(id), do: get("/api/v1/sectors/#{id}") |> unwrap_data()
-  def remove_comb(id), do: delete("/api/v1/sectors/#{id}") |> unwrap_ok()
-  def use_comb(id), do: post("/api/v1/sectors/#{id}/use") |> unwrap_data()
+  def list_sectors, do: get("/api/v1/sectors") |> unwrap_data()
+  def get_sector(id), do: get("/api/v1/sectors/#{id}") |> unwrap_data()
+  def remove_sector(id), do: delete("/api/v1/sectors/#{id}") |> unwrap_ok()
+  def use_sector(id), do: post("/api/v1/sectors/#{id}/use") |> unwrap_data()
 
   # Quest extras
   def quest_report(id), do: get("/api/v1/missions/#{id}/report") |> unwrap_data()

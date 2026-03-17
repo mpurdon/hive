@@ -46,7 +46,7 @@ defmodule GiTF.ObservabilityTest do
     test "detects stuck missions" do
       # Create old mission
       mission = %{
-        id: "qst-stuck",
+        id: "msn-stuck",
         status: "active",
         created_at: DateTime.add(DateTime.utc_now(), -3600),
         updated_at: DateTime.add(DateTime.utc_now(), -3600)

@@ -22,8 +22,8 @@ defmodule GiTF.DebriefTest do
     goal = Map.get(opts, :goal, "Test mission")
     sector_id = Map.get(opts, :sector_id, "cmb_test")
 
-    comb_attrs = Map.get(opts, :sector, %{})
-    sector = Map.merge(%{id: sector_id, path: System.tmp_dir!(), name: "test"}, comb_attrs)
+    sector_attrs = Map.get(opts, :sector, %{})
+    sector = Map.merge(%{id: sector_id, path: System.tmp_dir!(), name: "test"}, sector_attrs)
     Archive.insert(:sectors, sector)
 
     {:ok, mission} = GiTF.Missions.create(%{goal: goal, sector_id: sector_id})

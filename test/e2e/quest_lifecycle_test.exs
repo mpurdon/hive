@@ -2,7 +2,7 @@ defmodule GiTF.E2E.QuestLifecycleTest do
   use GiTF.TestDriver.Scenario
 
   scenario "mission completes when all ops finish" do
-    {:ok, env, sector} = Harness.add_comb(env)
+    {:ok, env, sector} = Harness.add_sector(env)
 
     {:ok, mission, [job1, job2]} =
       Harness.create_quest(env,
@@ -40,7 +40,7 @@ defmodule GiTF.E2E.QuestLifecycleTest do
   end
 
   scenario "mission remains pending when only some ops complete" do
-    {:ok, env, sector} = Harness.add_comb(env)
+    {:ok, env, sector} = Harness.add_sector(env)
 
     {:ok, mission, [job1, _job2]} =
       Harness.create_quest(env,

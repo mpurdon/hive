@@ -21,7 +21,7 @@ defmodule GiTF.LinkTest do
       assert link_msg.subject == "Do work"
       assert link_msg.body == "Build the feature"
       assert link_msg.read == false
-      assert String.starts_with?(link_msg.id, "wag-")
+      assert String.starts_with?(link_msg.id, "lnk-")
     end
 
     test "accepts optional metadata" do
@@ -95,7 +95,7 @@ defmodule GiTF.LinkTest do
     end
 
     test "returns error for unknown ID" do
-      assert {:error, :not_found} = Link.mark_read("wag-000000")
+      assert {:error, :not_found} = Link.mark_read("lnk-000000")
     end
   end
 end

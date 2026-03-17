@@ -105,10 +105,10 @@ defmodule GiTF.AuditTest do
 
     test "nil scores pass under :skip_missing policy", %{sector: sector} do
       # Set the sector policy to skip_missing
-      updated_comb = Map.put(sector, :nil_score_policy, :skip_missing)
-      Archive.put(:sectors, updated_comb)
+      updated_sector = Map.put(sector, :nil_score_policy, :skip_missing)
+      Archive.put(:sectors, updated_sector)
 
-      assert updated_comb.nil_score_policy == :skip_missing
+      assert updated_sector.nil_score_policy == :skip_missing
     end
   end
 end

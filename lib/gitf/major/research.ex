@@ -13,8 +13,8 @@ defmodule GiTF.Major.Research do
   
   Returns cached results if available and valid, otherwise performs fresh analysis.
   """
-  @spec research_comb(String.t()) :: {:ok, map()} | {:error, term()}
-  def research_comb(sector_id) do
+  @spec research_sector(String.t()) :: {:ok, map()} | {:error, term()}
+  def research_sector(sector_id) do
     if Cache.is_valid?(sector_id) do
       Cache.get_research(sector_id)
     else

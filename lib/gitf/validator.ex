@@ -23,7 +23,7 @@ defmodule GiTF.Validator do
           {:ok, atom()} | {:error, term()} | {:error, term(), term()}
   def validate(_ghost_id, op, shell_id) do
     with {:ok, shell} <- fetch_cell(shell_id),
-         {:ok, sector} <- fetch_comb(shell.sector_id) do
+         {:ok, sector} <- fetch_sector(shell.sector_id) do
       results = []
 
       # Run custom validation command if configured
@@ -148,7 +148,7 @@ defmodule GiTF.Validator do
     end
   end
 
-  defp fetch_comb(sector_id) do
+  defp fetch_sector(sector_id) do
     case Archive.get(:sectors, sector_id) do
       nil -> {:error, :comb_not_found}
       sector -> {:ok, sector}

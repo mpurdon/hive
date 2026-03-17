@@ -18,7 +18,7 @@ defmodule GiTF.GoalsTest do
   describe "validate_quest_completion/1" do
     test "validates completed mission" do
       mission = %{
-        id: "qst-test",
+        id: "msn-test",
         description: "Test mission",
         status: "active",
         created_at: DateTime.utc_now(),
@@ -28,7 +28,7 @@ defmodule GiTF.GoalsTest do
       
       op = %{
         id: "op-test",
-        mission_id: "qst-test",
+        mission_id: "msn-test",
         status: "completed",
         verification_status: "passed",
         created_at: DateTime.utc_now(),
@@ -36,7 +36,7 @@ defmodule GiTF.GoalsTest do
       }
       Archive.insert(:ops, op)
       
-      result = Goals.validate_quest_completion("qst-test")
+      result = Goals.validate_quest_completion("msn-test")
       
       assert result.goal_achieved == {:achieved, "All ops completed"}
       assert result.simplicity_score > 0
@@ -47,7 +47,7 @@ defmodule GiTF.GoalsTest do
   describe "validate_job/1" do
     test "validates completed op" do
       mission = %{
-        id: "qst-op",
+        id: "msn-op",
         description: "Test",
         created_at: DateTime.utc_now(),
         updated_at: DateTime.utc_now()
@@ -56,7 +56,7 @@ defmodule GiTF.GoalsTest do
       
       op = %{
         id: "op-valid",
-        mission_id: "qst-op",
+        mission_id: "msn-op",
         title: "Test op",
         status: "completed",
         verification_status: "passed",

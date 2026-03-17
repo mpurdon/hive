@@ -87,8 +87,8 @@ defmodule GiTF.TestDriver.Harness do
 
   Returns the updated env with the sector entry.
   """
-  @spec add_comb(env(), keyword()) :: {:ok, env(), map()}
-  def add_comb(env, opts \\ []) do
+  @spec add_sector(env(), keyword()) :: {:ok, env(), map()}
+  def add_sector(env, opts \\ []) do
     name = Keyword.get(opts, :name, "test-sector-#{:erlang.unique_integer([:positive])}")
     repo_path = create_temp_git_repo(name)
 
@@ -119,7 +119,7 @@ defmodule GiTF.TestDriver.Harness do
   def create_quest(env, opts \\ []) do
     goal = Keyword.get(opts, :goal, "Test mission #{:erlang.unique_integer([:positive])}")
     name = Keyword.get(opts, :name, nil)
-    sector_id = Keyword.get(opts, :sector_id) || first_comb_id(env)
+    sector_id = Keyword.get(opts, :sector_id) || first_sector_id(env)
 
     quest_attrs = %{goal: goal}
     quest_attrs = if name, do: Map.put(quest_attrs, :name, name), else: quest_attrs
@@ -235,10 +235,10 @@ defmodule GiTF.TestDriver.Harness do
     String.trim(real_path)
   end
 
-  defp first_comb_id(env) do
+  defp first_sector_id(env) do
     case Map.values(env.sectors) do
       [sector | _] -> sector.id
-      [] -> raise "No sectors added to harness. Call add_comb/2 first."
+      [] -> raise "No sectors added to harness. Call add_sector/2 first."
     end
   end
 

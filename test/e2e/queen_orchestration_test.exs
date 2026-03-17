@@ -2,7 +2,7 @@ defmodule GiTF.E2E.MajorOrchestrationTest do
   use GiTF.TestDriver.Scenario
 
   scenario "Major advances mission and spawns next op after completion" do
-    {:ok, env, sector} = Harness.add_comb(env)
+    {:ok, env, sector} = Harness.add_sector(env)
     env = Harness.start_major(env)
 
     {:ok, mission, [job1, _job2]} =
@@ -37,7 +37,7 @@ defmodule GiTF.E2E.MajorOrchestrationTest do
   end
 
   scenario "Major marks mission completed when all ops done" do
-    {:ok, env, sector} = Harness.add_comb(env)
+    {:ok, env, sector} = Harness.add_sector(env)
     env = Harness.start_major(env)
 
     {:ok, mission, [job1]} =

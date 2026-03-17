@@ -37,22 +37,22 @@ defmodule GiTF.AuditContract do
     base = @default_contract
 
     # Layer 2: sector-level thresholds
-    comb_thresholds =
+    sector_thresholds =
       case GiTF.Archive.get(:sectors, op.sector_id) do
         nil -> %{}
         sector -> Map.get(sector, :quality_thresholds, %{})
       end
 
-    with_comb =
-      if map_size(comb_thresholds) > 0 do
-        %{base | thresholds: Map.merge(base.thresholds, comb_thresholds)}
+    with_sector =
+      if map_size(sector_thresholds) > 0 do
+        %{base | thresholds: Map.merge(base.thresholds, sector_thresholds)}
       else
         base
       end
 
     # Layer 3: op-level contract overrides
     job_contract = Map.get(op, :verification_contract) || %{}
-    merged = sync(with_comb, normalize_contract(job_contract))
+    merged = sync(with_sector, normalize_contract(job_contract))
 
     # Layer 4: risk-based adjustments
     risk = Map.get(op, :risk_level, :low)
