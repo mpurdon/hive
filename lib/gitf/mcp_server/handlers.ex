@@ -10,14 +10,20 @@ defmodule GiTF.MCPServer.Handlers do
     health = GiTF.Observability.Health.check()
 
     recent_failures =
-      GiTF.EventStore.list(type: :bee_failed, limit: 10)
+      (GiTF.EventStore.list(type: :bee_failed, limit: 10) ++
+         GiTF.EventStore.list(type: :merge_failed, limit: 5) ++
+         GiTF.EventStore.list(type: :error, limit: 5))
+      |> Enum.sort_by(& &1.timestamp, {:desc, DateTime})
+      |> Enum.take(15)
       |> Enum.map(fn event ->
         %{
+          type: to_string(event.type),
           entity_id: event.entity_id,
           timestamp: to_string(event.timestamp),
           step: get_in(event, [:data, :step]),
-          reason: get_in(event, [:data, :reason]) || get_in(event, [:data, :error]),
-          op_id: get_in(event, [:metadata, :op_id])
+          reason: get_in(event, [:data, :reason]) || get_in(event, [:data, :error]) || get_in(event, [:data, :message]),
+          op_id: get_in(event, [:metadata, :op_id]),
+          mission_id: get_in(event, [:metadata, :mission_id])
         }
       end)
 
@@ -100,7 +106,7 @@ defmodule GiTF.MCPServer.Handlers do
 
   def call("show_op", %{"id" => id}) do
     case GiTF.Ops.get(id) do
-      {:ok, op} -> {:ok, json_text(serialize_op(op))}
+      {:ok, op} -> {:ok, json_text(serialize_op_detail(op))}
       {:error, :not_found} -> {:error, "Op not found: #{id}"}
     end
   end
@@ -184,6 +190,33 @@ defmodule GiTF.MCPServer.Handlers do
 
     {:ok, json_text(result)}
   end
+
+  def call("mission_timeline", %{"id" => id} = args) do
+    case GiTF.Missions.get(id) do
+      {:ok, _mission} ->
+        limit = args["limit"] || 50
+        events = GiTF.EventStore.timeline(id)
+        events = Enum.take(events, limit)
+
+        formatted =
+          Enum.map(events, fn event ->
+            %{
+              type: to_string(event.type),
+              entity_id: event.entity_id,
+              timestamp: to_string(event.timestamp),
+              data: event.data,
+              metadata: event.metadata
+            }
+          end)
+
+        {:ok, json_text(formatted)}
+
+      {:error, :not_found} ->
+        {:error, "Mission not found: #{id}"}
+    end
+  end
+
+  def call("mission_timeline", _), do: {:error, "Missing required parameter: id"}
 
   # -- Write operations (require confirm: true) -------------------------------
 
@@ -343,13 +376,74 @@ defmodule GiTF.MCPServer.Handlers do
   end
 
   defp serialize_ghost(g) do
-    %{
+    base = %{
       id: g.id,
       name: g.name,
       status: g.status,
       op_id: g[:op_id],
-      context_percentage: g[:context_percentage]
+      context_percentage: g[:context_percentage],
+      assigned_model: g[:assigned_model],
+      shell_path: g[:shell_path],
+      inserted_at: to_string(g[:inserted_at])
     }
+
+    # Include last progress if available
+    progress =
+      try do
+        GiTF.Progress.get(g.id)
+      rescue
+        _ -> nil
+      end
+
+    if progress, do: Map.put(base, :last_progress, progress), else: base
+  end
+
+  defp serialize_op_detail(j) do
+    base = serialize_op(j)
+
+    detail =
+      Map.merge(base, %{
+        retry_count: j[:retry_count] || 0,
+        risk_level: j[:risk_level],
+        verification_status: j[:verification_status],
+        phase_job: j[:phase_job] || false,
+        phase: j[:phase],
+        assigned_model: j[:assigned_model],
+        recommended_model: j[:recommended_model],
+        files_changed: j[:files_changed],
+        changed_files: j[:changed_files],
+        acceptance_criteria: j[:acceptance_criteria],
+        skip_verification: j[:skip_verification] || false,
+        depends_on: j[:depends_on] || []
+      })
+
+    # Include ghost status if assigned
+    ghost_info =
+      case j[:ghost_id] do
+        nil ->
+          nil
+
+        ghost_id ->
+          case GiTF.Archive.get(:ghosts, ghost_id) do
+            nil -> %{id: ghost_id, status: "unknown"}
+            g -> %{id: g.id, name: g.name, status: g.status, assigned_model: g[:assigned_model]}
+          end
+      end
+
+    # Include recent events for this op
+    recent_events =
+      GiTF.EventStore.list(op_id: j.id, limit: 10)
+      |> Enum.map(fn event ->
+        %{
+          type: to_string(event.type),
+          timestamp: to_string(event.timestamp),
+          data: event.data
+        }
+      end)
+
+    detail
+    |> Map.put(:ghost, ghost_info)
+    |> Map.put(:recent_events, recent_events)
   end
 
   defp serialize_sector(s) do

@@ -161,5 +161,51 @@ defmodule GiTF.Telemetry do
      %{mission_id: meta[:mission_id], op_id: meta[:op_id]}}
   end
 
+  defp map_event([:gitf, :alert, :raised], measurements, meta) do
+    {:error, Map.get(meta, :type, "alert") |> to_string(),
+     Map.merge(measurements, %{message: meta[:message]}), %{}}
+  end
+
+  defp map_event([:gitf, :sync, :crashed], measurements, meta) do
+    {:merge_failed, Map.get(meta, :op_id, "unknown"),
+     Map.merge(measurements, %{reason: meta[:reason], failure_type: :crash}),
+     %{op_id: meta[:op_id]}}
+  end
+
+  defp map_event([:gitf, :sync, :timeout], measurements, meta) do
+    {:merge_failed, Map.get(meta, :op_id, "unknown"),
+     Map.merge(measurements, %{timeout_seconds: meta[:timeout_seconds], failure_type: :timeout}),
+     %{op_id: meta[:op_id]}}
+  end
+
+  defp map_event([:gitf, :sync, :exhausted], measurements, meta) do
+    {:merge_failed, Map.get(meta, :op_id, "unknown"),
+     Map.merge(measurements, %{failure_type: :exhausted}),
+     %{op_id: meta[:op_id]}}
+  end
+
+  defp map_event([:gitf, :sync, :tier_failed], measurements, meta) do
+    {:merge_failed, Map.get(meta, :op_id, "unknown"),
+     Map.merge(measurements, %{tier: meta[:tier], failure_type: :tier_failed}),
+     %{op_id: meta[:op_id]}}
+  end
+
+  defp map_event([:gitf, :store, :data_loss], measurements, meta) do
+    {:error, "store",
+     Map.merge(measurements, %{event: :data_loss, message: meta[:message]}), %{}}
+  end
+
+  defp map_event([:gitf, :store, :write_error], measurements, meta) do
+    {:error, "store",
+     Map.merge(measurements, %{event: :write_error, message: meta[:message]}), %{}}
+  end
+
+  defp map_event([:gitf, :model, :downgraded], measurements, meta) do
+    {:error, Map.get(meta, :ghost_id, "unknown"),
+     Map.merge(measurements, %{event: :model_downgraded, from: meta[:from], to: meta[:to]}),
+     %{ghost_id: meta[:ghost_id]}}
+  end
+
+  # Non-persisted events (high-frequency or informational-only)
   defp map_event(_, _, _), do: nil
 end

@@ -97,6 +97,18 @@ defmodule GiTF.MCPServer.Tools do
         description: "Run system health checks (pubsub, store, disk, memory, model API, git, major).",
         inputSchema: %{type: "object", properties: %{}}
       },
+      %{
+        name: "mission_timeline",
+        description: "Get the full chronological event timeline for a mission. Shows every spawn, completion, failure, merge, and phase transition. Essential for diagnosing what went wrong.",
+        inputSchema: %{
+          type: "object",
+          properties: %{
+            id: %{type: "string", description: "Mission ID"},
+            limit: %{type: "integer", description: "Max events to return (default 50)", default: 50}
+          },
+          required: ["id"]
+        }
+      },
       # -- Write operations (require confirm: true) ----------------------------
       %{
         name: "create_mission",
