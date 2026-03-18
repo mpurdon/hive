@@ -368,9 +368,21 @@ defmodule GiTF.Ghost.Worker do
       end
     end
 
-    # Mark ghost as crashed if still in an active state
+    # Mark ghost as crashed if still in an active state and notify Major
     if state.status in [:provisioning, :running] do
       update_ghost_status(state.ghost_id, "crashed")
+      GiTF.Ops.fail(state.op_id)
+
+      try do
+        GiTF.Link.send(
+          state.ghost_id,
+          "major",
+          "job_failed",
+          "Job #{state.op_id} failed: ghost process terminated unexpectedly"
+        )
+      rescue
+        _ -> :ok
+      end
     end
 
     # Exfil API task if running (allow 2s for graceful cleanup)
@@ -660,7 +672,13 @@ defmodule GiTF.Ghost.Worker do
       end)
 
     task = Task.async(fn ->
-      GiTF.Runtime.AgentLoop.run(prompt, working_dir, agent_opts)
+      try do
+        GiTF.Runtime.AgentLoop.run(prompt, working_dir, agent_opts)
+      rescue
+        e ->
+          Logger.error("AgentLoop crashed for ghost #{ghost_id}: #{Exception.message(e)}")
+          {:error, {:agent_loop_crash, Exception.message(e)}}
+      end
     end)
 
     {:ok, task}
