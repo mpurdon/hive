@@ -88,12 +88,7 @@ defmodule GiTF.Ghosts do
   @spec spawn_detached(String.t(), String.t(), String.t(), keyword()) ::
           {:ok, map()} | {:error, term()}
   def spawn_detached(op_id, sector_id, gitf_root, opts \\ []) do
-    # In API mode, there's no process to detach from — use supervised Worker
-    if GiTF.Runtime.ModelResolver.api_mode?() do
-      spawn(op_id, sector_id, gitf_root, opts)
-    else
-      spawn_detached_cli(op_id, sector_id, gitf_root, opts)
-    end
+    spawn_detached_cli(op_id, sector_id, gitf_root, opts)
   end
 
   defp spawn_detached_cli(op_id, sector_id, gitf_root, opts) do
@@ -353,9 +348,10 @@ defmodule GiTF.Ghosts do
   end
 
   defp spawn_model_detached(ghost_id, op_id, shell, gitf_root) do
-    with {:ok, model_path} <- GiTF.Runtime.Models.find_executable(),
+    # Detached CLI spawn always uses the Claude plugin (not API plugins)
+    with {:ok, model_path} <- GiTF.Runtime.Claude.find_executable(),
          {:ok, prompt} <- build_job_prompt(op_id),
-         {:ok, plugin} <- GiTF.Runtime.Models.resolve_plugin() do
+         {:ok, plugin} <- {:ok, GiTF.Runtime.Claude} do
       cmd_line = build_detached_command(plugin, model_path, prompt)
 
       # Read risk_level from op for sandbox configuration
@@ -385,13 +381,17 @@ defmodule GiTF.Ghosts do
       # When spawned from a running server, tell the ghost's section CLI calls
       # to use remote mode so they don't try to boot a second server.
       server_export =
-        case GiTF.Web.Endpoint.config(:http) do
-          [_ | _] = http ->
-            port = Keyword.get(http, :port, 4000)
-            "export GITF_SERVER=http://localhost:#{port}\n"
+        try do
+          case GiTF.Web.Endpoint.config(:http) do
+            [_ | _] = http ->
+              port = Keyword.get(http, :port, 4000)
+              "export GITF_SERVER=http://localhost:#{port}\n"
 
-          _ ->
-            ""
+            _ ->
+              ""
+          end
+        rescue
+          ArgumentError -> ""
         end
 
       script_content = """

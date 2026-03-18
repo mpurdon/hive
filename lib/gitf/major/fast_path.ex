@@ -79,16 +79,17 @@ defmodule GiTF.Major.FastPath do
               case GiTF.Ghosts.spawn_detached(op.id, mission.sector_id, gitf_root) do
                 {:ok, ghost} ->
                   Logger.info("Fast path: spawned ghost #{ghost.id} for mission #{mission_id}")
+                  {:ok, "implementation"}
 
                 {:error, reason} ->
-                  Logger.warning("Fast path: ghost spawn failed: #{inspect(reason)}")
+                  Logger.error("Fast path: ghost spawn failed for mission #{mission_id}: #{inspect(reason)}")
+                  {:error, {:spawn_failed, reason}}
               end
 
             {:error, _} ->
               Logger.warning("Fast path: no gitf root, op #{op.id} will be picked up by scheduler")
+              {:ok, "implementation"}
           end
-
-          {:ok, "implementation"}
 
         {:error, reason} ->
           {:error, reason}

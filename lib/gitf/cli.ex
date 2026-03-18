@@ -135,6 +135,13 @@ defmodule GiTF.CLI do
     Map.get(Map.get(r, section, %{}), key)
   end
 
+  defp safe_gets(prompt) do
+    case IO.gets(prompt) do
+      :eof -> ""
+      line when is_binary(line) -> String.trim(line)
+    end
+  end
+
   # Extract --mode <mode> from anywhere in argv, set GITF_EXECUTION_MODE, and strip it.
   # This allows `gitf --mode bedrock mission new "..."` or `gitf mission new "..." --mode cli`.
   @valid_modes ~w(api cli ollama bedrock)
@@ -241,7 +248,12 @@ defmodule GiTF.CLI do
   defp prompt_init do
     IO.puts("gitf v#{GiTF.version()}")
     IO.puts("")
-    answer = IO.gets("No gitf workspace found. Initialize one here? [y/n] ") |> String.trim() |> String.downcase()
+
+    answer =
+      case IO.gets("No gitf workspace found. Initialize one here? [y/n] ") do
+        :eof -> "y"
+        line when is_binary(line) -> line |> String.trim() |> String.downcase()
+      end
 
     if answer in ["y", "yes"] do
       case GiTF.Init.init(".", force: false) do
@@ -1020,7 +1032,7 @@ defmodule GiTF.CLI do
               end)
 
               IO.puts("")
-              answer = IO.gets("Select a repo [1-#{length(repos)}]: ") |> String.trim()
+              answer = safe_gets("Select a repo [1-#{length(repos)}]: ")
 
               case Integer.parse(answer) do
                 {n, ""} when n >= 1 and n <= length(repos) ->
@@ -1184,7 +1196,7 @@ defmodule GiTF.CLI do
             end)
 
             IO.puts("")
-            answer = IO.gets("Select a sector [1-#{length(sectors)}]: ") |> String.trim()
+            answer = safe_gets("Select a sector [1-#{length(sectors)}]: ")
 
             case Integer.parse(answer) do
               {n, ""} when n >= 1 and n <= length(sectors) ->
@@ -1729,7 +1741,7 @@ defmodule GiTF.CLI do
       end
     else
       goal = if goal == nil or goal == "" do
-        answer = IO.gets("What do you want to build? ") |> String.trim()
+        answer = safe_gets("What do you want to build? ")
         if answer == "", do: System.halt(0), else: answer
       else
         goal
