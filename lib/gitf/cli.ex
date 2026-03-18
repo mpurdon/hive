@@ -271,14 +271,50 @@ defmodule GiTF.CLI do
         store_dir = Path.join([root, ".gitf", "store"])
 
         case GiTF.Archive.start_link(data_dir: store_dir) do
-          {:ok, _pid} -> :ok
-          {:error, {:already_started, _pid}} -> :ok
-          {:error, reason} -> Format.error("Archive error: #{inspect(reason)}")
+          {:ok, _pid} ->
+            :ok
+
+          {:error, {:already_started, _pid}} ->
+            # Archive already running — check if it points at the right directory.
+            # When -w is used, the app supervisor may have started Archive at
+            # a different path. Restart it pointing at the correct store.
+            if workspace_override?() do
+              try do
+                Supervisor.terminate_child(GiTF.Supervisor, GiTF.Archive)
+                Supervisor.delete_child(GiTF.Supervisor, GiTF.Archive)
+              catch
+                :exit, _ -> :ok
+              end
+
+              case Process.whereis(GiTF.Archive) do
+                nil -> :ok
+                pid ->
+                  try do
+                    GenServer.stop(pid, :normal, 5_000)
+                  catch
+                    :exit, _ -> :ok
+                  end
+              end
+
+              Process.sleep(10)
+              GiTF.Archive.start_link(data_dir: store_dir)
+
+              # Reload API keys from the correct workspace config
+              GiTF.Runtime.Keys.load()
+            end
+            :ok
+
+          {:error, reason} ->
+            Format.error("Archive error: #{inspect(reason)}")
         end
 
       {:error, :not_in_gitf} ->
         prompt_init()
     end
+  end
+
+  defp workspace_override? do
+    System.get_env("GITF_PATH") != nil
   end
 
   defp prompt_init do
@@ -292,7 +328,9 @@ defmodule GiTF.CLI do
       end
 
     if answer in ["y", "yes"] do
-      case GiTF.Init.init(".", force: false) do
+      init_path = System.get_env("GITF_PATH") || "."
+
+      case GiTF.Init.init(init_path, force: false) do
         {:ok, expanded} ->
           Format.success("GiTF initialized at #{expanded}")
           ensure_store()
