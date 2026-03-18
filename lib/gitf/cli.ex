@@ -2473,6 +2473,40 @@ defmodule GiTF.CLI do
     end
   end
 
+  defp dispatch([:github, :run], result) do
+    issue_number = result_get(result, :args, :issue)
+    quick = result_get(result, :flags, :quick) || false
+
+    case resolve_sector_id(result_get(result, :options, :sector)) do
+      {:ok, sector_id} ->
+        case GiTF.Sector.get(sector_id) do
+          {:ok, sector} ->
+            Format.info("Fetching issue ##{issue_number}...")
+
+            case GiTF.GitHub.create_mission_from_issue(sector, issue_number, quick: quick) do
+              {:ok, mission} ->
+                Format.success("Mission \"#{mission.name}\" created from issue ##{issue_number}")
+                Format.info("Track progress: gitf mission show #{mission.id}")
+
+              {:error, :issue_not_found} ->
+                Format.error("Issue ##{issue_number} not found")
+
+              {:error, :no_github_config} ->
+                Format.error("Sector #{sector.name} has no GitHub config. Use --github-owner and --github-repo when adding.")
+
+              {:error, reason} ->
+                Format.error("Failed: #{inspect(reason)}")
+            end
+
+          {:error, _} ->
+            show_not_found_error(:sector, sector_id)
+        end
+
+      {:error, :no_sector} ->
+        Format.error("No sector specified. Use --sector or set one with `gitf sector use`.")
+    end
+  end
+
   # `github sync` is an alias for `github issues` (kept for backward compatibility)
   defp dispatch([:github, :sync], result), do: dispatch([:github, :issues], result)
 
@@ -3825,6 +3859,34 @@ defmodule GiTF.CLI do
                   help: "Sector ID (defaults to current sector)",
                   parser: :string,
                   required: false
+                ]
+              ]
+            ],
+            run: [
+              name: "run",
+              about: "Create a mission from a GitHub issue and start working on it",
+              args: [
+                issue: [
+                  value_name: "ISSUE_NUMBER",
+                  help: "GitHub issue number (e.g. 42)",
+                  required: true,
+                  parser: :integer
+                ]
+              ],
+              options: [
+                sector: [
+                  short: "-c",
+                  long: "--sector",
+                  help: "Sector ID (defaults to current sector)",
+                  parser: :string,
+                  required: false
+                ]
+              ],
+              flags: [
+                quick: [
+                  short: "-q",
+                  long: "--quick",
+                  help: "Use fast path (single ghost, skip full pipeline)"
                 ]
               ]
             ],

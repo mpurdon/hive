@@ -108,6 +108,72 @@ defmodule GiTF.GitHub do
     end
   end
 
+  @doc """
+  Creates a mission from a GitHub issue.
+
+  Fetches the issue details, creates a mission with the issue title as the goal
+  and the issue body as context, and optionally starts it immediately.
+
+  ## Options
+
+    * `:quick` - use fast path (single ghost, no pipeline). Default: false
+    * `:start` - start the mission immediately. Default: true
+
+  Returns `{:ok, mission}` or `{:error, reason}`.
+  """
+  @spec create_mission_from_issue(map(), integer(), keyword()) ::
+          {:ok, map()} | {:error, term()}
+  def create_mission_from_issue(sector, issue_number, opts \\ []) do
+    with {:ok, client} <- client(sector),
+         {:ok, issue} <- fetch_issue(client, sector, issue_number) do
+      title = issue["title"] || "Issue ##{issue_number}"
+      body = issue["body"] || ""
+      labels = Enum.map(issue["labels"] || [], & &1["name"]) |> Enum.join(", ")
+
+      goal = """
+      #{title}
+
+      #{body}
+      #{if labels != "", do: "\nLabels: #{labels}", else: ""}
+      GitHub Issue: #{issue["html_url"]}
+      """
+      |> String.trim()
+
+      attrs = %{
+        goal: goal,
+        name: "GH-#{issue_number}: #{String.slice(title, 0, 60)}",
+        sector_id: sector.id
+      }
+
+      case GiTF.Missions.create(attrs) do
+        {:ok, mission} ->
+          quick = Keyword.get(opts, :quick, false)
+          start = Keyword.get(opts, :start, true)
+
+          if start do
+            start_opts = if quick, do: [force_fast_path: true], else: []
+            GiTF.Major.Orchestrator.start_quest(mission.id, start_opts)
+          end
+
+          {:ok, mission}
+
+        {:error, reason} ->
+          {:error, reason}
+      end
+    end
+  end
+
+  defp fetch_issue(client, sector, issue_number) do
+    case Req.get(client,
+           url: "/repos/#{sector.github_owner}/#{sector.github_repo}/issues/#{issue_number}"
+         ) do
+      {:ok, %{status: 200, body: issue}} -> {:ok, issue}
+      {:ok, %{status: 404}} -> {:error, :issue_not_found}
+      {:ok, %{status: status, body: resp}} -> {:error, "GitHub API error #{status}: #{inspect(resp)}"}
+      {:error, reason} -> {:error, reason}
+    end
+  end
+
   @doc "Adds a comment to an issue or PR."
   @spec add_comment(GiTF.Schema.Sector.t(), integer(), String.t()) :: :ok | {:error, term()}
   def add_comment(sector, issue_number, body) do
