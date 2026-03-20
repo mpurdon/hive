@@ -72,23 +72,22 @@ defmodule GiTF.Runtime.ModelSelector do
   @spec select_model_for_job(op_type(), complexity()) :: String.t()
   def select_model_for_job(op_type, complexity \\ :moderate)
 
-  def select_model_for_job(:planning, _complexity), do: "opus"
-  def select_model_for_job(:architecture, _complexity), do: "opus"
+  def select_model_for_job(:planning, _complexity), do: "thinking"
+  def select_model_for_job(:architecture, _complexity), do: "thinking"
 
-  def select_model_for_job(:implementation, :complex), do: "opus"
-  def select_model_for_job(:implementation, :moderate), do: "sonnet"
-  def select_model_for_job(:implementation, :simple), do: "haiku"
+  def select_model_for_job(:implementation, :complex), do: "thinking"
+  def select_model_for_job(:implementation, _complexity), do: "general"
 
-  def select_model_for_job(:research, _complexity), do: "haiku"
-  def select_model_for_job(:summarization, _complexity), do: "haiku"
-  def select_model_for_job(:audit, _complexity), do: "haiku"
-  def select_model_for_job(:simple_fix, _complexity), do: "haiku"
+  def select_model_for_job(:research, _complexity), do: "fast"
+  def select_model_for_job(:summarization, _complexity), do: "fast"
+  def select_model_for_job(:audit, _complexity), do: "fast"
+  def select_model_for_job(:simple_fix, _complexity), do: "fast"
 
-  def select_model_for_job(:refactoring, :complex), do: "opus"
-  def select_model_for_job(:refactoring, _complexity), do: "sonnet"
+  def select_model_for_job(:refactoring, :complex), do: "thinking"
+  def select_model_for_job(:refactoring, _complexity), do: "general"
 
-  # Default to haiku for unknown types (cost-effective)
-  def select_model_for_job(_op_type, _complexity), do: "haiku"
+  # Default to fast for unknown types (cost-effective)
+  def select_model_for_job(_op_type, _complexity), do: "fast"
 
   @doc """
   Get model information from the registry.
@@ -188,7 +187,7 @@ defmodule GiTF.Runtime.ModelSelector do
     |> List.first()
     |> case do
       {name, _info} -> name
-      nil -> "claude-sonnet"
+      nil -> "sonnet"
     end
   end
 
@@ -263,10 +262,12 @@ defmodule GiTF.Runtime.ModelSelector do
     _ -> model
   end
 
-  defp downgrade("opus"), do: "sonnet"
-  defp downgrade("sonnet"), do: "haiku"
+  defp downgrade("thinking"), do: "general"
+  defp downgrade("general"), do: "fast"
   # Legacy names
-  defp downgrade("claude-opus"), do: "sonnet"
-  defp downgrade("claude-sonnet"), do: "haiku"
+  defp downgrade("opus"), do: "general"
+  defp downgrade("sonnet"), do: "fast"
+  defp downgrade("claude-opus"), do: "general"
+  defp downgrade("claude-sonnet"), do: "fast"
   defp downgrade(model), do: model
 end

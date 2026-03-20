@@ -271,20 +271,43 @@ defmodule GiTF.Sync.Queue do
 
   # -- Private: result handling ------------------------------------------------
 
-  defp handle_merge_result(op_id, {:ok, :merged, tier}, state) do
-    Logger.info("Job #{op_id} merged successfully at tier #{tier}")
-
-    # Mark the op as merged
+  defp mark_op_merged(op_id) do
     case GiTF.Archive.get(:ops, op_id) do
       nil -> :ok
       op -> GiTF.Archive.put(:ops, Map.put(op, :merged_at, DateTime.utc_now()))
     end
+  end
 
-    # Link Major
+  defp handle_merge_result(op_id, {:ok, :merged, tier}, state) do
+    Logger.info("Job #{op_id} merged successfully at tier #{tier}")
+    mark_op_merged(op_id)
+
     GiTF.Link.send("sync_queue", "major", "job_merged",
       "Job #{op_id} merged successfully (tier #{tier})")
 
     entry = {op_id, :success, DateTime.utc_now()}
+    %{state | completed: [entry | Enum.take(state.completed, @max_history - 1)]}
+  end
+
+  defp handle_merge_result(op_id, {:ok, :pr_created, _tier}, state) do
+    Logger.info("Job #{op_id} PR created successfully")
+    mark_op_merged(op_id)
+
+    GiTF.Link.send("sync_queue", "major", "job_merged",
+      "Job #{op_id} synced via PR branch")
+
+    entry = {op_id, :pr_created, DateTime.utc_now()}
+    %{state | completed: [entry | Enum.take(state.completed, @max_history - 1)]}
+  end
+
+  defp handle_merge_result(op_id, {:ok, :manual, _tier}, state) do
+    Logger.info("Job #{op_id} sync strategy is manual, advancing pipeline")
+    mark_op_merged(op_id)
+
+    GiTF.Link.send("sync_queue", "major", "job_merged",
+      "Job #{op_id} synced (manual strategy — branch ready)")
+
+    entry = {op_id, :manual, DateTime.utc_now()}
     %{state | completed: [entry | Enum.take(state.completed, @max_history - 1)]}
   end
 

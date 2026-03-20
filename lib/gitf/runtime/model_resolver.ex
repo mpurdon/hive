@@ -2,12 +2,19 @@ defmodule GiTF.Runtime.ModelResolver do
   @moduledoc """
   Centralized model name resolution.
 
-  Maps tier names ("opus", "sonnet", "haiku") to provider-specific model
-  specs (e.g. "anthropic:claude-opus-4-6", "google:gemini-2.5-pro").
+  Maps tier names ("thinking", "general", "fast") to provider-specific model
+  specs (e.g. "google:gemini-2.5-pro", "anthropic:claude-sonnet-4-6").
 
-  The mapping is configured in `:gitf, :llm, :default_models` and can
-  be overridden at runtime. Provider-qualified names like
-  "anthropic:claude-opus-4-6" pass through unchanged.
+  The active provider is set via `[llm] provider` in config.toml (default: "google").
+  Provider-qualified names like "anthropic:claude-opus-4-6" pass through unchanged.
+
+  ## Tiers
+
+    * `"thinking"` — most capable model, for complex reasoning (design, review)
+    * `"general"`  — balanced model for standard work (implementation)
+    * `"fast"`     — cheapest model for simple tasks (research, summaries)
+
+  Legacy names ("opus", "sonnet", "haiku") are aliased to the new tiers.
 
   ## Execution Mode
 
@@ -16,18 +23,28 @@ defmodule GiTF.Runtime.ModelResolver do
   2. GiTF config `execution_mode`
   3. Application config `:gitf, :llm, :execution_mode`
   4. Default: `:api`
-
-  The `:ollama` mode is a convenience that behaves like `:api` but
-  auto-configures `OPENAI_API_BASE` for a local Ollama instance and
-  maps default model tiers to local model names.
   """
 
-  @default_models %{
-    "opus" => "google:gemini-2.5-pro",
-    "sonnet" => "google:gemini-2.5-flash",
-    "haiku" => "google:gemini-2.0-flash",
-    "fast" => "google:gemini-2.0-flash",
-    # Legacy Claude names (backwards compat for explicit requests)
+  # Provider-specific model catalogs: tier → model ID
+  @provider_models %{
+    "google" => %{
+      "thinking" => "google:gemini-2.5-pro",
+      "general" => "google:gemini-2.5-flash",
+      "fast" => "google:gemini-2.5-flash"
+    },
+    "anthropic" => %{
+      "thinking" => "anthropic:claude-opus-4-6",
+      "general" => "anthropic:claude-sonnet-4-6",
+      "fast" => "anthropic:claude-haiku-4-5"
+    }
+  }
+
+  # Legacy tier aliases → canonical tier name
+  @tier_aliases %{
+    "opus" => "thinking",
+    "sonnet" => "general",
+    "haiku" => "fast",
+    # Legacy Claude names → resolve via anthropic provider
     "claude-opus" => "anthropic:claude-opus-4-6",
     "claude-sonnet" => "anthropic:claude-sonnet-4-6",
     "claude-haiku" => "anthropic:claude-haiku-4-5",
@@ -41,21 +58,33 @@ defmodule GiTF.Runtime.ModelResolver do
   @doc """
   Resolves a model tier name or qualified name to a provider:model spec.
 
-  - `"opus"` → configured opus model (e.g. `"anthropic:claude-opus-4-6"`)
-  - `"sonnet"` → configured sonnet model
-  - `"claude-sonnet"` → maps to provider-qualified name
-  - `"anthropic:claude-opus-4-6"` → passthrough
-  - `"google:gemini-2.0-flash"` → passthrough
+  - `"thinking"` → provider's thinking model (e.g. `"google:gemini-2.5-pro"`)
+  - `"general"` → provider's general model
+  - `"fast"` → provider's fast model
+  - `"opus"` / `"sonnet"` / `"haiku"` → legacy aliases for the above
+  - `"anthropic:claude-opus-4-6"` → passthrough (provider-qualified)
   """
   @spec resolve(String.t()) :: String.t()
   def resolve(name) when is_binary(name) do
-    # If already provider-qualified, pass through
+    # Provider-qualified names pass through unchanged
     if String.contains?(name, ":") do
       name
     else
       models = configured_models()
       Map.get(models, name, name)
     end
+  end
+
+  @doc """
+  Returns the configured LLM provider name (e.g. "google", "anthropic").
+
+  Read from `[llm] provider` in config.toml. Defaults to "google".
+  """
+  @spec configured_provider() :: String.t()
+  def configured_provider do
+    GiTF.Config.Provider.get([:llm, :provider]) || "google"
+  rescue
+    _ -> "google"
   end
 
   @doc """
@@ -137,33 +166,54 @@ defmodule GiTF.Runtime.ModelResolver do
     mode = execution_mode()
 
     base = cond do
-      mode == :ollama -> Map.merge(@default_models, mode_defaults(:ollama))
-      mode == :bedrock -> Map.merge(@default_models, mode_defaults(:bedrock))
-      true -> @default_models
+      mode == :ollama -> provider_tier_map("ollama") |> Map.merge(mode_defaults(:ollama))
+      mode == :bedrock -> provider_tier_map("bedrock") |> Map.merge(mode_defaults(:bedrock))
+      true -> provider_tier_map(configured_provider())
     end
+
+    # Add legacy aliases that resolve to canonical tier specs
+    with_aliases = Map.merge(base, resolve_aliases(base))
 
     case Application.get_env(:gitf, :llm) do
       nil ->
-        base
+        with_aliases
 
       config ->
         custom = config[:default_models] || %{}
         custom_string_keys = Map.new(custom, fn {k, v} -> {to_string(k), v} end)
-        Map.merge(base, custom_string_keys)
+        Map.merge(with_aliases, custom_string_keys)
     end
   end
 
+  # Build the tier→model map for a given provider
+  defp provider_tier_map(provider_name) do
+    Map.get(@provider_models, provider_name, @provider_models["google"])
+  end
+
+  # Resolve legacy aliases using the current tier map
+  defp resolve_aliases(tier_map) do
+    @tier_aliases
+    |> Enum.map(fn {alias_name, target} ->
+      if String.contains?(target, ":") do
+        # Direct provider-qualified reference (e.g. "claude-opus" → "anthropic:claude-opus-4-6")
+        {alias_name, target}
+      else
+        # Tier alias (e.g. "opus" → "thinking") — look up in current tier map
+        {alias_name, Map.get(tier_map, target, target)}
+      end
+    end)
+    |> Map.new()
+  end
+
   @ollama_defaults %{
-    "opus" => "openai:qwen2.5-coder:32b",
-    "sonnet" => "openai:qwen2.5-coder:14b",
-    "haiku" => "openai:qwen2.5-coder:7b",
+    "thinking" => "openai:qwen2.5-coder:32b",
+    "general" => "openai:qwen2.5-coder:14b",
     "fast" => "openai:qwen2.5-coder:7b"
   }
 
   @bedrock_defaults %{
-    "opus" => "bedrock:anthropic.claude-sonnet-4-6-20250514-v1:0",
-    "sonnet" => "bedrock:anthropic.claude-sonnet-4-6-20250514-v1:0",
-    "haiku" => "bedrock:anthropic.claude-haiku-4-5-20251001-v1:0",
+    "thinking" => "bedrock:anthropic.claude-sonnet-4-6-20250514-v1:0",
+    "general" => "bedrock:anthropic.claude-sonnet-4-6-20250514-v1:0",
     "fast" => "bedrock:anthropic.claude-haiku-4-5-20251001-v1:0"
   }
 
@@ -196,16 +246,11 @@ defmodule GiTF.Runtime.ModelResolver do
   @spec fallback(String.t()) :: String.t() | nil
   def fallback(model_spec) do
     resolved = resolve(model_spec)
-    models = configured_models()
-
-    # Build a reverse lookup: model_spec → tier name
-    tier = Enum.find_value(models, fn {tier_name, spec} ->
-      if spec == resolved, do: tier_name
-    end)
+    tier = reverse_lookup_tier(resolved)
 
     case tier do
-      "opus" -> resolve("sonnet")
-      "sonnet" -> resolve("haiku")
+      t when t in ["thinking", "opus"] -> resolve("general")
+      t when t in ["general", "sonnet"] -> resolve("fast")
       _ -> nil
     end
   end
@@ -213,24 +258,27 @@ defmodule GiTF.Runtime.ModelResolver do
   @doc """
   Returns a more capable model for the given model spec.
 
-  Escalates: haiku → sonnet → opus. Returns nil if already at opus.
+  Escalates: fast → general → thinking. Returns nil if already at thinking.
   Used when retrying failed ops with a stronger model.
   """
   @spec escalate(String.t()) :: String.t() | nil
   def escalate(model_spec) do
     resolved = resolve(model_spec)
-    models = configured_models()
-
-    tier = Enum.find_value(models, fn {tier_name, spec} ->
-      if spec == resolved, do: tier_name
-    end)
+    tier = reverse_lookup_tier(resolved)
 
     case tier do
-      "haiku" -> resolve("sonnet")
-      "fast" -> resolve("sonnet")
-      "sonnet" -> resolve("opus")
+      t when t in ["fast", "haiku"] -> resolve("general")
+      t when t in ["general", "sonnet"] -> resolve("thinking")
       _ -> nil
     end
+  end
+
+  # Reverse lookup: resolved model spec → tier name
+  defp reverse_lookup_tier(resolved) do
+    configured_models()
+    |> Enum.find_value(fn {tier_name, spec} ->
+      if spec == resolved, do: tier_name
+    end)
   end
 
   @doc """

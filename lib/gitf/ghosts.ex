@@ -231,12 +231,13 @@ defmodule GiTF.Ghosts do
 
   defp create_ghost_record(name, op_id) do
     # Get op to determine model assignment
-    default_model = GiTF.Runtime.ModelResolver.resolve("sonnet")
+    default_model = GiTF.Runtime.ModelResolver.resolve("general")
 
     model =
       case GiTF.Ops.get(op_id) do
         {:ok, op} ->
-          op.assigned_model || op.recommended_model || default_model
+          raw = op.assigned_model || op.recommended_model || "general"
+          GiTF.Runtime.ModelResolver.resolve(raw)
 
         _ ->
           default_model

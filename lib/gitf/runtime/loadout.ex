@@ -317,10 +317,31 @@ defmodule GiTF.Runtime.Loadout do
     abs = Path.expand(rel_path, working_dir)
     wd = Path.expand(working_dir)
 
-    unless String.starts_with?(abs, wd) do
+    # Allow paths within the working directory (worktree)
+    # AND within the sector root (parent of ghosts/ directory),
+    # since worktrees live inside the sector at <sector>/ghosts/<ghost_id>
+    sector_root = find_sector_root(wd)
+
+    allowed =
+      String.starts_with?(abs, wd) or
+        (sector_root != nil and String.starts_with?(abs, sector_root))
+
+    unless allowed do
       raise "Path traversal detected: #{rel_path} resolves outside #{working_dir}"
     end
 
     abs
+  end
+
+  # Worktrees are at <sector>/ghosts/<ghost_id>. Walk up to find the sector root.
+  defp find_sector_root(worktree_path) do
+    parts = Path.split(worktree_path)
+    ghosts_idx = Enum.find_index(parts, &(&1 == "ghosts"))
+
+    if ghosts_idx && ghosts_idx > 0 do
+      parts |> Enum.take(ghosts_idx) |> Path.join()
+    else
+      nil
+    end
   end
 end

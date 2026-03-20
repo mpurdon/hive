@@ -1,7 +1,7 @@
 defmodule GiTF.MixProject do
   use Mix.Project
 
-  @version "0.29.0"
+  @version "0.31.2"
 
   def project do
     [
@@ -52,6 +52,7 @@ defmodule GiTF.MixProject do
       {:phoenix, "~> 1.7"},
       {:phoenix_live_view, "~> 1.0"},
       {:phoenix_html, "~> 4.1"},
+      {:heroicons, "~> 0.5"},
       {:plug_cowboy, "~> 2.7"},
       {:jason, "~> 1.4"},
       {:optimus, "~> 0.5"},

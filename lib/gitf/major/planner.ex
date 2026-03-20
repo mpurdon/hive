@@ -198,7 +198,7 @@ defmodule GiTF.Major.Planner do
 
       prompt = build_llm_plan_prompt(mission, research, requirements, design, review, opts)
 
-      case GiTF.Runtime.Models.generate_text(prompt, model: "sonnet") do
+      case GiTF.Runtime.Models.generate_text(prompt, model: "thinking") do
         {:ok, response} ->
           text = extract_text(response)
 
@@ -231,7 +231,7 @@ defmodule GiTF.Major.Planner do
                   "title" => "Implementation",
                   "description" => text,
                   "target_files" => [],
-                  "model_recommendation" => "sonnet"
+                  "model_recommendation" => "general"
                 }],
                 estimated_duration: "unknown",
                 created_at: DateTime.utc_now()
@@ -300,7 +300,7 @@ defmodule GiTF.Major.Planner do
         3. Define clear acceptance criteria
         4. Specify target files where possible
         5. Set up dependencies (op indices, 0-based)
-        6. Recommend model complexity (sonnet for simple, opus for complex)
+        6. Recommend model complexity (general for simple, thinking for complex)
 
         ## Output Format
 
@@ -314,7 +314,7 @@ defmodule GiTF.Major.Planner do
             "target_files": ["path/to/file"],
             "acceptance_criteria": ["Testable criterion 1"],
             "depends_on_indices": [],
-            "model_recommendation": "sonnet"
+            "model_recommendation": "general"
           }
         ]
         ```
@@ -410,9 +410,8 @@ defmodule GiTF.Major.Planner do
     {:ok, Enum.reverse(ops)}
   end
 
-  defp resolve_model("opus"), do: "claude-opus-4-6"
-  defp resolve_model("sonnet"), do: "claude-sonnet-4-6"
   defp resolve_model(nil), do: nil
+  defp resolve_model(tier) when is_binary(tier), do: GiTF.Runtime.ModelResolver.resolve(tier)
   defp resolve_model(other), do: other
 
   # -- Multi-Plan Evaluation ---------------------------------------------------
@@ -467,7 +466,7 @@ defmodule GiTF.Major.Planner do
     ```
     """
 
-    case GiTF.Runtime.Models.generate_text(prompt, model: "haiku") do
+    case GiTF.Runtime.Models.generate_text(prompt, model: "fast") do
       {:ok, response} ->
         text = extract_text(response)
         parse_strategies(text)
@@ -655,7 +654,7 @@ defmodule GiTF.Major.Planner do
   defp score_complexity_distribution(tasks) do
     models =
       Enum.map(tasks, fn t ->
-        t["model_recommendation"] || "sonnet"
+        t["model_recommendation"] || "general"
       end)
 
     unique = Enum.uniq(models) |> length()
@@ -667,13 +666,13 @@ defmodule GiTF.Major.Planner do
     # Estimate based on model tiers
     total_cost =
       Enum.reduce(tasks, 0, fn t, acc ->
-        model = t["model_recommendation"] || "sonnet"
+        model = t["model_recommendation"] || "general"
 
         cost =
           case model do
-            "haiku" -> 1
-            "sonnet" -> 3
-            "opus" -> 10
+            m when m in ["fast", "haiku"] -> 1
+            m when m in ["general", "sonnet"] -> 3
+            m when m in ["thinking", "opus"] -> 10
             _ -> 3
           end
 
@@ -688,7 +687,7 @@ defmodule GiTF.Major.Planner do
   defp score_model_confidence(tasks) do
     scores =
       Enum.map(tasks, fn t ->
-        model = t["model_recommendation"] || "sonnet"
+        model = t["model_recommendation"] || "general"
         op_type = infer_op_type(t)
         rep = GiTF.Trust.model_reputation(model, op_type)
         if rep, do: rep.success_rate, else: 0.5

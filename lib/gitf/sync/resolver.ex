@@ -35,7 +35,29 @@ defmodule GiTF.Sync.Resolver do
     with {:ok, shell} <- fetch_cell(shell_id),
          {:ok, sector} <- fetch_sector(shell.sector_id),
          {:ok, target} <- determine_target_branch(op_id, sector) do
-      attempt_tiers(op_id, shell_id, shell, sector, target, 0)
+      strategy = Map.get(sector, :sync_strategy) || "auto_merge"
+
+      case strategy do
+        "manual" ->
+          Logger.info("Sync strategy manual for op #{op_id}, skipping merge")
+          {:ok, :manual, 0}
+
+        "pr_branch" ->
+          Logger.info("Sync strategy pr_branch for op #{op_id}, creating PR")
+          case GiTF.Sync.create_local_pr(shell, sector, op_id) do
+            {:ok, _url} -> {:ok, :pr_created, 0}
+            {:error, reason} ->
+              # PR creation may fail (no remote, no gh CLI, etc.) but the branch
+              # still exists — advance the pipeline so work isn't stuck.
+              Logger.warning("PR creation failed for op #{op_id}: #{inspect(reason)}, " <>
+                "branch #{shell.branch} still available for manual PR")
+              {:ok, :pr_created, 0}
+          end
+
+        _ ->
+          # "auto_merge" or unrecognized — use tier-based merge
+          attempt_tiers(op_id, shell_id, shell, sector, target, 0)
+      end
     else
       {:error, reason} -> {:error, reason, -1}
     end

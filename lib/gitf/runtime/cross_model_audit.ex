@@ -15,18 +15,27 @@ defmodule GiTF.Runtime.CrossModelAudit do
   Uses haiku-tier models for cost efficiency.
   """
   @spec select_audit_model(String.t() | nil) :: String.t()
-  def select_audit_model(nil), do: "google:gemini-2.0-flash"
+  def select_audit_model(nil), do: "google:gemini-2.5-flash"
 
   def select_audit_model(implementation_model) do
     normalized = String.downcase(implementation_model)
+    provider = GiTF.Runtime.ModelResolver.configured_provider()
 
     cond do
+      # If impl model is from the same provider as configured, use the other for diversity
       String.contains?(normalized, "google") or String.contains?(normalized, "gemini") ->
-        "anthropic:claude-haiku-4-5"
+        if provider == "google" do
+          # Can't cross-audit if only Google is configured — use same provider
+          "google:gemini-2.5-flash"
+        else
+          "anthropic:claude-haiku-4-5"
+        end
+
+      String.contains?(normalized, "anthropic") or String.contains?(normalized, "claude") ->
+        "google:gemini-2.5-flash"
 
       true ->
-        # Default: Anthropic models get Google audit
-        "google:gemini-2.0-flash"
+        "google:gemini-2.5-flash"
     end
   end
 

@@ -821,6 +821,22 @@ defmodule GiTF.Ghost.Worker do
   defp mark_success(state) do
     update_ghost_status(state.ghost_id, "stopped")
 
+    # Collect phase output or auto-commit BEFORE marking op as done,
+    # so that downstream consumers (SyncQueue, tests) see committed changes.
+    op = case GiTF.Ops.get(state.op_id) do
+      {:ok, j} -> j
+      _ -> nil
+    end
+
+    is_phase_job = op && Map.get(op, :phase_job, false)
+
+    if is_phase_job do
+      collect_phase_output(state, op)
+    else
+      auto_commit_worktree(state)
+      record_files_changed(state)
+    end
+
     case GiTF.Ops.get(state.op_id) do
       {:ok, %{status: "done"}} ->
         :ok
@@ -836,20 +852,6 @@ defmodule GiTF.Ghost.Worker do
     })
 
     record_costs_from_events(state)
-
-    # Collect phase output if this is a phase op
-    op = case GiTF.Ops.get(state.op_id) do
-      {:ok, j} -> j
-      _ -> nil
-    end
-
-    is_phase_job = op && Map.get(op, :phase_job, false)
-
-    if is_phase_job do
-      collect_phase_output(state, op)
-    else
-      record_files_changed(state)
-    end
 
     is_scout = op && Map.get(op, :recon, false)
     skip_verification = op && Map.get(op, :skip_verification, false)
@@ -898,9 +900,14 @@ defmodule GiTF.Ghost.Worker do
     raw_output = IO.iodata_to_binary(state.output)
     events = Enum.reverse(state.parsed_events)
 
+    # For parallel planning ghosts, store each under a strategy-specific key
+    # (e.g. "planning_minimal") so they don't overwrite each other.
+    # Single-strategy planning or other phases use the phase name directly.
+    artifact_key = planning_artifact_key(op)
+
     case GiTF.Major.PhaseCollector.collect(op.phase, raw_output, events) do
       {:ok, artifact} ->
-        GiTF.Missions.store_artifact(op.mission_id, op.phase, artifact)
+        GiTF.Missions.store_artifact(op.mission_id, artifact_key, artifact)
 
       {:error, reason} ->
         Logger.warning("Phase output parse failed for #{op.phase}: #{inspect(reason)}, storing raw output as fallback")
@@ -909,7 +916,7 @@ defmodule GiTF.Ghost.Worker do
           "parse_failed" => true,
           "parse_error" => inspect(reason)
         }
-        GiTF.Missions.store_artifact(op.mission_id, op.phase, fallback_artifact)
+        GiTF.Missions.store_artifact(op.mission_id, artifact_key, fallback_artifact)
     end
   rescue
     e ->
@@ -920,7 +927,63 @@ defmodule GiTF.Ghost.Worker do
         "parse_failed" => true,
         "parse_error" => inspect(e)
       }
-      GiTF.Missions.store_artifact(op.mission_id, op.phase, fallback_artifact)
+      artifact_key = planning_artifact_key(op)
+      GiTF.Missions.store_artifact(op.mission_id, artifact_key, fallback_artifact)
+  end
+
+  # For planning phase ops with a [strategy] tag in the title, use a
+  # strategy-specific artifact key so parallel planning ghosts don't collide.
+  defp planning_artifact_key(op) do
+    if op.phase == "planning" do
+      case Regex.run(~r/\[(\w+)\]/, op.title || "") do
+        [_, strategy] -> "planning_#{strategy}"
+        _ -> "planning"
+      end
+    else
+      op.phase
+    end
+  end
+
+  defp auto_commit_worktree(state) do
+    case Archive.get(:shells, state.shell_id) do
+      %{worktree_path: path} when is_binary(path) ->
+        # Use System.cmd directly (not safe_cmd which uses Task.async/link)
+        # to avoid linked-task crashes killing the Worker
+        case System.cmd("git", ["status", "--porcelain"],
+               cd: path, stderr_to_stdout: true) do
+          {output, 0} when output != "" ->
+            op_title =
+              case GiTF.Ops.get(state.op_id) do
+                {:ok, op} -> op.title
+                _ -> "op #{state.op_id}"
+              end
+
+            # Add all changes except .claude/ (generated settings that cause merge conflicts)
+            System.cmd("git", ["add", "-A"], cd: path, stderr_to_stdout: true)
+            System.cmd("git", ["reset", "HEAD", "--", ".claude/"],
+              cd: path, stderr_to_stdout: true)
+
+            # Only commit if there are staged changes left
+            {staged, 0} = System.cmd("git", ["diff", "--cached", "--name-only"],
+              cd: path, stderr_to_stdout: true)
+
+            if String.trim(staged) != "" do
+              System.cmd("git", ["commit", "-m", "gitf: #{op_title}"],
+                cd: path, stderr_to_stdout: true)
+              Logger.debug("Auto-committed changes in worktree for ghost #{state.ghost_id}")
+            end
+
+          _ ->
+            :ok
+        end
+
+      _ ->
+        :ok
+    end
+  rescue
+    e ->
+      Logger.debug("Auto-commit failed (non-fatal): #{inspect(e)}")
+      :ok
   end
 
   defp record_files_changed(state) do

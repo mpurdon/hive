@@ -336,7 +336,7 @@ defmodule GiTF.Major.PhasePrompts do
     3. Define clear acceptance criteria derived from requirements
     4. Specify target files from the design
     5. Set up dependencies (op indices, 0-based)
-    6. Recommend model complexity (sonnet for simple, opus for complex)
+    6. Recommend model complexity (general for simple, thinking for complex)
 
     ## Output Format
 
@@ -350,7 +350,7 @@ defmodule GiTF.Major.PhasePrompts do
         "target_files": ["lib/path/to/file.ex"],
         "acceptance_criteria": ["Testable criterion 1", "Testable criterion 2"],
         "depends_on_indices": [],
-        "model_recommendation": "sonnet"
+        "model_recommendation": "general"
       }
     ]
     ```

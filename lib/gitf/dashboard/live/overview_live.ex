@@ -105,11 +105,18 @@ defmodule GiTF.Dashboard.OverviewLive do
       _ -> 0
     end
 
-    sector_count = try do
-      length(GiTF.Sector.list())
+    sectors = try do
+      GiTF.Sector.list()
     rescue
-      _ -> 0
+      _ -> []
     end
+
+    sector_count = length(sectors)
+
+    recent_sectors =
+      sectors
+      |> Enum.sort_by(fn s -> Map.get(s, :updated_at) || Map.get(s, :inserted_at) end, {:desc, DateTime})
+      |> Enum.take(5)
 
     socket
     |> assign(:page_title, "Overview")
@@ -133,12 +140,37 @@ defmodule GiTF.Dashboard.OverviewLive do
     |> assign(:implementation_quests, implementation_quests)
     |> assign(:pending_approvals, pending_approvals)
     |> assign(:sector_count, sector_count)
+    |> assign(:recent_sectors, recent_sectors)
   end
 
   defp safe_active_count do
     GiTF.SectorSupervisor.active_count()
   rescue
     _ -> 0
+  end
+
+  # Icon component for link message subjects
+  defp link_msg_icon(assigns) do
+    ~H"""
+    <span class="link-icon" style="display:inline-flex;vertical-align:middle;margin-right:6px;">
+      <%= case @subject do %>
+        <% "health_alert" -> %><Heroicons.exclamation_triangle mini class="w-4 h-4" style="color:#f59e0b;" />
+        <% "job_complete" -> %><Heroicons.check_circle mini class="w-4 h-4" style="color:#22c55e;" />
+        <% "job_failed" -> %><Heroicons.x_circle mini class="w-4 h-4" style="color:#ef4444;" />
+        <% "job_merged" -> %><Heroicons.arrow_path_rounded_square mini class="w-4 h-4" style="color:#8b5cf6;" />
+        <% "merge_failed" -> %><Heroicons.fire mini class="w-4 h-4" style="color:#ef4444;" />
+        <% "quest_advance" -> %><Heroicons.forward mini class="w-4 h-4" style="color:#3b82f6;" />
+        <% "scout_complete" -> %><Heroicons.magnifying_glass mini class="w-4 h-4" style="color:#06b6d4;" />
+        <% "reimagine_job_created" -> %><Heroicons.arrow_path mini class="w-4 h-4" style="color:#f97316;" />
+        <% "context_handoff" -> %><Heroicons.arrow_right_on_rectangle mini class="w-4 h-4" style="color:#8b5cf6;" />
+        <% "human_approval" -> %><Heroicons.user mini class="w-4 h-4" style="color:#a855f7;" />
+        <% "plan_approval_needed" -> %><Heroicons.clipboard_document_check mini class="w-4 h-4" style="color:#eab308;" />
+        <% "pr_created" -> %><Heroicons.code_bracket mini class="w-4 h-4" style="color:#22d3ee;" />
+        <% "start_mission" -> %><Heroicons.rocket_launch mini class="w-4 h-4" style="color:#10b981;" />
+        <% _ -> %><Heroicons.chat_bubble_left mini class="w-4 h-4" style="color:#6b7280;" />
+      <% end %>
+    </span>
+    """
   end
 
   @impl true
@@ -149,9 +181,9 @@ defmodule GiTF.Dashboard.OverviewLive do
 
       <div class="cards">
         <div class="card">
-          <div class="card-label">Total Ghosts</div>
-          <div class="card-value blue">{@ghost_count}</div>
-          <div class="card-label" style="margin-top:0.25rem">{@active_ghosts} active</div>
+          <div class="card-label">Active Ghosts</div>
+          <div class="card-value blue">{@active_ghosts}</div>
+          <div class="card-label" style="margin-top:0.25rem">{@ghost_count} total</div>
         </div>
         <div class="card">
           <div class="card-label">Missions</div>
@@ -170,7 +202,25 @@ defmodule GiTF.Dashboard.OverviewLive do
         </div>
       </div>
 
-      <div class="cards">
+      <div style="display:grid; grid-template-columns:1fr 1fr 1fr; grid-template-rows:auto auto; gap:0.75rem; margin-bottom:1.5rem">
+        <div class="card" style="grid-row:1 / 3">
+          <div class="card-label">Sectors</div>
+          <%= if @recent_sectors == [] do %>
+            <div class="empty" style="font-size:0.8rem; padding:0.5rem 0">No sectors registered.</div>
+          <% else %>
+            <div style="display:flex; flex-direction:column; gap:0.4rem; margin-top:0.5rem">
+              <%= for sector <- @recent_sectors do %>
+                <div style="display:flex; justify-content:space-between; align-items:center; padding:0.3rem 0; border-bottom:1px solid #21262d">
+                  <span style="color:#f0f6fc; font-weight:500; font-size:0.85rem">{Map.get(sector, :name, "-")}</span>
+                  <span class="badge badge-grey" style="font-size:0.65rem">{Map.get(sector, :sync_strategy, "-")}</span>
+                </div>
+              <% end %>
+            </div>
+          <% end %>
+          <div style="margin-top:0.75rem">
+            <a href="/dashboard/sectors" style="color:#58a6ff; font-size:0.8rem">Manage &rarr;</a>
+          </div>
+        </div>
         <div class="card">
           <div class="card-label">Context Usage</div>
           <div class={"card-value #{if @avg_context > 40, do: "orange", else: "blue"}"}>
@@ -196,9 +246,6 @@ defmodule GiTF.Dashboard.OverviewLive do
             R:{@research_quests} P:{@planning_quests} I:{@implementation_quests}
           </div>
         </div>
-      </div>
-
-      <div class="cards">
         <div class="card">
           <div class="card-label">Pending Approvals</div>
           <div class={"card-value #{if @pending_approvals > 0, do: "yellow"}"}>
@@ -206,13 +253,6 @@ defmodule GiTF.Dashboard.OverviewLive do
           </div>
           <div class="card-label" style="margin-top:0.25rem">
             <a href="/dashboard/approvals" style="color:#58a6ff; font-size:0.8rem">View queue</a>
-          </div>
-        </div>
-        <div class="card">
-          <div class="card-label">Sectors</div>
-          <div class="card-value">{@sector_count}</div>
-          <div class="card-label" style="margin-top:0.25rem">
-            <a href="/dashboard/sectors" style="color:#58a6ff; font-size:0.8rem">Manage</a>
           </div>
         </div>
       </div>
@@ -247,7 +287,7 @@ defmodule GiTF.Dashboard.OverviewLive do
         <% else %>
           <%= for link_msg <- @recent_waggles do %>
             <div class={"link_msg-item #{unless link_msg.read, do: "link_msg-unread"}"}>
-              <div class="link_msg-subject">{link_msg.subject || "(no subject)"}</div>
+              <div class="link_msg-subject" style="display:flex;align-items:center;"><.link_msg_icon subject={link_msg.subject} /> {link_msg.subject || "(no subject)"}</div>
               <div class="link_msg-meta">
                 {link_msg.from} &rarr; {link_msg.to}
                 &middot;

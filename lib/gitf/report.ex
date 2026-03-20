@@ -61,15 +61,16 @@ defmodule GiTF.Report do
 
   defp enrich_jobs(ops, gitf_root) do
     Enum.map(ops, fn op ->
-      ghost = if op.ghost_id, do: Archive.get(:ghosts, op.ghost_id)
-      log_tokens = parse_bee_log(op.ghost_id, gitf_root)
+      ghost_id = Map.get(op, :ghost_id)
+      ghost = if ghost_id, do: Archive.get(:ghosts, ghost_id)
+      log_tokens = parse_bee_log(ghost_id, gitf_root)
 
       %{
         op_id: op.id,
-        title: op.title,
-        status: op.status,
-        ghost_id: op.ghost_id,
-        ghost_name: ghost && (ghost[:name] || op.ghost_id),
+        title: Map.get(op, :title, "-"),
+        status: Map.get(op, :status, "unknown"),
+        ghost_id: ghost_id,
+        ghost_name: ghost && (ghost[:name] || ghost_id),
         started_at: ghost && ghost[:inserted_at],
         completed_at: ghost && ghost[:updated_at],
         duration: compute_duration(ghost),
@@ -240,7 +241,7 @@ defmodule GiTF.Report do
     done = Enum.count(ops, &(&1.status == "done"))
     failed = Enum.count(ops, &(&1.status == "failed"))
 
-    ghost_ids = ops |> Enum.map(& &1.ghost_id) |> Enum.reject(&is_nil/1) |> Enum.uniq()
+    ghost_ids = ops |> Enum.map(&Map.get(&1, :ghost_id)) |> Enum.reject(&is_nil/1) |> Enum.uniq()
 
     lines = [
       "Summary",

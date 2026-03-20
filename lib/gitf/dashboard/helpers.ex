@@ -20,8 +20,14 @@ defmodule GiTF.Dashboard.Helpers do
   def status_badge(_), do: "badge-grey"
 
   def phase_badge("research"), do: "badge-blue"
+  def phase_badge("requirements"), do: "badge-blue"
+  def phase_badge("design"), do: "badge-yellow"
+  def phase_badge("review"), do: "badge-yellow"
   def phase_badge("planning"), do: "badge-yellow"
   def phase_badge("implementation"), do: "badge-purple"
+  def phase_badge("validation"), do: "badge-purple"
+  def phase_badge("awaiting_approval"), do: "badge-yellow"
+  def phase_badge("sync"), do: "badge-blue"
   def phase_badge("completed"), do: "badge-green"
   def phase_badge(_), do: "badge-grey"
 

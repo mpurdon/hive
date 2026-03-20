@@ -10,12 +10,12 @@ defmodule GiTF.Dashboard.MissionDetailLive do
   @phases [
     "pending",
     "research",
+    "requirements",
+    "design",
+    "review",
     "planning",
-    "approval",
     "implementation",
-    "verification",
-    "audit",
-    "reporting",
+    "validation",
     "sync",
     "completed"
   ]
@@ -311,9 +311,9 @@ defmodule GiTF.Dashboard.MissionDetailLive do
             >
               <div class="step-circle">
                 <%= if phase_done?(@mission, phase) do %>
-                  ✓
+                  <Heroicons.check mini class="w-4 h-4" />
                 <% else %>
-                  {idx + 1}
+                  <.phase_icon phase={phase} />
                 <% end %>
               </div>
               <div class="step-label">{phase}</div>
@@ -413,15 +413,33 @@ defmodule GiTF.Dashboard.MissionDetailLive do
     """
   end
 
+  # Map orchestrator phases that aren't in the visual pipeline to their
+  # nearest visual equivalent.  "awaiting_approval" sits between validation
+  # and sync, so we display it as if the mission is at the "sync" step.
+  defp phase_icon(%{phase: "pending"} = assigns), do: ~H"<Heroicons.clock mini class='w-4 h-4' />"
+  defp phase_icon(%{phase: "research"} = assigns), do: ~H"<Heroicons.magnifying_glass mini class='w-4 h-4' />"
+  defp phase_icon(%{phase: "requirements"} = assigns), do: ~H"<Heroicons.clipboard_document_list mini class='w-4 h-4' />"
+  defp phase_icon(%{phase: "design"} = assigns), do: ~H"<Heroicons.cube_transparent mini class='w-4 h-4' />"
+  defp phase_icon(%{phase: "review"} = assigns), do: ~H"<Heroicons.eye mini class='w-4 h-4' />"
+  defp phase_icon(%{phase: "planning"} = assigns), do: ~H"<Heroicons.map mini class='w-4 h-4' />"
+  defp phase_icon(%{phase: "implementation"} = assigns), do: ~H"<Heroicons.wrench_screwdriver mini class='w-4 h-4' />"
+  defp phase_icon(%{phase: "validation"} = assigns), do: ~H"<Heroicons.shield_check mini class='w-4 h-4' />"
+  defp phase_icon(%{phase: "sync"} = assigns), do: ~H"<Heroicons.arrow_path_rounded_square mini class='w-4 h-4' />"
+  defp phase_icon(%{phase: "completed"} = assigns), do: ~H"<Heroicons.flag mini class='w-4 h-4' />"
+  defp phase_icon(assigns), do: ~H"<span>{@phase |> String.first() |> String.upcase()}</span>"
+
+  defp normalise_phase("awaiting_approval"), do: "sync"
+  defp normalise_phase(phase), do: phase
+
   defp phase_done?(mission, phase) do
-    current = Map.get(mission, :current_phase, "pending")
+    current = normalise_phase(Map.get(mission, :current_phase, "pending"))
     current_idx = Enum.find_index(@phases, &(&1 == current)) || 0
     phase_idx = Enum.find_index(@phases, &(&1 == phase)) || 0
     phase_idx < current_idx
   end
 
   defp phase_step_class(mission, phase) do
-    current = Map.get(mission, :current_phase, "pending")
+    current = normalise_phase(Map.get(mission, :current_phase, "pending"))
 
     cond do
       phase == current -> "step-active"

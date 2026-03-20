@@ -154,40 +154,10 @@ defmodule GiTF.Major.Orchestrator do
           plan_approval = GiTF.Missions.get_artifact(mission.id, "plan_approval")
 
           if plan_approval && plan_approval["status"] == "pending" do
-            # Plan approval still pending — check if it's been approved externally
-            case GiTF.Override.approval_status(mission.id) do
-              :approved ->
-                Logger.info("Quest #{mission.id}: plan approved by human, proceeding to implementation")
-                GiTF.Missions.store_artifact(mission.id, "plan_approval",
-                  Map.put(plan_approval, "status", "approved"))
-                {:ok, mission} = GiTF.Missions.get(mission.id)
-                start_implementation(mission)
-
-              :rejected ->
-                Logger.info("Quest #{mission.id}: plan rejected, regenerating")
-                GiTF.Missions.store_artifact(mission.id, "plan_approval",
-                  Map.put(plan_approval, "status", "rejected"))
-                # Clear the planning artifact so a new plan is generated
-                GiTF.Missions.store_artifact(mission.id, "planning", nil)
-                {:ok, mission} = GiTF.Missions.get(mission.id)
-                start_planning(mission)
-
-              _ ->
-                # Still pending — auto-approve after timeout (1h, matching awaiting_approval)
-                requested_at = plan_approval["requested_at"]
-
-                if plan_approval_timed_out?(requested_at) do
-                  Logger.info("Quest #{mission.id}: plan auto-approved after timeout")
-                  GiTF.Missions.store_artifact(mission.id, "plan_approval",
-                    Map.put(plan_approval, "status", "auto_approved"))
-                  {:ok, mission} = GiTF.Missions.get(mission.id)
-                  start_implementation(mission)
-                else
-                  {:ok, "planning"}
-                end
-            end
+            handle_plan_approval(mission, plan_approval)
           else
-            check_and_advance(mission, "planning", &start_implementation/1)
+            # Check if all parallel planning ghosts are done
+            check_planning_complete(mission)
           end
 
         "implementation" ->
@@ -221,7 +191,7 @@ defmodule GiTF.Major.Orchestrator do
       with {:ok, _} <- GiTF.Missions.transition_phase(mission.id, "research", "Quest started") do
         sector = Archive.get(:sectors, sector_id)
         prompt = PhasePrompts.research_prompt(mission, sector)
-        spawn_phase_ghost(mission, "research", prompt, model: "sonnet")
+        spawn_phase_ghost(mission, "research", prompt, model: "general")
         {:ok, "research"}
       end
     end
@@ -232,7 +202,7 @@ defmodule GiTF.Major.Orchestrator do
 
     with {:ok, _} <- GiTF.Missions.transition_phase(mission.id, "requirements", "Research complete") do
       prompt = PhasePrompts.requirements_prompt(mission, research)
-      spawn_phase_ghost(mission, "requirements", prompt, model: "sonnet")
+      spawn_phase_ghost(mission, "requirements", prompt, model: "general")
       {:ok, "requirements"}
     end
   end
@@ -259,7 +229,7 @@ defmodule GiTF.Major.Orchestrator do
           PhasePrompts.design_prompt(mission, requirements, research, extra_instructions)
         end
 
-      spawn_phase_ghost(mission, "design", prompt, model: "opus")
+      spawn_phase_ghost(mission, "design", prompt, model: "thinking")
 
       {:ok, "design"}
     end
@@ -272,7 +242,7 @@ defmodule GiTF.Major.Orchestrator do
 
     with {:ok, _} <- GiTF.Missions.transition_phase(mission.id, "review", "Design complete") do
       prompt = PhasePrompts.review_prompt(mission, design, requirements, research)
-      spawn_phase_ghost(mission, "review", prompt, model: "opus")
+      spawn_phase_ghost(mission, "review", prompt, model: "thinking")
       {:ok, "review"}
     end
   end
@@ -283,8 +253,41 @@ defmodule GiTF.Major.Orchestrator do
     review = GiTF.Missions.get_artifact(mission.id, "review")
 
     with {:ok, _} <- GiTF.Missions.transition_phase(mission.id, "planning", "Review approved") do
-      prompt = PhasePrompts.planning_prompt(mission, design, requirements, review)
-      spawn_phase_ghost(mission, "planning", prompt, model: "sonnet")
+      # Discover whether this needs multiple strategies or just one
+      artifacts = %{research: GiTF.Missions.get_artifact(mission.id, "research"),
+                    requirements: requirements, design: design}
+
+      strategies =
+        try do
+          Planner.discover_strategies(mission, artifacts)
+        rescue
+          _ -> [%{name: "normal", hint: "Standard implementation with reasonable completeness"}]
+        end
+
+      # Simple goals get 1 planning ghost; complex get 3 parallel
+      strategies = if length(strategies) <= 1, do: strategies, else: Enum.take(strategies, 3)
+
+      # Store strategy count so advance logic knows how many to wait for
+      quest_record = Archive.get(:missions, mission.id)
+      if quest_record do
+        Archive.put(:missions, Map.put(quest_record, :planning_strategy_count, length(strategies)))
+      end
+
+      # Spawn a planning ghost for each strategy in parallel
+      Enum.each(strategies, fn %{name: strategy_name, hint: hint} ->
+        strategy_section = Planner.strategy_instruction(strategy_name, hint)
+
+        base_prompt = PhasePrompts.planning_prompt(mission, design, requirements, review)
+        prompt = if strategy_section == "",
+          do: base_prompt,
+          else: base_prompt <> "\n" <> strategy_section <> "\n"
+
+        spawn_phase_ghost(mission, "planning",  prompt,
+          model: "thinking",
+          strategy: strategy_name
+        )
+      end)
+
       {:ok, "planning"}
     end
   end
@@ -296,50 +299,18 @@ defmodule GiTF.Major.Orchestrator do
     planning_artifact = GiTF.Missions.get_artifact(mission.id, "planning")
 
     with {:ok, _} <- GiTF.Missions.transition_phase(mission.id, "implementation", "Planning complete") do
-      # Try multi-plan generation to produce 3 scored alternatives
-      # Falls back to raw planning artifact on failure
+      # Planning phase already scored and selected the best plan.
+      # Just create ops from whatever planning artifact exists.
       case planning_artifact do
         specs when is_list(specs) and specs != [] ->
-          case Planner.generate_candidate_plans(mission.id) do
-            {:ok, best_plan} ->
-              best_tasks = best_plan[:tasks] || best_plan.tasks || []
-              score = Map.get(best_plan, :score, 0.0)
-
-              cond do
-                not is_list(best_tasks) or best_tasks == [] ->
-                  Logger.info("Quest #{mission.id}: multi-plan returned empty tasks, using planning artifact")
-                  Planner.create_jobs_from_specs(mission.id, specs)
-
-                score < @plan_confidence_threshold ->
-                  # Low confidence — request human review of the plan before proceeding
-                  Logger.info(
-                    "Quest #{mission.id}: best plan score #{Float.round(score, 2)} " <>
-                      "below threshold #{@plan_confidence_threshold}, requesting plan approval"
-                  )
-
-                  request_plan_approval(mission, best_plan)
-                  {:ok, "implementation"}
-
-                true ->
-                  Logger.info(
-                    "Quest #{mission.id}: using multi-plan best candidate " <>
-                      "(#{best_plan[:strategy]}, score: #{Float.round(score, 2)})"
-                  )
-
-                  Planner.create_jobs_from_specs(mission.id, best_tasks)
-              end
-
-            {:error, reason} ->
-              Logger.info("Quest #{mission.id}: multi-plan failed (#{inspect(reason)}), using planning artifact")
-              Planner.create_jobs_from_specs(mission.id, specs)
-          end
+          Planner.create_jobs_from_specs(mission.id, specs)
 
         _ ->
           Logger.warning("Planning artifact is not a list, falling back to synthetic planning")
           generate_synthetic_jobs(mission)
       end
 
-      # Spawn ready ops — the Major's spawn_ready_jobs handles this
+      # Spawn ready ops
       {:ok, mission} = GiTF.Missions.get(mission.id)
       spawn_implementation_jobs(mission)
 
@@ -353,33 +324,138 @@ defmodule GiTF.Major.Orchestrator do
 
     with {:ok, _} <- GiTF.Missions.transition_phase(mission.id, "validation", "Implementation complete") do
       prompt = PhasePrompts.validation_prompt(mission, all_artifacts)
-      spawn_phase_ghost(mission, "validation", prompt, model: "sonnet")
+      spawn_phase_ghost(mission, "validation", prompt, model: "general")
       {:ok, "validation"}
     end
   end
 
   defp start_merge(mission) do
     with {:ok, _} <- GiTF.Missions.transition_phase(mission.id, "sync", "Validation passed, merging") do
-      case GiTF.Sync.merge_quest(mission.id) do
-        {:ok, branch} ->
+      sector = if mission.sector_id, do: Archive.get(:sectors, mission.sector_id)
+      strategy = if sector, do: Map.get(sector, :sync_strategy) || "auto_merge", else: "auto_merge"
+
+      case strategy do
+        "manual" ->
           GiTF.Missions.store_artifact(mission.id, "sync", %{
-            "status" => "success",
-            "branch" => branch,
-            "merged_at" => DateTime.utc_now()
+            "status" => "manual",
+            "note" => "Branches left for manual merge"
           })
           complete_quest(mission.id)
 
-        {:error, reason} ->
-          GiTF.Missions.store_artifact(mission.id, "sync", %{
-            "status" => "failed",
-            "error" => inspect(reason)
-          })
-          Logger.warning("Quest #{mission.id} sync failed: #{inspect(reason)}, completing as failed")
-          GiTF.Missions.transition_phase(mission.id, "completed", "Sync failed: #{inspect(reason)}")
-          GiTF.Missions.update_status!(mission.id)
-          {:ok, "completed"}
+        "pr_branch" ->
+          finalize_merge_as_pr(mission, sector)
+
+        _ ->
+          finalize_merge_to_main(mission)
       end
     end
+  end
+
+  defp finalize_merge_to_main(mission) do
+    case GiTF.Sync.merge_quest(mission.id) do
+      {:ok, quest_branch} ->
+        # merge_quest creates a mission branch — now merge it into main
+        sector = Archive.get(:sectors, mission.sector_id)
+        repo_path = sector.path
+
+        with {:ok, main_branch} <- GiTF.Sync.detect_main_branch(repo_path),
+             :ok <- GiTF.Git.checkout(repo_path, main_branch),
+             :ok <- GiTF.Git.sync(repo_path, quest_branch, no_ff: true) do
+          GiTF.Missions.store_artifact(mission.id, "sync", %{
+            "status" => "success",
+            "branch" => quest_branch,
+            "merged_at" => DateTime.utc_now()
+          })
+          complete_quest(mission.id)
+        else
+          {:error, reason} ->
+            Logger.warning("Quest #{mission.id} merge of mission branch failed: #{inspect(reason)}")
+            GiTF.Missions.store_artifact(mission.id, "sync", %{
+              "status" => "failed",
+              "branch" => quest_branch,
+              "error" => inspect(reason)
+            })
+            GiTF.Missions.transition_phase(mission.id, "completed", "Sync failed: #{inspect(reason)}")
+            GiTF.Missions.update_status!(mission.id)
+            {:ok, "completed"}
+        end
+
+      {:error, reason} ->
+        GiTF.Missions.store_artifact(mission.id, "sync", %{
+          "status" => "failed",
+          "error" => inspect(reason)
+        })
+        Logger.warning("Quest #{mission.id} sync failed: #{inspect(reason)}, completing as failed")
+        GiTF.Missions.transition_phase(mission.id, "completed", "Sync failed: #{inspect(reason)}")
+        GiTF.Missions.update_status!(mission.id)
+        {:ok, "completed"}
+    end
+  end
+
+  defp finalize_merge_as_pr(mission, sector) do
+    case GiTF.Sync.merge_quest(mission.id) do
+      {:ok, quest_branch} ->
+        repo_path = sector.path
+        {:ok, main_branch} = GiTF.Sync.detect_main_branch(repo_path)
+
+        title = "gitf: #{mission.name || mission.goal}"
+        body = "Mission #{mission.id}\n\nGoal: #{mission.goal}"
+
+        # Push mission branch and create PR
+        GiTF.Git.safe_cmd(["push", "-u", "origin", quest_branch],
+          cd: repo_path, stderr_to_stdout: true)
+
+        pr_result =
+          case System.cmd("gh", [
+                 "pr", "create",
+                 "--head", quest_branch,
+                 "--base", main_branch,
+                 "--title", String.slice(title, 0, 200),
+                 "--body", String.slice(body, 0, 4000)
+               ], cd: repo_path, stderr_to_stdout: true) do
+            {output, 0} -> {:ok, String.trim(output)}
+            {output, _} -> {:error, String.slice(output, 0, 200)}
+          end
+
+        case pr_result do
+          {:ok, url} ->
+            GiTF.Missions.store_artifact(mission.id, "sync", %{
+              "status" => "pr_created",
+              "branch" => quest_branch,
+              "pr_url" => url
+            })
+
+          {:error, reason} ->
+            Logger.warning("Quest #{mission.id} PR creation failed: #{inspect(reason)}")
+            GiTF.Missions.store_artifact(mission.id, "sync", %{
+              "status" => "pr_failed",
+              "branch" => quest_branch,
+              "error" => inspect(reason)
+            })
+        end
+
+        complete_quest(mission.id)
+
+      {:error, reason} ->
+        GiTF.Missions.store_artifact(mission.id, "sync", %{
+          "status" => "failed",
+          "error" => inspect(reason)
+        })
+        Logger.warning("Quest #{mission.id} merge_quest failed: #{inspect(reason)}")
+        GiTF.Missions.transition_phase(mission.id, "completed", "Sync failed: #{inspect(reason)}")
+        GiTF.Missions.update_status!(mission.id)
+        {:ok, "completed"}
+    end
+  rescue
+    e ->
+      Logger.warning("Quest #{mission.id} PR finalization failed: #{Exception.message(e)}")
+      GiTF.Missions.store_artifact(mission.id, "sync", %{
+        "status" => "failed",
+        "error" => Exception.message(e)
+      })
+      GiTF.Missions.transition_phase(mission.id, "completed", "PR finalization failed")
+      GiTF.Missions.update_status!(mission.id)
+      {:ok, "completed"}
   end
 
   defp start_awaiting_approval(mission) do
@@ -407,7 +483,7 @@ defmodule GiTF.Major.Orchestrator do
       |> Enum.with_index(1)
       |> Enum.map(fn {t, i} ->
         title = t["title"] || Map.get(t, :title, "Task #{i}")
-        model = t["model_recommendation"] || Map.get(t, :model_recommendation, "sonnet")
+        model = t["model_recommendation"] || Map.get(t, :model_recommendation, "general")
         deps = t["depends_on"] || Map.get(t, :depends_on, [])
         dep_str = if deps != [], do: " (depends on: #{Enum.join(deps, ", ")})", else: ""
         "  #{i}. #{title} [#{model}]#{dep_str}"
@@ -455,6 +531,196 @@ defmodule GiTF.Major.Orchestrator do
       if is_list(best_tasks) and best_tasks != [] do
         Planner.create_jobs_from_specs(mission.id, best_tasks)
       end
+  end
+
+  # -- Planning phase: parallel ghost completion + scoring --------------------
+
+  defp check_planning_complete(mission) do
+    # Find all planning phase ops for this mission
+    planning_ops = Archive.filter(:ops, fn j ->
+      j.mission_id == mission.id and
+        j[:phase_job] == true and
+        j[:phase] == "planning"
+    end)
+
+    if planning_ops == [] do
+      # No planning ops exist yet (race condition) — stay in planning
+      {:ok, "planning"}
+    else
+      done_ops = Enum.filter(planning_ops, &(&1.status == "done"))
+      failed_ops = Enum.filter(planning_ops, &(&1.status == "failed"))
+      total = length(planning_ops)
+      terminal = length(done_ops) + length(failed_ops)
+
+      cond do
+        # All done or failed — evaluate what we have
+        terminal == total ->
+          evaluate_planning_results(mission, done_ops)
+
+        # All in-progress — wait
+        true ->
+          {:ok, "planning"}
+      end
+    end
+  end
+
+  defp evaluate_planning_results(mission, done_ops) do
+    if done_ops == [] do
+      # All planning ghosts failed — fall back to synthetic planning
+      Logger.warning("Quest #{mission.id}: all planning ghosts failed, generating fallback")
+      {:ok, mission} = GiTF.Missions.get(mission.id)
+      start_implementation(mission)
+    else
+      if length(done_ops) == 1 do
+        # Single planning ghost — its artifact is either "planning" or "planning_<strategy>"
+        strategy = extract_strategy_from_title(hd(done_ops).title)
+        artifact_key = if strategy != "normal", do: "planning_#{strategy}", else: "planning"
+        artifact = GiTF.Missions.get_artifact(mission.id, artifact_key)
+        # Also check the base "planning" key as fallback
+        artifact = artifact || GiTF.Missions.get_artifact(mission.id, "planning")
+
+        if artifact do
+          # Copy to the canonical "planning" key if stored under strategy key
+          if artifact_key != "planning" do
+            GiTF.Missions.store_artifact(mission.id, "planning", artifact)
+          end
+          {:ok, mission} = GiTF.Missions.get(mission.id)
+          start_implementation(mission)
+        else
+          {:ok, "planning"}
+        end
+      else
+        # Multiple planning ghosts — score and pick best
+        select_best_plan(mission, done_ops, nil)
+      end
+    end
+  end
+
+  defp select_best_plan(mission, done_ops, _planning_artifact) do
+    # Each planning ghost stored its output as "planning_<strategy>" artifact
+    candidates =
+      done_ops
+      |> Enum.map(fn op ->
+        strategy = extract_strategy_from_title(op.title)
+        artifact_key = "planning_#{strategy}"
+        artifact = GiTF.Missions.get_artifact(mission.id, artifact_key)
+
+        cond do
+          is_list(artifact) and artifact != [] ->
+            plan = %{tasks: artifact, strategy: strategy}
+            score = Planner.score_plan(plan)
+            Map.put(plan, :score, score)
+
+          is_map(artifact) and not Map.get(artifact, "parse_failed", false) ->
+            # Artifact is a map (e.g. from PhaseCollector) — try to extract tasks
+            tasks = artifact["tasks"] || artifact[:tasks] || [artifact]
+            plan = %{tasks: List.wrap(tasks), strategy: strategy}
+            score = Planner.score_plan(plan)
+            Map.put(plan, :score, score)
+
+          true ->
+            nil
+        end
+      end)
+      |> Enum.reject(&is_nil/1)
+
+    if candidates == [] do
+      # Couldn't parse individual plans — use the latest planning artifact
+      {:ok, mission} = GiTF.Missions.get(mission.id)
+      start_implementation(mission)
+    else
+      # Store all candidates
+      GiTF.Missions.store_artifact(mission.id, "plan_candidates", %{
+        "candidates" => Enum.map(candidates, fn c ->
+          %{"strategy" => c.strategy, "score" => c.score, "task_count" => length(c.tasks)}
+        end),
+        "generated_at" => DateTime.utc_now() |> DateTime.to_iso8601()
+      })
+
+      # Pick the best
+      best = Enum.max_by(candidates, & &1.score)
+
+      Logger.info("Quest #{mission.id}: selected plan '#{best.strategy}' " <>
+        "(score: #{Float.round(best.score, 2)}) from #{length(candidates)} candidates")
+
+      # Store best as the definitive planning artifact
+      GiTF.Missions.store_artifact(mission.id, "planning", best.tasks)
+
+      # Store candidates on mission record for fallback
+      quest_record = Archive.get(:missions, mission.id)
+      if quest_record do
+        Archive.put(:missions, Map.merge(quest_record, %{
+          draft_plan: best,
+          plan_candidates: candidates
+        }))
+      end
+
+      score = best.score
+
+      if score < @plan_confidence_threshold do
+        Logger.info("Quest #{mission.id}: best plan score #{Float.round(score, 2)} below threshold")
+        {:ok, mission} = GiTF.Missions.get(mission.id)
+        request_plan_approval(mission, best)
+        {:ok, "planning"}
+      else
+        {:ok, mission} = GiTF.Missions.get(mission.id)
+        start_implementation(mission)
+      end
+    end
+  end
+
+  defp extract_strategy_from_title(title) do
+    case Regex.run(~r/\[(\w+)\]/, title) do
+      [_, strategy] -> strategy
+      _ -> "normal"
+    end
+  end
+
+  defp parse_plan_output(text) do
+    json_str =
+      case Regex.run(~r/```json\s*\n(.*?)\n\s*```/s, text) do
+        [_, json] -> json
+        _ -> text
+      end
+
+    case Jason.decode(json_str) do
+      {:ok, tasks} when is_list(tasks) -> {:ok, tasks}
+      _ -> {:error, :parse_failed}
+    end
+  rescue
+    _ -> {:error, :parse_failed}
+  end
+
+  defp handle_plan_approval(mission, plan_approval) do
+    case GiTF.Override.approval_status(mission.id) do
+      :approved ->
+        Logger.info("Quest #{mission.id}: plan approved by human, proceeding to implementation")
+        GiTF.Missions.store_artifact(mission.id, "plan_approval",
+          Map.put(plan_approval, "status", "approved"))
+        {:ok, mission} = GiTF.Missions.get(mission.id)
+        start_implementation(mission)
+
+      :rejected ->
+        Logger.info("Quest #{mission.id}: plan rejected, regenerating")
+        GiTF.Missions.store_artifact(mission.id, "plan_approval",
+          Map.put(plan_approval, "status", "rejected"))
+        GiTF.Missions.store_artifact(mission.id, "planning", nil)
+        {:ok, mission} = GiTF.Missions.get(mission.id)
+        start_planning(mission)
+
+      _ ->
+        requested_at = plan_approval["requested_at"]
+
+        if plan_approval_timed_out?(requested_at) do
+          Logger.info("Quest #{mission.id}: plan auto-approved after timeout")
+          GiTF.Missions.store_artifact(mission.id, "plan_approval",
+            Map.put(plan_approval, "status", "auto_approved"))
+          {:ok, mission} = GiTF.Missions.get(mission.id)
+          start_implementation(mission)
+        else
+          {:ok, "planning"}
+        end
+    end
   end
 
   defp handle_approval_result(mission) do
@@ -630,32 +896,32 @@ defmodule GiTF.Major.Orchestrator do
 
     case phase do
       "research" ->
-        {PhasePrompts.research_prompt(mission, sector), "sonnet"}
+        {PhasePrompts.research_prompt(mission, sector), "general"}
 
       "requirements" ->
         research = GiTF.Missions.get_artifact(mission.id, "research") || %{}
-        {PhasePrompts.requirements_prompt(mission, research), "sonnet"}
+        {PhasePrompts.requirements_prompt(mission, research), "general"}
 
       "design" ->
         requirements = GiTF.Missions.get_artifact(mission.id, "requirements") || %{}
         research = GiTF.Missions.get_artifact(mission.id, "research") || %{}
-        {PhasePrompts.design_prompt(mission, requirements, research), "opus"}
+        {PhasePrompts.design_prompt(mission, requirements, research), "thinking"}
 
       "review" ->
         design = GiTF.Missions.get_artifact(mission.id, "design") || %{}
         requirements = GiTF.Missions.get_artifact(mission.id, "requirements") || %{}
         research = GiTF.Missions.get_artifact(mission.id, "research") || %{}
-        {PhasePrompts.review_prompt(mission, design, requirements, research), "opus"}
+        {PhasePrompts.review_prompt(mission, design, requirements, research), "thinking"}
 
       "planning" ->
         design = GiTF.Missions.get_artifact(mission.id, "design") || %{}
         requirements = GiTF.Missions.get_artifact(mission.id, "requirements") || %{}
         review = GiTF.Missions.get_artifact(mission.id, "review") || %{}
-        {PhasePrompts.planning_prompt(mission, design, requirements, review), "sonnet"}
+        {PhasePrompts.planning_prompt(mission, design, requirements, review), "thinking"}
 
       "validation" ->
         all_artifacts = Map.get(mission, :artifacts, %{})
-        {PhasePrompts.validation_prompt(mission, all_artifacts), "sonnet"}
+        {PhasePrompts.validation_prompt(mission, all_artifacts), "general"}
 
       phase when phase in ["implementation", "sync", "awaiting_approval"] ->
         # These phases don't use phase ghosts — handled by op spawning,
@@ -663,12 +929,12 @@ defmodule GiTF.Major.Orchestrator do
         nil
 
       _ ->
-        {"Re-attempt #{phase} phase", "sonnet"}
+        {"Re-attempt #{phase} phase", "general"}
     end
   rescue
     e ->
       Logger.warning("Failed to rebuild prompt for phase #{phase}: #{Exception.message(e)}")
-      {"Re-attempt #{phase} phase (prompt rebuild failed)", "sonnet"}
+      {"Re-attempt #{phase} phase (prompt rebuild failed)", "general"}
   end
 
   defp handle_review_result(mission) do
@@ -989,11 +1255,20 @@ defmodule GiTF.Major.Orchestrator do
   # -- Ghost Spawning ----------------------------------------------------------
 
   defp spawn_phase_ghost(mission, phase, prompt, opts) do
-    model = Keyword.get(opts, :model, "sonnet")
+    model = Keyword.get(opts, :model, "general")
+    strategy = Keyword.get(opts, :strategy)
+
+    # Build title with strategy label for parallel planning ghosts
+    title =
+      if strategy do
+        "#{String.capitalize(phase)} [#{strategy}] for: #{String.slice(mission.goal, 0, 50)}"
+      else
+        "#{String.capitalize(phase)} phase for: #{String.slice(mission.goal, 0, 60)}"
+      end
 
     # Create a phase op
     job_attrs = %{
-      title: "#{String.capitalize(phase)} phase for: #{String.slice(mission.goal, 0, 60)}",
+      title: title,
       description: prompt,
       mission_id: mission.id,
       sector_id: mission.sector_id,

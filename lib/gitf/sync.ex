@@ -62,6 +62,92 @@ defmodule GiTF.Sync do
     end
   end
 
+  @doc """
+  Creates a PR for a ghost branch, either via `gh` CLI or the GitHub API.
+
+  Pushes the branch to origin first, then creates the PR. Falls back to
+  `GiTF.GitHub.create_pr/3` when the sector has `github_owner`/`github_repo`.
+
+  Returns `{:ok, pr_url}` or `{:error, reason}`.
+  """
+  @spec create_local_pr(map(), map(), String.t()) :: {:ok, String.t()} | {:error, term()}
+  def create_local_pr(shell, sector, op_id) do
+    repo_path = sector.path
+
+    op =
+      case GiTF.Ops.get(op_id) do
+        {:ok, j} -> j
+        _ -> nil
+      end
+
+    title = if op, do: op.title, else: "gitf: #{shell.branch}"
+    body = if op, do: op.description || "", else: ""
+
+    # If sector has GitHub API config, prefer that
+    if Map.get(sector, :github_owner) && Map.get(sector, :github_repo) && op do
+      case GiTF.GitHub.create_pr(sector, shell, op) do
+        {:ok, url} ->
+          Logger.info("PR created via GitHub API: #{url}")
+          {:ok, url}
+
+        {:error, api_reason} ->
+          Logger.warning("GitHub API PR failed: #{inspect(api_reason)}, trying gh CLI")
+          create_pr_via_gh(repo_path, shell.branch, title, body)
+      end
+    else
+      create_pr_via_gh(repo_path, shell.branch, title, body)
+    end
+  rescue
+    e ->
+      Logger.warning("create_local_pr failed: #{Exception.message(e)}")
+      {:error, {:pr_creation_failed, Exception.message(e)}}
+  end
+
+  defp create_pr_via_gh(repo_path, branch, title, body) do
+    # Push the branch to origin
+    case GiTF.Git.safe_cmd(["push", "-u", "origin", branch],
+           cd: repo_path, stderr_to_stdout: true) do
+      {_, 0} ->
+        :ok
+
+      {push_output, _} ->
+        # Check if it's just "already up to date" or similar non-error
+        if String.contains?(push_output, "Everything up-to-date") do
+          :ok
+        else
+          Logger.warning("Git push output: #{String.slice(push_output, 0, 200)}")
+          # Continue anyway — branch might already be pushed
+          :ok
+        end
+    end
+
+    # Detect base branch
+    {:ok, base} = detect_main_branch(repo_path)
+
+    # Create PR via gh CLI
+    case System.cmd("gh", [
+           "pr", "create",
+           "--head", branch,
+           "--base", base,
+           "--title", title,
+           "--body", String.slice(body, 0, 4000)
+         ], cd: repo_path, stderr_to_stdout: true) do
+      {output, 0} ->
+        url = output |> String.trim()
+        Logger.info("PR created via gh CLI: #{url}")
+        {:ok, url}
+
+      {output, _code} ->
+        # gh might not be installed or no remote configured
+        Logger.warning("gh pr create failed: #{String.slice(output, 0, 200)}")
+        {:error, {:gh_pr_failed, String.slice(output, 0, 200)}}
+    end
+  rescue
+    e ->
+      Logger.warning("gh CLI PR creation failed: #{Exception.message(e)}")
+      {:error, {:gh_not_available, Exception.message(e)}}
+  end
+
   # -- Private: per-sector sync lock --------------------------------------------
 
   @doc false

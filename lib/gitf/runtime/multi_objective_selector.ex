@@ -10,18 +10,18 @@ defmodule GiTF.Runtime.MultiObjectiveSelector do
   Risk adjustment shifts weight from cost to quality for high/critical ops.
   """
 
-  @candidates ["opus", "sonnet", "haiku"]
+  @candidates ["thinking", "general", "fast"]
 
   @cost_scores %{
-    "haiku" => 1.0,
-    "sonnet" => 0.66,
-    "opus" => 0.33
+    "fast" => 1.0,
+    "general" => 0.66,
+    "thinking" => 0.33
   }
 
   @cost_tiers %{
-    "haiku" => 0.01,
-    "sonnet" => 0.10,
-    "opus" => 0.50
+    "fast" => 0.01,
+    "general" => 0.10,
+    "thinking" => 0.50
   }
 
   @doc """
@@ -65,7 +65,7 @@ defmodule GiTF.Runtime.MultiObjectiveSelector do
 
     case scored do
       [{model, breakdown} | _] -> {model, breakdown}
-      [] -> {"sonnet", %{total: 0.0}}
+      [] -> {"general", %{total: 0.0}}
     end
   end
 

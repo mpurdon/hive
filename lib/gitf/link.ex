@@ -34,6 +34,21 @@ defmodule GiTF.Link do
     {:ok, link_msg} = Archive.insert(:links, record)
     broadcast(to, {:waggle_received, link_msg})
 
+    # Direct delivery to Major process — PubSub topic mismatch fallback
+    try do
+      if to == "major" do
+        case Process.whereis(GiTF.Major) do
+          pid when is_pid(pid) ->
+            Kernel.send(pid, {:waggle_received, link_msg})
+          _ ->
+            require Logger
+            Logger.warning("Link: Major process not registered, direct delivery skipped")
+        end
+      end
+    rescue
+      _ -> :ok
+    end
+
     GiTF.Telemetry.emit([:gitf, :link_msg, :sent], %{}, %{
       from: from,
       to: to,
@@ -157,6 +172,20 @@ defmodule GiTF.Link do
   def topic(:sector, name), do: "link_msg:sector:#{name}"
 
   # -- Private helpers -------------------------------------------------------
+
+  defp broadcast("major" = to, message) do
+    Phoenix.PubSub.broadcast(@pubsub, "link:major", message)
+  rescue
+    e in ArgumentError ->
+      _ = e
+      :ok
+
+    e ->
+      require Logger
+      Logger.error("Link broadcast failed for #{to}: #{Exception.message(e)}")
+      :telemetry.execute([:gitf, :link_msg, :broadcast_error], %{}, %{to: to, error: e})
+      :ok
+  end
 
   defp broadcast(to, message) do
     Phoenix.PubSub.broadcast(@pubsub, "link_msg:#{to}", message)
