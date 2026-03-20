@@ -20,14 +20,20 @@ erl_crash.dump
 *.ez
 
 # Ignore package tarball (built via "mix hex.build").
-hive-*.tar
+gitf-*.tar
 
 # Compiled escript binary (built via "mix escript.build").
-/hive
-/hive.escript
+/gitf
 
 # Runtime log file.
-hive.log
+section.log
+
+# Local data/config directories.
+.hive/
+.gitf/
+
+# MCP client config (local to each machine).
+.mcp.json
 
 # Claude Code local config.
 .claude/
