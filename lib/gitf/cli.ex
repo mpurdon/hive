@@ -220,7 +220,7 @@ defmodule GiTF.CLI do
   defp expand_defaults(argv), do: argv
 
   # Commands that manage their own store lifecycle or don't need the store.
-  @no_auto_store [[:version], [:server]]
+  @no_auto_store [[:version], [:server], [:daemon]]
 
   defp maybe_ensure_store(subcommand_path) do
     unless subcommand_path in @no_auto_store do
@@ -1800,7 +1800,7 @@ defmodule GiTF.CLI do
     Process.sleep(2_000)
 
     case GiTF.Missions.get(mission_id) do
-      {:ok, mission} ->
+      {:ok, _mission} ->
         ops = GiTF.Ops.list(mission_id: mission_id)
         all_terminal = Enum.all?(ops, &(&1.status in ["done", "failed", "rejected"]))
 
@@ -2315,18 +2315,26 @@ defmodule GiTF.CLI do
     end
   end
 
+  defp dispatch([:daemon], result), do: dispatch([:server], result)
+
   defp dispatch([:server], result) do
     port = result_get(result, :options, :port) || 4000
+
+    # Trap signals so prep_stop/1 fires on Ctrl+C, cleaning up the MCP socket
+    Process.flag(:trap_exit, true)
 
     {:ok, _} = Application.ensure_all_started(:gitf)
 
     url = "http://localhost:#{port}"
-    Format.success("GiTF server v#{GiTF.version()} running at #{url}")
-    Format.info("API available at #{url}/api/v1/health")
+    sock = GiTF.MCPServer.SocketListener.socket_path()
+    Format.success("GiTF daemon v#{GiTF.version()} running")
+    Format.info("  Dashboard: #{url}")
+    Format.info("  API:       #{url}/api/v1/health")
+    Format.info("  MCP:       #{sock}")
     Format.info("Press Ctrl+C to stop.")
 
-    # Block the main process. The BEAM's exfil handler (Ctrl+C -> 'a')
-    # will stop the supervision tree which releases the port.
+    # Block the main process. The BEAM's exit handler (Ctrl+C -> 'a')
+    # will stop the supervision tree which triggers prep_stop → socket cleanup.
     ref = Process.monitor(Process.whereis(GiTF.Supervisor))
 
     receive do
@@ -3840,9 +3848,22 @@ defmodule GiTF.CLI do
           name: "dashboard",
           about: "Open the live TUI dashboard"
         ],
+        daemon: [
+          name: "daemon",
+          about: "Start the GiTF daemon (web + MCP + factory). Alias: server",
+          options: [
+            port: [
+              short: "-p",
+              long: "--port",
+              help: "Port to listen on (default: 4000)",
+              parser: :integer,
+              required: false
+            ]
+          ]
+        ],
         server: [
           name: "server",
-          about: "Start the GiTF web server for real-time mission monitoring",
+          about: "Start the GiTF daemon (alias for 'daemon')",
           options: [
             port: [
               short: "-p",

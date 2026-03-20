@@ -1,7 +1,7 @@
 defmodule GiTF.MixProject do
   use Mix.Project
 
-  @version "0.31.2"
+  @version "0.34.0"
 
   def project do
     [
@@ -41,7 +41,8 @@ defmodule GiTF.MixProject do
     [
       gitf: [
         steps: [:assemble],
-        applications: [runtime_tools: :permanent]
+        applications: [runtime_tools: :permanent],
+        cookie: "gitf_#{:erlang.phash2(System.user_home!())}"
       ]
     ]
   end
@@ -61,7 +62,6 @@ defmodule GiTF.MixProject do
       {:ratatouille, "~> 0.5"},
       {:telemetry, "~> 1.2"},
       {:req_llm, "~> 1.6"},
-      {:phoenix_live_reload, "~> 1.5", only: :dev},
       {:mox, "~> 1.1", only: :test},
       {:lazy_html, ">= 0.1.0", only: :test}
     ]

@@ -14,4 +14,9 @@ if config_env() == :prod do
     server: true,
     code_reloader: false,
     secret_key_base: secret
+
+  # MCP socket path can be overridden
+  if sock = System.get_env("GITF_MCP_SOCK") do
+    config :gitf, mcp_sock: sock
+  end
 end

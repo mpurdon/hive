@@ -71,7 +71,7 @@ defmodule GiTF.CLI.PlanHandler do
       end
     rescue
       # Catch the MatchError thrown by Ratatouille when ExTermbox NIF fails to load in an escript
-      e in MatchError ->
+      _e in MatchError ->
         GiTF.CLI.Format.warn("TUI failed to initialize (this is normal when running as a global escript).")
         GiTF.CLI.Format.info("Falling back to CLI mode...")
         run_cli_planning(mission)

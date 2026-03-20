@@ -115,7 +115,16 @@ defmodule GiTF.Dashboard.OverviewLive do
 
     recent_sectors =
       sectors
-      |> Enum.sort_by(fn s -> Map.get(s, :updated_at) || Map.get(s, :inserted_at) end, {:desc, DateTime})
+      |> Enum.sort_by(&(-safe_unix_ts(&1)))
+      |> Enum.take(5)
+
+    # Recent missions for the overview card (active first, then recent completed)
+    recent_missions =
+      missions
+      |> Enum.sort_by(fn m ->
+        active = if Map.get(m, :status) == "active", do: 0, else: 1
+        {active, -safe_unix_ts(m)}
+      end)
       |> Enum.take(5)
 
     socket
@@ -141,6 +150,56 @@ defmodule GiTF.Dashboard.OverviewLive do
     |> assign(:pending_approvals, pending_approvals)
     |> assign(:sector_count, sector_count)
     |> assign(:recent_sectors, recent_sectors)
+    |> assign(:recent_missions, recent_missions)
+  end
+
+  @mini_phases ~w(research requirements design review planning implementation validation sync completed)
+
+  defp mini_phase_pipeline(assigns) do
+    current = assigns.phase || "pending"
+    phases = @mini_phases
+
+    current_idx = Enum.find_index(phases, &(&1 == normalise_overview_phase(current))) || -1
+
+    assigns = assign(assigns, :phases, phases)
+    assigns = assign(assigns, :current_idx, current_idx)
+
+    ~H"""
+    <div style="display:flex; align-items:center; gap:0px">
+      <%= for {phase, idx} <- Enum.with_index(@phases) do %>
+        <%= if idx > 0 do %>
+          <div style={"width:6px; height:1px; background:#{if idx <= @current_idx, do: "#22c55e", else: "#30363d"}"}></div>
+        <% end %>
+        <div
+          title={phase}
+          style={"width:6px; height:6px; border-radius:50%; background:#{cond do
+            idx < @current_idx -> "#22c55e"
+            idx == @current_idx -> "#3b82f6"
+            true -> "#30363d"
+          end}"}
+        ></div>
+      <% end %>
+    </div>
+    """
+  end
+
+  defp normalise_overview_phase("awaiting_approval"), do: "sync"
+  defp normalise_overview_phase("pending"), do: "pending"
+  defp normalise_overview_phase(phase), do: phase
+
+  defp mission_status_badge("active"), do: "badge-blue"
+  defp mission_status_badge("completed"), do: "badge-green"
+  defp mission_status_badge("failed"), do: "badge-red"
+  defp mission_status_badge("killed"), do: "badge-red"
+  defp mission_status_badge("planning"), do: "badge-yellow"
+  defp mission_status_badge(_), do: "badge-grey"
+
+  defp safe_unix_ts(record) do
+    ts = Map.get(record, :updated_at) || Map.get(record, :inserted_at)
+    case ts do
+      %DateTime{} -> DateTime.to_unix(ts)
+      _ -> 0
+    end
   end
 
   defp safe_active_count do
@@ -179,30 +238,8 @@ defmodule GiTF.Dashboard.OverviewLive do
     <.live_component module={GiTF.Dashboard.AppLayout} id="layout" current_path={@current_path} flash={@flash}>
       <h1 class="page-title">Dashboard Overview</h1>
 
-      <div class="cards">
-        <div class="card">
-          <div class="card-label">Active Ghosts</div>
-          <div class="card-value blue">{@active_ghosts}</div>
-          <div class="card-label" style="margin-top:0.25rem">{@ghost_count} total</div>
-        </div>
-        <div class="card">
-          <div class="card-label">Missions</div>
-          <div class="card-value yellow">{@quest_count}</div>
-          <div class="card-label" style="margin-top:0.25rem">{@active_quests} active</div>
-        </div>
-        <div class="card">
-          <div class="card-label">Total Cost</div>
-          <div class="card-value green">{format_cost(@total_cost)}</div>
-          <div class="card-label" style="margin-top:0.25rem">{format_tokens(@total_input_tokens + @total_output_tokens)} tokens</div>
-        </div>
-        <div class="card">
-          <div class="card-label">Live Processes</div>
-          <div class="card-value">{@active_processes}</div>
-          <div class="card-label" style="margin-top:0.25rem">under SectorSupervisor</div>
-        </div>
-      </div>
-
-      <div style="display:grid; grid-template-columns:1fr 1fr 1fr; grid-template-rows:auto auto; gap:0.75rem; margin-bottom:1.5rem">
+      <div style="display:grid; grid-template-columns:1fr 1fr 1fr; grid-auto-rows:1fr; gap:0.75rem; margin-bottom:1.5rem">
+        <%!-- Sectors: col 1, spans 2 rows --%>
         <div class="card" style="grid-row:1 / 3">
           <div class="card-label">Sectors</div>
           <%= if @recent_sectors == [] do %>
@@ -217,10 +254,54 @@ defmodule GiTF.Dashboard.OverviewLive do
               <% end %>
             </div>
           <% end %>
-          <div style="margin-top:0.75rem">
+          <div style="margin-top:auto; padding-top:0.75rem">
             <a href="/dashboard/sectors" style="color:#58a6ff; font-size:0.8rem">Manage &rarr;</a>
           </div>
         </div>
+
+        <%!-- Missions: col 2, spans 2 rows --%>
+        <div class="card" style="grid-row:1 / 3">
+          <div class="card-label">Missions</div>
+          <%= if @recent_missions == [] do %>
+            <div class="empty" style="font-size:0.8rem; padding:0.5rem 0">No missions.</div>
+          <% else %>
+            <div style="display:flex; flex-direction:column; gap:0.5rem; margin-top:0.5rem">
+              <%= for mission <- @recent_missions do %>
+                <a href={"/dashboard/missions/#{mission.id}"} style="text-decoration:none; display:block; padding:0.4rem 0; border-bottom:1px solid #21262d">
+                  <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:0.3rem">
+                    <span style="color:#f0f6fc; font-weight:500; font-size:0.8rem; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; max-width:70%">
+                      {Map.get(mission, :name) || String.slice(Map.get(mission, :goal, ""), 0, 30)}
+                    </span>
+                    <span class={"badge #{mission_status_badge(Map.get(mission, :status))}"} style="font-size:0.6rem">
+                      {Map.get(mission, :status, "?")}
+                    </span>
+                  </div>
+                  <div style="display:flex; align-items:center; gap:2px">
+                    <.mini_phase_pipeline phase={Map.get(mission, :current_phase, "pending")} />
+                  </div>
+                </a>
+              <% end %>
+            </div>
+          <% end %>
+          <div style="margin-top:auto; padding-top:0.75rem; display:flex; justify-content:space-between; align-items:center">
+            <a href="/dashboard/missions" style="color:#58a6ff; font-size:0.8rem">View all &rarr;</a>
+            <span style="color:#6b7280; font-size:0.75rem">{@quest_count} total</span>
+          </div>
+        </div>
+
+        <%!-- Col 3: metric cards, one per row --%>
+        <div class="card">
+          <div class="card-label">Total Cost</div>
+          <div class="card-value green">{format_cost(@total_cost)}</div>
+          <div class="card-label" style="margin-top:0.25rem">{format_tokens(@total_input_tokens + @total_output_tokens)} tokens</div>
+        </div>
+        <div class="card">
+          <div class="card-label">Active Ghosts</div>
+          <div class="card-value blue">{@active_ghosts}</div>
+          <div class="card-label" style="margin-top:0.25rem">{@ghost_count} total</div>
+        </div>
+
+        <%!-- Row 3: three metric cards --%>
         <div class="card">
           <div class="card-label">Context Usage</div>
           <div class={"card-value #{if @avg_context > 40, do: "orange", else: "blue"}"}>
@@ -246,6 +327,8 @@ defmodule GiTF.Dashboard.OverviewLive do
             R:{@research_quests} P:{@planning_quests} I:{@implementation_quests}
           </div>
         </div>
+
+        <%!-- Row 4 --%>
         <div class="card">
           <div class="card-label">Pending Approvals</div>
           <div class={"card-value #{if @pending_approvals > 0, do: "yellow"}"}>

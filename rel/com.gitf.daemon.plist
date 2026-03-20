@@ -1,0 +1,46 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN"
+  "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<!--
+  launchd agent for the GiTF daemon.
+
+  Install:
+    cp rel/com.gitf.daemon.plist ~/Library/LaunchAgents/
+    launchctl load ~/Library/LaunchAgents/com.gitf.daemon.plist
+
+  Start/stop:
+    launchctl start com.gitf.daemon
+    launchctl stop com.gitf.daemon
+
+  Uninstall:
+    launchctl unload ~/Library/LaunchAgents/com.gitf.daemon
+    rm ~/Library/LaunchAgents/com.gitf.daemon.plist
+-->
+<dict>
+    <key>Label</key>
+    <string>com.gitf.daemon</string>
+    <key>ProgramArguments</key>
+    <array>
+        <string>/Users/mp/.mix/escripts/gitf</string>
+        <string>daemon</string>
+    </array>
+    <key>RunAtLoad</key>
+    <false/>
+    <key>KeepAlive</key>
+    <false/>
+    <key>StandardOutPath</key>
+    <string>/Users/mp/.gitf/daemon.log</string>
+    <key>StandardErrorPath</key>
+    <string>/Users/mp/.gitf/daemon.err</string>
+    <key>EnvironmentVariables</key>
+    <dict>
+        <key>HOME</key>
+        <string>/Users/mp</string>
+        <key>PATH</key>
+        <string>/usr/local/bin:/usr/bin:/bin:/opt/homebrew/bin</string>
+    </dict>
+    <key>WorkingDirectory</key>
+    <string>/Users/mp</string>
+</dict>
+</plist>

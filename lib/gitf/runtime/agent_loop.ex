@@ -34,7 +34,7 @@ defmodule GiTF.Runtime.AgentLoop do
 
   require Logger
 
-  alias GiTF.Runtime.{LLMClient, Loadout, ModelResolver, CacheControl}
+  alias GiTF.Runtime.{LLMClient, Loadout, ModelResolver}
 
   @default_max_iterations 50
   @default_max_tokens 16_384
@@ -205,42 +205,13 @@ defmodule GiTF.Runtime.AgentLoop do
     end
   end
 
-  # -- Tool Execution ----------------------------------------------------------
-
-  defp execute_tool_calls(tool_calls, available_tools) do
-    tool_map = Map.new(available_tools, fn t -> {t.name, t} end)
-
-    Enum.map(tool_calls, fn tc ->
-      case Map.get(tool_map, tc.name) do
-        nil ->
-          {:error, "Unknown tool: #{tc.name}"}
-
-        tool ->
-          case ReqLLM.Tool.execute(tool, tc.arguments) do
-            {:ok, result} ->
-              {:ok, to_string_result(result)}
-
-            {:error, reason} ->
-              {:ok, "Tool error: #{inspect(reason)}"}
-          end
-      end
-    end)
-  end
-
-  defp to_string_result(result) when is_binary(result), do: result
-  defp to_string_result(result) when is_map(result), do: Jason.encode!(result)
-  defp to_string_result(result) when is_list(result), do: Jason.encode!(result)
-  defp to_string_result(result), do: inspect(result)
-
   # -- Context Building --------------------------------------------------------
 
-  defp prepare_context_and_cache(system_prompt, prompt, _model) do
+  defp prepare_context_and_cache(system_prompt, prompt, model) do
     # Use standard ReqLLM message formatting for all providers.
     # ReqLLM handles provider-specific system prompt formatting internally.
-    {build_initial_messages(system_prompt, prompt, _model), []}
+    {build_initial_messages(system_prompt, prompt, model), []}
   end
-
-  defp is_gemini?(model), do: String.contains?(model, "google") or String.contains?(model, "gemini")
 
   defp build_initial_messages(nil, prompt, _model) do
     ReqLLM.Context.new([
@@ -253,26 +224,6 @@ defmodule GiTF.Runtime.AgentLoop do
       ReqLLM.Context.system(system_prompt),
       ReqLLM.Context.user(prompt)
     ])
-  end
-
-  defp append_tool_results(context, tool_calls, results) do
-    ctx = context || ReqLLM.Context.new()
-
-    tool_messages =
-      Enum.zip(tool_calls, results)
-      |> Enum.map(fn {tc, result} ->
-        content = case result do
-          {:ok, text} -> text
-          {:error, text} -> "Error: #{text}"
-        end
-
-        # Pass both ID and name — Gemini requires the function name in tool results
-        ReqLLM.Context.tool_result(tc.id, tc.name, content)
-      end)
-
-    Enum.reduce(tool_messages, ctx, fn msg, c ->
-      ReqLLM.Context.append(c, msg)
-    end)
   end
 
   # -- Generate Options --------------------------------------------------------

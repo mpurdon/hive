@@ -875,7 +875,14 @@ defmodule GiTF.Ghost.Worker do
         session_id = GiTF.Runtime.Models.extract_session_id(Enum.reverse(state.parsed_events))
         body = "Job #{state.op_id} completed successfully (phase: #{op.phase})"
         body = if session_id, do: body <> "\nSession ID: #{session_id}", else: body
-        GiTF.Link.send(state.ghost_id, "major", "job_complete", body)
+        {:ok, link_msg} = GiTF.Link.send(state.ghost_id, "major", "job_complete", body)
+
+        # Direct delivery to Major — Link.send goes through PubSub which can be unreliable
+        try do
+          GenServer.cast(GiTF.Major, {:phase_complete, state.ghost_id, state.op_id, op.mission_id})
+        rescue
+          _ -> :ok
+        end
 
       skip_verification ->
         # Simple ops skip tachikoma verification, go straight to Major

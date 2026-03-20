@@ -34,19 +34,19 @@ defmodule GiTF.Runtime.ModelSelector do
   """
   def model_registry do
     %{
-      "opus" => %{
+      "thinking" => %{
         capabilities: [:planning, :complex_implementation, :architecture, :refactoring],
         cost_tier: :high,
         context_limit: 200_000,
         strengths: ["complex reasoning", "large refactors", "system design"]
       },
-      "sonnet" => %{
+      "general" => %{
         capabilities: [:implementation, :refactoring, :debugging, :moderate_complexity],
         cost_tier: :medium,
         context_limit: 200_000,
         strengths: ["balanced performance", "general coding", "moderate complexity"]
       },
-      "haiku" => %{
+      "fast" => %{
         capabilities: [:research, :summarization, :simple_fixes, :audit, :analysis],
         cost_tier: :low,
         context_limit: 200_000,
@@ -111,16 +111,21 @@ defmodule GiTF.Runtime.ModelSelector do
     mission_id = op[:mission_id] || op["mission_id"]
 
     # When mission context exists, use multi-objective selector
-    if mission_id do
-      try do
-        {model, _breakdown} = GiTF.Runtime.MultiObjectiveSelector.select_optimal(op)
-        model
-      rescue
-        _ -> fallback_recommend(op, mission_id)
+    raw =
+      if mission_id do
+        try do
+          {model, _breakdown} = GiTF.Runtime.MultiObjectiveSelector.select_optimal(op)
+          model
+        rescue
+          _ -> fallback_recommend(op, mission_id)
+        end
+      else
+        fallback_recommend(op, nil)
       end
-    else
-      fallback_recommend(op, nil)
-    end
+
+    # Always resolve through the provider system so Trust/GhostID historical
+    # data (which may contain old "claude-sonnet" names) routes correctly
+    GiTF.Runtime.ModelResolver.resolve(raw)
   end
 
   defp fallback_recommend(op, mission_id) do

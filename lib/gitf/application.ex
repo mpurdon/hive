@@ -2,6 +2,7 @@ defmodule GiTF.Application do
   @moduledoc false
 
   use Application
+  require Logger
 
   @impl true
   def start(_type, _args) do
@@ -11,6 +12,16 @@ defmodule GiTF.Application do
     else
       start_full_app()
     end
+  end
+
+  @impl true
+  def prep_stop(state) do
+    Logger.info("GiTF shutting down gracefully...")
+    # Explicitly clean up the MCP socket + PID file.
+    # This fires even when terminate/2 on the GenServer is skipped
+    # (e.g. escript SIGINT, unclean shutdown).
+    GiTF.MCPServer.SocketListener.cleanup()
+    state
   end
 
   defp start_full_app do
@@ -38,32 +49,84 @@ defmodule GiTF.Application do
 
     GiTF.Progress.init()
     GiTF.CircuitBreaker.init()
+    # Reset any circuit breaker state from previous sessions
+    GiTF.CircuitBreaker.reset("api:llm")
     GiTF.Observability.Metrics.init()
     GiTF.Telemetry.attach_default_handlers()
     GiTF.Observability.Metrics.attach_handlers()
 
-    children = [
-      # PubSub MUST be first — everything else depends on it
+    # -----------------------------------------------------------------------
+    # Supervision tree — grouped by failure domain
+    # -----------------------------------------------------------------------
+    #
+    # Foundation: PubSub, Archive, Registry, TaskSupervisor
+    #   → Must start first, everything depends on these
+    #
+    # Core (rest_for_one): Major, SectorSupervisor, RateLimiter, Watchdogs
+    #   → If Major crashes, ghosts/sectors restart too (they depend on Major)
+    #
+    # Interface (one_for_one): Endpoint, MCP socket, ViewModel, PubSubBridge
+    #   → Dashboard/MCP crash never kills the factory
+    #
+    # Plugins (one_for_one): MCP plugins, channels, plugin manager
+    #   → Isolated from everything else
+    #
+    # Background (one_for_one): Observability, Tachikoma, SyncQueue, Exfil, Cache
+    #   → Optional services, skipped in test
+    # -----------------------------------------------------------------------
+
+    foundation = [
       {Phoenix.PubSub, name: GiTF.PubSub},
       {GiTF.Archive, data_dir: Application.get_env(:gitf, :store_dir, Path.join(File.cwd!, ".gitf/store"))},
       {Registry, keys: :unique, name: GiTF.Registry},
-      {Task.Supervisor, name: GiTF.TaskSupervisor},
-      {GiTF.RateLimiter, name: GiTF.RateLimiter, max_tokens: 30, refill_rate: 30, refill_interval: 1_000},
-      # The Major is the brain of the factory - starts automatically now
-      {GiTF.Major, gitf_root: Application.get_env(:gitf, :store_dir, File.cwd!)},
-      {GiTF.Ingestion.Watchdog, gitf_root: File.cwd!()},
-      {GiTF.PubSubBridge, []}
-    ] ++ endpoint_child() ++ [
-      {GiTF.SectorSupervisor, []},
-      {GiTF.Budget.Watchdog, []},
-      {GiTF.Plugin.MCPSupervisor, []},
-      {GiTF.Plugin.ChannelSupervisor, []},
-      {GiTF.Plugin.Manager, []},
-      {GiTF.Runtime.GeminiCacheManager, []},
-      # ViewModel starts after PubSub; subscribes in handle_continue
-      {GiTF.ViewModel, []},
-      {GiTF.Exfil, []}
-    ] ++ optional_children()
+      {Task.Supervisor, name: GiTF.TaskSupervisor}
+    ]
+
+    core = %{
+      id: GiTF.Core.Supervisor,
+      type: :supervisor,
+      start: {Supervisor, :start_link, [
+        [
+          {GiTF.RateLimiter, name: GiTF.RateLimiter, max_tokens: 30, refill_rate: 30, refill_interval: 1_000},
+          {GiTF.Major, gitf_root: Application.get_env(:gitf, :store_dir, File.cwd!)},
+          {GiTF.SectorSupervisor, []},
+          {GiTF.Budget.Watchdog, []},
+          {GiTF.Ingestion.Watchdog, gitf_root: File.cwd!()}
+        ],
+        [strategy: :rest_for_one, name: GiTF.Core.Supervisor]
+      ]}
+    }
+
+    interface_children =
+      endpoint_child() ++ [
+        {GiTF.MCPServer.SocketListener, []},
+        {GiTF.ViewModel, []},
+        {GiTF.PubSubBridge, []}
+      ]
+
+    interface = %{
+      id: GiTF.Interface.Supervisor,
+      type: :supervisor,
+      start: {Supervisor, :start_link, [
+        interface_children,
+        [strategy: :one_for_one, name: GiTF.Interface.Supervisor]
+      ]}
+    }
+
+    plugins = %{
+      id: GiTF.Plugin.Supervisor,
+      type: :supervisor,
+      start: {Supervisor, :start_link, [
+        [
+          {GiTF.Plugin.MCPSupervisor, []},
+          {GiTF.Plugin.ChannelSupervisor, []},
+          {GiTF.Plugin.Manager, []}
+        ],
+        [strategy: :one_for_one, name: GiTF.Plugin.Supervisor]
+      ]}
+    }
+
+    children = foundation ++ [core, interface, plugins] ++ background_children()
 
     opts = [strategy: :one_for_one, name: GiTF.Supervisor]
     Supervisor.start_link(children, opts)
@@ -80,35 +143,48 @@ defmodule GiTF.Application do
         [{GiTF.Web.Endpoint, []}]
 
       {:error, :eaddrinuse} ->
-        require Logger
         Logger.info("Port #{port} already in use, skipping web endpoint. " <>
           "A GiTF server may already be running. Use GITF_SERVER=http://localhost:#{port} for remote mode.")
         []
 
       {:error, :eacces} ->
-        require Logger
         Logger.warning("Permission denied for port #{port}. Try a port above 1024.")
         []
 
       {:error, reason} ->
-        require Logger
         Logger.warning("Cannot bind to port #{port}: #{inspect(reason)}. Skipping web endpoint.")
         []
     end
   end
 
-  # Background monitoring processes — skip in test to avoid conflicts
-  # with tests that restart Archive or other supervised components.
-  defp optional_children do
-    if function_exported?(Mix, :env, 0) and Mix.env() == :test do
-      []
-    else
-      [
-        {GiTF.Observability, []},
-        {GiTF.Tachikoma, []},
-        {GiTF.Sync.Queue, []}
-      ]
-    end
+  # Background services — skip in test to avoid conflicts
+  defp background_children do
+    bg = [
+      {GiTF.Runtime.GeminiCacheManager, []},
+      {GiTF.Exfil, []}
+    ]
+
+    optional =
+      if function_exported?(Mix, :env, 0) and Mix.env() == :test do
+        []
+      else
+        [
+          {GiTF.Observability, []},
+          {GiTF.Tachikoma, []},
+          {GiTF.Sync.Queue, []}
+        ]
+      end
+
+    bg_children = bg ++ optional
+
+    [%{
+      id: GiTF.Background.Supervisor,
+      type: :supervisor,
+      start: {Supervisor, :start_link, [
+        bg_children,
+        [strategy: :one_for_one, name: GiTF.Background.Supervisor]
+      ]}
+    }]
   end
 
   defp validate_config(gitf_root) do
@@ -151,12 +227,10 @@ defmodule GiTF.Application do
           end
 
         if warnings != [] do
-          require Logger
           Enum.each(warnings, fn w -> Logger.warning("Config: #{w}") end)
         end
 
       {:error, reason} ->
-        require Logger
         Logger.warning("Config: cannot read #{config_path}: #{inspect(reason)}, using defaults")
     end
   rescue

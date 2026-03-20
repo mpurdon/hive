@@ -2,13 +2,50 @@ defmodule GiTF.MCPServer do
   @moduledoc """
   MCP (Model Context Protocol) server for GiTF.
 
-  Communicates over stdio using newline-delimited JSON-RPC 2.0.
-  Exposes factory data as MCP tools so AI coding assistants can query the factory.
+  Supports two transports:
+  - **stdio**: for direct process spawning (legacy `gitf mcp-serve`)
+  - **Unix socket**: for daemon mode (`gitf server` with socket listener)
+
+  Both use newline-delimited JSON-RPC 2.0.
   """
 
   require Logger
 
   @protocol_version "2024-11-05"
+
+  # -- Public API: process a single JSON-RPC message --------------------------
+
+  @doc """
+  Handles a parsed JSON-RPC message and returns a response map (or nil for notifications).
+
+  Used by both the stdio loop and the socket listener.
+  """
+  @spec handle_rpc(map()) :: map() | nil
+  def handle_rpc(%{"jsonrpc" => "2.0", "id" => id, "method" => method} = msg) do
+    params = msg["params"] || %{}
+
+    result =
+      case method do
+        "initialize" -> handle_initialize()
+        "tools/list" -> handle_tools_list()
+        "tools/call" -> handle_tools_call(params)
+        _ -> {:error, -32601, "Method not found: #{method}"}
+      end
+
+    case result do
+      {:ok, body} ->
+        %{jsonrpc: "2.0", id: id, result: body}
+
+      {:error, code, message} ->
+        %{jsonrpc: "2.0", id: id, error: %{code: code, message: message}}
+    end
+  end
+
+  # Notifications (no id) — no response
+  def handle_rpc(%{"jsonrpc" => "2.0", "method" => _}), do: nil
+  def handle_rpc(_), do: nil
+
+  # -- Stdio transport --------------------------------------------------------
 
   @doc "Runs the MCP server loop, reading from stdin until EOF."
   def run do
@@ -26,7 +63,10 @@ defmodule GiTF.MCPServer do
       data ->
         buffer = buffer <> data
         {messages, remaining} = parse_messages(buffer)
-        Enum.each(messages, &handle_message/1)
+        Enum.each(messages, fn msg ->
+          response = handle_rpc(msg)
+          if response, do: write_stdout(Jason.encode!(response) <> "\n")
+        end)
         loop(remaining)
     end
   end
@@ -48,29 +88,7 @@ defmodule GiTF.MCPServer do
     {messages, remaining}
   end
 
-  defp handle_message(%{"jsonrpc" => "2.0", "id" => id, "method" => method} = msg) do
-    params = msg["params"] || %{}
-
-    result =
-      case method do
-        "initialize" -> handle_initialize()
-        "tools/list" -> handle_tools_list()
-        "tools/call" -> handle_tools_call(params)
-        _ -> {:error, -32601, "Method not found: #{method}"}
-      end
-
-    case result do
-      {:ok, body} ->
-        respond(id, body)
-
-      {:error, code, message} ->
-        respond_error(id, code, message)
-    end
-  end
-
-  # Notifications (no id) — acknowledge silently
-  defp handle_message(%{"jsonrpc" => "2.0", "method" => _}), do: :ok
-  defp handle_message(_), do: :ok
+  # -- Internals --------------------------------------------------------------
 
   defp handle_initialize do
     {:ok, %{
@@ -104,19 +122,7 @@ defmodule GiTF.MCPServer do
     {:error, -32602, "Invalid params: name and arguments required"}
   end
 
-  defp respond(id, result) do
-    msg = Jason.encode!(%{jsonrpc: "2.0", id: id, result: result})
-    write_stdout(msg <> "\n")
-  end
-
-  defp respond_error(id, code, message) do
-    msg = Jason.encode!(%{jsonrpc: "2.0", id: id, error: %{code: code, message: message}})
-    write_stdout(msg <> "\n")
-  end
-
   # Write directly to fd 1, bypassing the Erlang IO system.
-  # This ensures log messages that leak to :standard_io during boot
-  # don't interleave with JSON-RPC output.
   defp write_stdout(data) do
     case Process.get(:mcp_stdout) do
       nil ->

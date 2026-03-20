@@ -315,10 +315,8 @@ defmodule GiTF.MCPServer.Handlers do
 
   def call("send_link", %{"from" => from, "to" => to, "subject" => subject, "body" => body} = args) do
     with :ok <- require_confirm(args) do
-      case GiTF.Link.send(from, to, subject, body) do
-        {:ok, link} -> {:ok, json_text(serialize_link(link))}
-        {:error, reason} -> {:error, inspect(reason)}
-      end
+      {:ok, link} = GiTF.Link.send(from, to, subject, body)
+      {:ok, json_text(serialize_link(link))}
     end
   end
 

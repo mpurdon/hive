@@ -169,6 +169,17 @@ defmodule GiTF.Major do
   end
 
   @impl true
+  def handle_cast({:phase_complete, ghost_id, op_id, mission_id}, state) do
+    # Direct notification from ghost worker — bypasses PubSub for reliability
+    Logger.info("Phase complete (direct): ghost=#{ghost_id} op=#{op_id} mission=#{mission_id}")
+    notify_run_job_completed(op_id)
+    state = advance_quest(ghost_id, state)
+    {:noreply, state}
+  end
+
+  def handle_cast(_msg, state), do: {:noreply, state}
+
+  @impl true
   def handle_info({:waggle_received, link_msg}, state) do
     state = handle_waggle(link_msg, state)
     {:noreply, state}
@@ -918,6 +929,7 @@ defmodule GiTF.Major do
   end
 
   defp spawn_ready_jobs(%{status: "planning"}, state), do: state
+  defp spawn_ready_jobs(%{status: status}, state) when status in ["killed", "completed", "closed"], do: state
 
   defp spawn_ready_jobs(mission, state) do
     # Pre-flight health gate — don't spawn into a degraded system

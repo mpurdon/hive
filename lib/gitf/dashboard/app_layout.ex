@@ -27,7 +27,7 @@ defmodule GiTF.Dashboard.AppLayout do
     ~H"""
     <div>
       <nav class="nav">
-        <div class="nav-brand"><a href="/" style="color:inherit;text-decoration:none">The <span>GiTF</span></a></div>
+        <div class="nav-brand"><a href="/" style="color:inherit;text-decoration:none">The <span>GiTF</span></a> <span style="font-size:0.7rem;color:#6b7280;font-weight:400;margin-left:0.4rem">v<%= GiTF.version() %></span></div>
         <div class="nav-links">
           <a href={@prefix} class={if @current_path == "/", do: "active"}>Overview</a>
           <a href={"#{@prefix}/missions"} class={if active?(@current_path, "/missions"), do: "active"}>Missions</a>

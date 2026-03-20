@@ -23,8 +23,8 @@ config :gitf, :llm,
   default_models: %{
     opus: "google:gemini-2.5-pro",
     sonnet: "google:gemini-2.5-flash",
-    haiku: "google:gemini-2.0-flash",
-    fast: "google:gemini-2.0-flash"
+    haiku: "google:gemini-2.5-flash",
+    fast: "google:gemini-2.5-flash"
   }
 
 # Allow ReqLLM to load API keys from .env files when present

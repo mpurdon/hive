@@ -3,7 +3,6 @@ defmodule GiTF.Dashboard.SectorsLive do
 
   use Phoenix.LiveView
 
-  import GiTF.Dashboard.Helpers
 
   @impl true
   def mount(_params, _session, socket) do

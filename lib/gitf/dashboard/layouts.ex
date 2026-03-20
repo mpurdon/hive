@@ -65,7 +65,7 @@ defmodule GiTF.Dashboard.Layouts do
           .nav-links a.active { background: #1f6feb33; color: #58a6ff; }
 
           /* -- Main content -------------------------------------------------- */
-          .main { padding: 1.5rem; max-width: 1200px; margin: 0 auto; }
+          .main { padding: 1.5rem 2rem; max-width: 100%; }
           .page-title {
             font-size: 1.5rem;
             font-weight: 600;
