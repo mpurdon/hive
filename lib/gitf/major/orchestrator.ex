@@ -815,7 +815,7 @@ defmodule GiTF.Major.Orchestrator do
 
       phase_start =
         transitions
-        |> Enum.filter(&(&1.phase == phase))
+        |> Enum.filter(&(Map.get(&1, :to_phase) == phase || Map.get(&1, :phase) == phase))
         |> Enum.sort_by(& &1.inserted_at, {:desc, DateTime})
         |> List.first()
 
