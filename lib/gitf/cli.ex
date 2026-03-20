@@ -1796,34 +1796,6 @@ defmodule GiTF.CLI do
     end
   end
 
-  defp wait_for_mission(mission_id) do
-    Process.sleep(2_000)
-
-    case GiTF.Missions.get(mission_id) do
-      {:ok, _mission} ->
-        ops = GiTF.Ops.list(mission_id: mission_id)
-        all_terminal = Enum.all?(ops, &(&1.status in ["done", "failed", "rejected"]))
-
-        if all_terminal do
-          done = Enum.count(ops, &(&1.status == "done"))
-          failed = Enum.count(ops, &(&1.status == "failed"))
-
-          if failed == 0 do
-            Format.success("Mission completed. #{done} op(s) done.")
-          else
-            Format.warn("Mission finished. #{done} done, #{failed} failed.")
-          end
-        else
-          running = Enum.count(ops, &(&1.status in ["running", "assigned"]))
-          Format.info("  #{running} op(s) still running...")
-          wait_for_mission(mission_id)
-        end
-
-      _ ->
-        Format.error("Mission not found")
-    end
-  end
-
   defp dispatch([:mission, :new], result) do
     goal = result_get(result, :args, :goal)
 
@@ -2753,6 +2725,34 @@ defmodule GiTF.CLI do
   end
 
   # -- Dispatch helpers (not dispatch/2 clauses) -----------------------------
+
+  defp wait_for_mission(mission_id) do
+    Process.sleep(2_000)
+
+    case GiTF.Missions.get(mission_id) do
+      {:ok, _mission} ->
+        ops = GiTF.Ops.list(mission_id: mission_id)
+        all_terminal = Enum.all?(ops, &(&1.status in ["done", "failed", "rejected"]))
+
+        if all_terminal do
+          done = Enum.count(ops, &(&1.status == "done"))
+          failed = Enum.count(ops, &(&1.status == "failed"))
+
+          if failed == 0 do
+            Format.success("Mission completed. #{done} op(s) done.")
+          else
+            Format.warn("Mission finished. #{done} done, #{failed} failed.")
+          end
+        else
+          running = Enum.count(ops, &(&1.status in ["running", "assigned"]))
+          Format.info("  #{running} op(s) still running...")
+          wait_for_mission(mission_id)
+        end
+
+      _ ->
+        Format.error("Mission not found")
+    end
+  end
 
   @empty_costs %{input_tokens: 0, output_tokens: 0, cache_read_tokens: 0, cache_write_tokens: 0, model: nil}
 

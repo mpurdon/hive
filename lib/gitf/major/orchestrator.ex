@@ -27,10 +27,6 @@ defmodule GiTF.Major.Orchestrator do
   Start a mission workflow.
 
   Validates the mission is ready and kicks off the research phase.
-  """
-  @spec start_quest(String.t()) :: {:ok, map()} | {:error, term()}
-  @doc """
-  Start a mission workflow.
 
   ## Options
 
@@ -674,21 +670,6 @@ defmodule GiTF.Major.Orchestrator do
       [_, strategy] -> strategy
       _ -> "normal"
     end
-  end
-
-  defp parse_plan_output(text) do
-    json_str =
-      case Regex.run(~r/```json\s*\n(.*?)\n\s*```/s, text) do
-        [_, json] -> json
-        _ -> text
-      end
-
-    case Jason.decode(json_str) do
-      {:ok, tasks} when is_list(tasks) -> {:ok, tasks}
-      _ -> {:error, :parse_failed}
-    end
-  rescue
-    _ -> {:error, :parse_failed}
   end
 
   defp handle_plan_approval(mission, plan_approval) do

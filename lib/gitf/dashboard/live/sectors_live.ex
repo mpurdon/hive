@@ -360,7 +360,7 @@ defmodule GiTF.Dashboard.SectorsLive do
             <div style="color:#8b949e; padding:0.5rem 0; font-size:0.85rem">
               <p>Set <code style="color:#d2a8ff; background:#1c2128; padding:0.1rem 0.3rem; border-radius:3px">GITHUB_TOKEN</code> environment variable or add it to <code style="color:#d2a8ff; background:#1c2128; padding:0.1rem 0.3rem; border-radius:3px">.gitf/config.toml</code> to enable GitHub integration.</p>
               <pre style="margin-top:0.5rem; color:#c9d1d9; font-size:0.75rem; background:#161b22; padding:0.5rem; border-radius:4px">[github]
-token = "ghp_your_token_here"</pre>
+              token = "ghp_your_token_here"</pre>
             </div>
           <% end %>
         <% end %>
