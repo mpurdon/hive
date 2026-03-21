@@ -336,9 +336,16 @@ defmodule GiTF.Dashboard.OverviewLive do
                     <span style="color:#f0f6fc; font-weight:500; font-size:0.8rem; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; max-width:70%">
                       {Map.get(mission, :name) || String.slice(Map.get(mission, :goal, ""), 0, 30)}
                     </span>
-                    <span class={"badge #{mission_status_badge(Map.get(mission, :status))}"} style="font-size:0.6rem">
-                      {Map.get(mission, :status, "?")}
-                    </span>
+                    <div style="display:flex; gap:0.25rem; align-items:center">
+                      <%= if Map.get(mission, :pipeline_mode) do %>
+                        <span class={"badge #{if Map.get(mission, :pipeline_mode) == "fast", do: "badge-yellow", else: "badge-purple"}"} style="font-size:0.5rem">
+                          {Map.get(mission, :pipeline_mode) |> to_string() |> String.upcase()}
+                        </span>
+                      <% end %>
+                      <span class={"badge #{mission_status_badge(Map.get(mission, :status))}"} style="font-size:0.6rem">
+                        {Map.get(mission, :status, "?")}
+                      </span>
+                    </div>
                   </div>
                   <div style="display:flex; align-items:center; gap:2px">
                     <.mini_phase_pipeline phase={Map.get(mission, :current_phase, "pending")} />

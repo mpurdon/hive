@@ -225,6 +225,7 @@ defmodule GiTF.MCPServer.Handlers do
       attrs = %{goal: goal}
       attrs = if args["sector_id"], do: Map.put(attrs, :sector_id, args["sector_id"]), else: attrs
       attrs = if args["name"], do: Map.put(attrs, :name, args["name"]), else: attrs
+      attrs = if args["review_plan"], do: Map.put(attrs, :review_plan, true), else: attrs
 
       case GiTF.Missions.create(attrs) do
         {:ok, mission} -> {:ok, json_text(serialize_mission(mission))}
@@ -371,6 +372,7 @@ defmodule GiTF.MCPServer.Handlers do
       goal: m[:goal],
       sector_id: m[:sector_id],
       current_phase: m[:current_phase],
+      pipeline_mode: m[:pipeline_mode],
       inserted_at: to_string(m[:inserted_at]),
       ops: Enum.map(ops, &serialize_op/1)
     }

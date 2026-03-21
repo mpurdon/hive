@@ -251,6 +251,12 @@ defmodule GiTF.Dashboard.MissionDetailLive do
             <span class={"badge #{phase_badge(Map.get(@mission, :current_phase, "pending"))}"}>
               {Map.get(@mission, :current_phase, "pending")}
             </span>
+            <span class={"badge #{if Map.get(@mission, :pipeline_mode) == "fast", do: "badge-yellow", else: "badge-purple"}"} style="font-size:0.65rem">
+              {Map.get(@mission, :pipeline_mode, "pending") |> to_string() |> String.upcase()}
+            </span>
+            <%= if Map.get(@mission, :review_plan) do %>
+              <span class="badge badge-purple" style="font-size:0.55rem">REVIEW</span>
+            <% end %>
             <span style="font-family:monospace; font-size:0.75rem; color:#8b949e">
               {short_id(@mission.id)}
             </span>

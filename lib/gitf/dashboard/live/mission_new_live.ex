@@ -32,11 +32,12 @@ defmodule GiTF.Dashboard.MissionNewLive do
       |> maybe_put(:sector_id, params["sector"])
 
     quick = params["quick"] == "true"
+    review = params["review_plan"] == "true"
+    attrs = if review, do: Map.put(attrs, :review_plan, true), else: attrs
 
     case GiTF.Missions.create(attrs) do
       {:ok, mission} ->
         if quick do
-          # Quick mode: fast-path immediately
           case GiTF.Major.Orchestrator.start_quest(mission.id, force_fast_path: true) do
             {:ok, _} ->
               {:noreply,
@@ -51,10 +52,24 @@ defmodule GiTF.Dashboard.MissionNewLive do
                |> push_navigate(to: "/dashboard/missions/#{mission.id}")}
           end
         else
-          {:noreply,
-           socket
-           |> put_flash(:info, "Mission created. Use the Plan page to generate and review plans.")
-           |> push_navigate(to: "/dashboard/missions/#{mission.id}")}
+          # Full pipeline: auto-start, will pause at planning if review requested
+          case GiTF.Major.Orchestrator.start_quest(mission.id) do
+            {:ok, _} ->
+              flash = if review,
+                do: "Mission started — will pause at planning for your review.",
+                else: "Mission started — running full pipeline."
+
+              {:noreply,
+               socket
+               |> put_flash(:info, flash)
+               |> push_navigate(to: "/dashboard/missions/#{mission.id}")}
+
+            {:error, reason} ->
+              {:noreply,
+               socket
+               |> put_flash(:error, "Created but failed to start: #{inspect(reason)}")
+               |> push_navigate(to: "/dashboard/missions/#{mission.id}")}
+          end
         end
 
       {:error, reason} ->
@@ -102,6 +117,15 @@ defmodule GiTF.Dashboard.MissionNewLive do
                   <span style="color:#8b949e"> — research, plan, implement, verify (greenfield projects)</span>
                 </span>
               </label>
+              <%= if @form["quick"] != "true" do %>
+                <label style="display:flex; align-items:center; gap:0.5rem; cursor:pointer; color:#c9d1d9; font-size:0.85rem; margin-left:1.75rem">
+                  <input type="checkbox" name="mission[review_plan]" value="true" checked={@form["review_plan"] == "true"} style="accent-color:#a855f7" />
+                  <span>
+                    <strong style="color:#a855f7">Review plan</strong>
+                    <span style="color:#8b949e"> — pause at planning for manual review before implementation</span>
+                  </span>
+                </label>
+              <% end %>
             </div>
 
             <div class="form-group">

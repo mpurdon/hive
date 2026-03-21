@@ -164,6 +164,7 @@ defmodule GiTF.Sector do
     expanded = Path.expand(path)
 
     with :ok <- validate_directory(expanded),
+         :ok <- validate_git_repo(expanded),
          :ok <- validate_unique_name(opts, expanded) do
       name = Keyword.get(opts, :name, Path.basename(expanded))
 
@@ -210,6 +211,22 @@ defmodule GiTF.Sector do
 
   defp validate_directory(path) do
     if File.dir?(path), do: :ok, else: {:error, :path_not_found}
+  end
+
+  defp validate_git_repo(path) do
+    # Must be a git repo
+    unless File.dir?(Path.join(path, ".git")) do
+      {:error, {:invalid_repo, "Not a git repository (no .git directory)"}}
+    else
+      # HEAD must resolve to a valid ref (needs at least one commit)
+      case System.cmd("git", ["rev-parse", "HEAD"], cd: path, stderr_to_stdout: true) do
+        {_, 0} ->
+          :ok
+
+        {_, _} ->
+          {:error, {:invalid_repo, "Git repo has no commits. Run: git add -A && git commit -m \"Initial commit\""}}
+      end
+    end
   end
 
   defp validate_unique_name(opts, expanded) do

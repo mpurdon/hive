@@ -119,6 +119,7 @@ defmodule GiTF.MCPServer.Tools do
             goal: %{type: "string", description: "The mission objective"},
             sector_id: %{type: "string", description: "Sector to assign the mission to"},
             name: %{type: "string", description: "Human-friendly mission name (auto-generated if omitted)"},
+            review_plan: %{type: "boolean", description: "Pause at planning phase for manual review in the dashboard", default: false},
             confirm: %{type: "boolean", description: "Must be true to execute"}
           },
           required: ["goal", "confirm"]

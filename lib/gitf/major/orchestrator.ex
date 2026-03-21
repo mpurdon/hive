@@ -42,6 +42,7 @@ defmodule GiTF.Major.Orchestrator do
       # Fast path: skip all phases for focused tasks
       if FastPath.eligible?(mission, force: force) do
         Logger.info("Quest #{mission_id} eligible for fast path, skipping phase pipeline")
+        GiTF.Missions.update(mission_id, %{pipeline_mode: "fast"})
         FastPath.execute(mission_id)
       else
         # If a confirmed plan (planning artifact) already exists, skip to implementation
@@ -49,8 +50,10 @@ defmodule GiTF.Major.Orchestrator do
 
         if planning_artifact && is_list(planning_artifact) && planning_artifact != [] do
           Logger.info("Quest #{mission_id} has pre-confirmed plan, skipping to implementation")
+          GiTF.Missions.update(mission_id, %{pipeline_mode: "full"})
           start_implementation(mission)
         else
+          GiTF.Missions.update(mission_id, %{pipeline_mode: "full"})
           start_research(mission)
         end
       end
@@ -653,13 +656,15 @@ defmodule GiTF.Major.Orchestrator do
 
       score = best.score
 
-      if score < @plan_confidence_threshold do
-        Logger.info("Quest #{mission.id}: best plan score #{Float.round(score, 2)} below threshold")
-        {:ok, mission} = GiTF.Missions.get(mission.id)
+      {:ok, mission} = GiTF.Missions.get(mission.id)
+      review_plan = Map.get(mission, :review_plan, false)
+
+      if review_plan or score < @plan_confidence_threshold do
+        reason = if review_plan, do: "manual review requested", else: "score #{Float.round(score, 2)} below threshold"
+        Logger.info("Quest #{mission.id}: pausing for plan review (#{reason})")
         request_plan_approval(mission, best)
         {:ok, "planning"}
       else
-        {:ok, mission} = GiTF.Missions.get(mission.id)
         start_implementation(mission)
       end
     end

@@ -141,16 +141,33 @@ defmodule GiTF.Runtime.AgentLoop do
 
   defp handle_response(response, _messages, _model, tools, state) do
     classified = ReqLLM.Response.classify(response)
-    usage = response.usage || %{}
+    # Extract usage — try struct accessor first, then map access
+    raw_usage =
+      try do
+        ReqLLM.Response.usage(response)
+      rescue
+        _ -> response.usage
+      end
+
+    usage = raw_usage || %{}
     state = accumulate_usage(state, usage)
 
-    # Emit per-response usage so context tracking sees actual window size
-    if map_size(usage) > 0 do
+    # Emit per-response usage so context tracking sees actual window size.
+    input_t = Map.get(usage, :input_tokens) || Map.get(usage, "input_tokens") ||
+              Map.get(usage, :prompt_tokens) || Map.get(usage, "prompt_tokens") || 0
+    output_t = Map.get(usage, :output_tokens) || Map.get(usage, "output_tokens") ||
+               Map.get(usage, :completion_tokens) || Map.get(usage, "completion_tokens") ||
+               Map.get(usage, :candidates_tokens) || Map.get(usage, "candidates_tokens") || 0
+
+    if input_t > 0 or output_t > 0 do
+      Logger.debug("AgentLoop: context usage in=#{input_t} out=#{output_t}")
       emit_progress(state.on_progress, %{
         type: :response_usage,
-        input_tokens: Map.get(usage, :input_tokens, 0),
-        output_tokens: Map.get(usage, :output_tokens, 0)
+        input_tokens: input_t,
+        output_tokens: output_t
       })
+    else
+      Logger.debug("AgentLoop: no usage extracted, raw=#{inspect(raw_usage, limit: 200)}")
     end
 
     case classified.type do

@@ -37,6 +37,7 @@ defmodule GiTF.Missions do
         status: attrs[:status] || "pending",
         sector_id: attrs[:sector_id] || attrs["sector_id"],
         current_phase: "pending",
+        review_plan: attrs[:review_plan] || attrs["review_plan"] || false,
         research_summary: nil,
         implementation_plan: nil,
         artifacts: %{},
@@ -104,10 +105,8 @@ defmodule GiTF.Missions do
   """
   @spec delete(String.t()) :: :ok | {:error, :not_found}
   def delete(mission_id) do
-    case Archive.get(:missions, mission_id) do
-      nil -> {:error, :not_found}
-      _quest -> Archive.delete(:missions, mission_id)
-    end
+    # Kill first to clean up ops, ghosts, shells/worktrees, then delete
+    kill(mission_id)
   end
 
   @doc """
