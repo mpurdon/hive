@@ -35,6 +35,7 @@ defmodule GiTF.Observability do
   @impl true
   def init(opts) do
     interval = Keyword.get(opts, :interval, @default_interval)
+    Alerts.attach_webhook_handler()
     schedule_check(interval)
     {:ok, %{interval: interval}}
   end

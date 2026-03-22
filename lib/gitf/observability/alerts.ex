@@ -25,12 +25,58 @@ defmodule GiTF.Observability.Alerts do
     end)
   end
 
-  @doc "Send alert notification"
-  def notify(alerts, channel \\ :log) do
+  @doc "Send alert notification. Dispatches to both log and webhook when a webhook_url is configured."
+  def notify(alerts, channel \\ :auto) do
     Enum.each(alerts, fn {type, message} ->
       GiTF.Telemetry.emit([:gitf, :alert, :raised], %{}, %{type: type, message: message})
-      send_notification(channel, type, message)
+
+      case channel do
+        :auto ->
+          send_notification(:log, type, message)
+          if webhook_url(), do: send_notification(:webhook, type, message)
+
+        other ->
+          send_notification(other, type, message)
+      end
     end)
+  end
+
+  @doc "Dispatch a single alert directly to the configured webhook (and log)."
+  @spec dispatch_webhook(atom(), String.t()) :: :ok
+  def dispatch_webhook(type, message) do
+    Logger.warning("[ALERT] #{type}: #{message}")
+
+    case webhook_url() do
+      nil -> :ok
+      _url -> send_notification(:webhook, type, message)
+    end
+
+    :ok
+  end
+
+  @doc "Attach a telemetry handler that forwards [:gitf, :alert, :raised] events to the webhook."
+  def attach_webhook_handler do
+    :telemetry.attach(
+      "gitf-alert-webhook",
+      [:gitf, :alert, :raised],
+      &__MODULE__.handle_alert_event/4,
+      nil
+    )
+  rescue
+    # Handler already attached or telemetry not available
+    _ -> :ok
+  end
+
+  @doc false
+  def handle_alert_event(_event, _measurements, metadata, _config) do
+    type = Map.get(metadata, :type, :unknown)
+    message = Map.get(metadata, :message, "")
+
+    if webhook_url() do
+      send_notification(:webhook, type, message)
+    end
+  rescue
+    _ -> :ok
   end
 
   defp check_rule(:validation_failed, threshold_seconds) do

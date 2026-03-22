@@ -18,8 +18,8 @@ defmodule GiTF.Major.Orchestrator do
 
   @phases ~w(research requirements design review planning implementation validation awaiting_approval sync simplify scoring)
   @max_redesign_iterations 2
-  @approval_timeout_hours 1
-  @max_quest_age_hours 24
+
+  alias GiTF.Config.Provider, as: Config
 
   # -- Public API --------------------------------------------------------------
 
@@ -36,7 +36,8 @@ defmodule GiTF.Major.Orchestrator do
   @spec start_quest(String.t(), keyword()) :: {:ok, map()} | {:error, term()}
   def start_quest(mission_id, opts \\ []) do
     with {:ok, mission} <- GiTF.Missions.get(mission_id),
-         :ok <- validate_quest_ready(mission) do
+         :ok <- validate_quest_ready(mission),
+         :ok <- budget_preflight(mission_id) do
       force = Keyword.get(opts, :force_fast_path, false)
       force_full = Keyword.get(opts, :force_full_pipeline, false)
 
@@ -94,13 +95,17 @@ defmodule GiTF.Major.Orchestrator do
     with {:ok, mission} <- GiTF.Missions.get(mission_id) do
       # Circuit breaker: fail missions that have been running too long
       if quest_timed_out?(mission) do
-        Logger.warning("Quest #{mission_id} exceeded #{@max_quest_age_hours}h max age, force-completing")
+        timeout_h = max_quest_age_hours()
+        Logger.warning("Quest #{mission_id} exceeded #{timeout_h}h max age, force-completing")
         GiTF.Telemetry.emit([:gitf, :alert, :raised], %{}, %{
           type: :quest_timeout,
-          message: "Quest #{mission_id} force-completed after #{@max_quest_age_hours}h timeout"
+          message: "Quest #{mission_id} force-completed after #{timeout_h}h timeout"
         })
 
-        fail_quest(mission_id, "Quest timed out after #{@max_quest_age_hours}h")
+        GiTF.Observability.Alerts.dispatch_webhook(:quest_timeout,
+          "Quest #{mission_id} force-completed after #{timeout_h}h timeout")
+
+        fail_quest(mission_id, "Quest timed out after #{timeout_h}h")
       else
         advance_mission_phase(mission)
       end
@@ -114,7 +119,7 @@ defmodule GiTF.Major.Orchestrator do
         phase = Map.get(mission, :current_phase, "pending")
         # Don't timeout missions that are completed or awaiting approval
         phase not in ["completed", "awaiting_approval", "pending"] and
-          hours > @max_quest_age_hours
+          hours > max_quest_age_hours()
 
       _ ->
         false
@@ -466,6 +471,8 @@ defmodule GiTF.Major.Orchestrator do
   defp start_awaiting_approval(mission) do
     with {:ok, _} <- GiTF.Missions.transition_phase(mission.id, "awaiting_approval", "Validation passed, awaiting human approval") do
       GiTF.Override.request_approval(mission.id)
+      GiTF.Observability.Alerts.dispatch_webhook(:approval_requested,
+        "Quest #{mission.id} awaiting human approval: #{String.slice(mission.goal, 0, 80)}")
       {:ok, "awaiting_approval"}
     end
   end
@@ -728,18 +735,28 @@ defmodule GiTF.Major.Orchestrator do
       :pending ->
         # Check for approval timeout — re-validate then auto-approve
         if approval_timed_out?(mission.id) do
-          # Re-validate before auto-approving to catch regressions
-          validation_fresh? = revalidate_quest(mission)
+          timeout_h = approval_timeout_hours()
 
-          if validation_fresh? do
-            Logger.info("Quest #{mission.id} auto-approved after #{@approval_timeout_hours}h timeout (dark factory mode)")
-            GiTF.Override.approve(mission.id, %{approved_by: "auto_timeout", notes: "Auto-approved after #{@approval_timeout_hours}h (re-validated)"})
-            {:ok, mission} = GiTF.Missions.get(mission.id)
-            start_merge(mission)
+          # Critical-risk missions never auto-approve — alert instead
+          if mission_max_risk(mission.id) == :critical do
+            Logger.warning("Quest #{mission.id} timeout reached but mission is critical-risk, refusing auto-approve")
+            GiTF.Observability.Alerts.dispatch_webhook(:approval_timeout_critical,
+              "Quest #{mission.id} timed out after #{timeout_h}h but is critical-risk — requires human approval")
+            {:ok, "awaiting_approval"}
           else
-            Logger.warning("Quest #{mission.id} re-validation failed, rejecting auto-approve")
-            GiTF.Override.reject(mission.id, "Re-validation failed during auto-approve")
-            fail_quest(mission.id, "Auto-approve failed re-validation")
+            # Re-validate before auto-approving to catch regressions
+            validation_fresh? = revalidate_quest(mission)
+
+            if validation_fresh? do
+              Logger.info("Quest #{mission.id} auto-approved after #{timeout_h}h timeout (dark factory mode)")
+              GiTF.Override.approve(mission.id, %{approved_by: "auto_timeout", notes: "Auto-approved after #{timeout_h}h (re-validated)"})
+              {:ok, mission} = GiTF.Missions.get(mission.id)
+              start_merge(mission)
+            else
+              Logger.warning("Quest #{mission.id} re-validation failed, rejecting auto-approve")
+              GiTF.Override.reject(mission.id, "Re-validation failed during auto-approve")
+              fail_quest(mission.id, "Auto-approve failed re-validation")
+            end
           end
         else
           {:ok, "awaiting_approval"}
@@ -787,7 +804,7 @@ defmodule GiTF.Major.Orchestrator do
     case DateTime.from_iso8601(requested_at_str) do
       {:ok, requested_at, _} ->
         hours_elapsed = DateTime.diff(DateTime.utc_now(), requested_at, :second) / 3600
-        hours_elapsed > @approval_timeout_hours
+        hours_elapsed > approval_timeout_hours()
 
       _ ->
         false
@@ -801,7 +818,7 @@ defmodule GiTF.Major.Orchestrator do
       nil -> false
       request ->
         hours_elapsed = DateTime.diff(DateTime.utc_now(), request.requested_at, :second) / 3600
-        hours_elapsed > @approval_timeout_hours
+        hours_elapsed > approval_timeout_hours()
     end
   end
 
@@ -1315,12 +1332,16 @@ defmodule GiTF.Major.Orchestrator do
   defp fail_quest(mission_id, reason) do
     GiTF.Missions.transition_phase(mission_id, "completed", reason)
     GiTF.Missions.update_status!(mission_id)
+    GiTF.Observability.Alerts.dispatch_webhook(:quest_failed,
+      "Quest #{mission_id} failed: #{reason}")
     {:ok, "completed"}
   end
 
   defp complete_quest(mission_id) do
     with {:ok, _} <- GiTF.Missions.transition_phase(mission_id, "completed", "All phases complete") do
       GiTF.Missions.update_status!(mission_id)
+      GiTF.Observability.Alerts.dispatch_webhook(:quest_completed,
+        "Quest #{mission_id} completed successfully")
 
       # Start post-review if enabled for this sector
       with {:ok, mission} <- GiTF.Missions.get(mission_id),
@@ -1500,6 +1521,29 @@ defmodule GiTF.Major.Orchestrator do
 
   # -- Helpers -----------------------------------------------------------------
 
+  defp budget_preflight(mission_id) do
+    case GiTF.Budget.preflight_check(mission_id) do
+      :ok ->
+        :ok
+
+      {:warn, estimated, remaining} ->
+        Logger.warning("Quest #{mission_id} budget tight: estimated $#{Float.round(estimated, 2)} vs $#{Float.round(remaining, 2)} remaining")
+        GiTF.Observability.Alerts.dispatch_webhook(:budget_warning,
+          "Quest #{mission_id} budget tight: ~$#{Float.round(estimated, 2)} needed, $#{Float.round(remaining, 2)} remaining")
+        :ok
+
+      {:error, :would_exceed, estimated, remaining} ->
+        Logger.warning("Quest #{mission_id} would exceed budget: estimated $#{Float.round(estimated, 2)} vs $#{Float.round(remaining, 2)} remaining")
+        GiTF.Observability.Alerts.dispatch_webhook(:budget_blocked,
+          "Quest #{mission_id} blocked: ~$#{Float.round(estimated, 2)} needed but only $#{Float.round(remaining, 2)} remaining")
+        {:error, :budget_would_exceed}
+    end
+  rescue
+    e ->
+      Logger.warning("Budget preflight check failed for #{mission_id}: #{Exception.message(e)}, allowing")
+      :ok
+  end
+
   defp validate_quest_ready(mission) do
     cond do
       is_nil(Map.get(mission, :sector_id)) ->
@@ -1548,6 +1592,23 @@ defmodule GiTF.Major.Orchestrator do
 
           _ ->
             {:error, :no_sector_assigned}
+        end
+    end
+  end
+
+  defp approval_timeout_hours, do: Config.get([:approvals, :timeout_hours], 1)
+  defp max_quest_age_hours, do: Config.get([:major, :mission_timeout_hours], 24)
+
+  # Determine the highest-risk op type in a mission (for auto-approve gating)
+  defp mission_max_risk(mission_id) do
+    case GiTF.Archive.get(:missions, mission_id) do
+      nil -> :normal
+      mission ->
+        ops = Map.get(mission, :ops, [])
+        cond do
+          Enum.any?(ops, fn op -> Map.get(op, :risk_level) == "critical" end) -> :critical
+          Enum.any?(ops, fn op -> Map.get(op, :risk_level) == "high" end) -> :high
+          true -> :normal
         end
     end
   end
