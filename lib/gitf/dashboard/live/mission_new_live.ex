@@ -17,12 +17,18 @@ defmodule GiTF.Dashboard.MissionNewLive do
      |> assign(:page_title, "New Mission")
      |> assign(:current_path, "/dashboard/missions")
      |> assign(:sectors, sectors)
-     |> assign(:form, %{"goal" => "", "name" => "", "sector" => ""})}
+     |> assign(:form, %{"goal" => "", "name" => "", "sector" => "", "quick" => "false"})}
   end
 
   @impl true
   def handle_event("validate", %{"mission" => params}, socket) do
-    {:noreply, assign(socket, :form, params)}
+    {:noreply, assign(socket, :form, Map.merge(socket.assigns.form, params))}
+  end
+
+  def handle_event("set_mode", %{"mode" => mode}, socket) do
+    quick = if mode == "quick", do: "true", else: "false"
+    form = Map.put(socket.assigns.form, "quick", quick)
+    {:noreply, assign(socket, :form, form)}
   end
 
   def handle_event("create", %{"mission" => params}, socket) do
@@ -53,7 +59,7 @@ defmodule GiTF.Dashboard.MissionNewLive do
           end
         else
           # Full pipeline: auto-start, will pause at planning if review requested
-          case GiTF.Major.Orchestrator.start_quest(mission.id) do
+          case GiTF.Major.Orchestrator.start_quest(mission.id, force_full_pipeline: true) do
             {:ok, _} ->
               flash = if review,
                 do: "Mission started — will pause at planning for your review.",
@@ -101,28 +107,34 @@ defmodule GiTF.Dashboard.MissionNewLive do
               >{@form["goal"]}</textarea>
             </div>
 
-            <!-- Mode toggle -->
-            <div class="form-group" style="display:flex; gap:1.5rem; padding:0.75rem 1rem; background:#1c2128; border-radius:6px; border:1px solid #30363d">
-              <label style="display:flex; align-items:center; gap:0.5rem; cursor:pointer; color:#c9d1d9; font-size:0.85rem">
-                <input type="radio" name="mission[quick]" value="true" checked={@form["quick"] == "true"} style="accent-color:#3fb950" />
-                <span>
-                  <strong style="color:#3fb950">Quick Run</strong>
-                  <span style="color:#8b949e"> — single ghost, no pipeline (bug fixes, focused tasks)</span>
-                </span>
-              </label>
-              <label style="display:flex; align-items:center; gap:0.5rem; cursor:pointer; color:#c9d1d9; font-size:0.85rem">
-                <input type="radio" name="mission[quick]" value="false" checked={@form["quick"] != "true"} style="accent-color:#58a6ff" />
-                <span>
-                  <strong style="color:#58a6ff">Full Pipeline</strong>
-                  <span style="color:#8b949e"> — research, plan, implement, verify (greenfield projects)</span>
-                </span>
-              </label>
-              <%= if @form["quick"] != "true" do %>
-                <label style="display:flex; align-items:center; gap:0.5rem; cursor:pointer; color:#c9d1d9; font-size:0.85rem; margin-left:1.75rem">
+            <!-- Mode toggle buttons -->
+            <div class="form-group">
+              <% is_quick = @form["quick"] == "true" %>
+              <input type="hidden" name="mission[quick]" value={if is_quick, do: "true", else: "false"} />
+              <div style="display:flex; gap:0; border-radius:6px; overflow:hidden; border:1px solid #30363d">
+                <div
+                  phx-click="set_mode"
+                  phx-value-mode="quick"
+                  style={"flex:1; display:flex; align-items:center; justify-content:center; gap:0.5rem; cursor:pointer; padding:0.6rem 1rem; font-size:0.85rem; #{if is_quick, do: "background:#1a3a2a; color:#3fb950", else: "background:#1c2128; color:#6b7280"}"}
+                >
+                  <strong>Quick Run</strong>
+                  <span style="font-size:0.75rem; opacity:0.7">single ghost, fast</span>
+                </div>
+                <div
+                  phx-click="set_mode"
+                  phx-value-mode="full"
+                  style={"flex:1; display:flex; align-items:center; justify-content:center; gap:0.5rem; cursor:pointer; padding:0.6rem 1rem; font-size:0.85rem; border-left:1px solid #30363d; #{if !is_quick, do: "background:#1a2a3a; color:#58a6ff", else: "background:#1c2128; color:#6b7280"}"}
+                >
+                  <strong>Full Pipeline</strong>
+                  <span style="font-size:0.75rem; opacity:0.7">research, plan, verify</span>
+                </div>
+              </div>
+              <%= unless is_quick do %>
+                <label style="display:flex; align-items:center; gap:0.5rem; cursor:pointer; color:#c9d1d9; font-size:0.85rem; margin-top:0.5rem; padding:0.4rem 0.75rem; background:#1c2128; border-radius:4px; border:1px solid #30363d">
                   <input type="checkbox" name="mission[review_plan]" value="true" checked={@form["review_plan"] == "true"} style="accent-color:#a855f7" />
                   <span>
                     <strong style="color:#a855f7">Review plan</strong>
-                    <span style="color:#8b949e"> — pause at planning for manual review before implementation</span>
+                    <span style="color:#8b949e"> — pause at planning for manual review</span>
                   </span>
                 </label>
               <% end %>

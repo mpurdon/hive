@@ -37,3 +37,5 @@ section.log
 
 # Claude Code local config.
 .claude/
+hive
+hive.log

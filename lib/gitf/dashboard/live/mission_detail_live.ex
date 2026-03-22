@@ -308,7 +308,12 @@ defmodule GiTF.Dashboard.MissionDetailLive do
         <div class="stepper">
           <%= for {phase, idx} <- Enum.with_index(@phases) do %>
             <%= if idx > 0 do %>
-              <div class={"step-line #{if phase_done?(@mission, Enum.at(@phases, idx - 1)), do: "step-line-done"}"}></div>
+              <% prev = Enum.at(@phases, idx - 1) %>
+              <div class={"step-line #{cond do
+                phase_skipped?(@mission, prev) and phase_skipped?(@mission, phase) -> "step-line-skipped"
+                phase_done?(@mission, prev) and not phase_skipped?(@mission, phase) -> "step-line-done"
+                true -> ""
+              end}"}></div>
             <% end %>
             <div
               class={"step #{phase_step_class(@mission, phase)}"}
@@ -316,10 +321,13 @@ defmodule GiTF.Dashboard.MissionDetailLive do
               phx-value-phase={phase}
             >
               <div class="step-circle">
-                <%= if phase_done?(@mission, phase) do %>
-                  <Heroicons.check mini class="w-4 h-4" />
-                <% else %>
-                  <.phase_icon phase={phase} />
+                <%= cond do %>
+                  <% phase_skipped?(@mission, phase) -> %>
+                    <span style="color:#4b5563">—</span>
+                  <% phase_done?(@mission, phase) -> %>
+                    <Heroicons.check mini class="w-4 h-4" />
+                  <% true -> %>
+                    <.phase_icon phase={phase} />
                 <% end %>
               </div>
               <div class="step-label">{phase}</div>
@@ -437,6 +445,9 @@ defmodule GiTF.Dashboard.MissionDetailLive do
   defp normalise_phase("awaiting_approval"), do: "sync"
   defp normalise_phase(phase), do: phase
 
+  # Phases that fast-path missions actually execute
+  @fast_phases ~w(pending implementation validation sync completed)
+
   defp phase_done?(mission, phase) do
     current = normalise_phase(Map.get(mission, :current_phase, "pending"))
     current_idx = Enum.find_index(@phases, &(&1 == current)) || 0
@@ -444,11 +455,16 @@ defmodule GiTF.Dashboard.MissionDetailLive do
     phase_idx < current_idx
   end
 
+  defp phase_skipped?(mission, phase) do
+    Map.get(mission, :pipeline_mode) == "fast" and phase not in @fast_phases
+  end
+
   defp phase_step_class(mission, phase) do
     current = normalise_phase(Map.get(mission, :current_phase, "pending"))
 
     cond do
       phase == current -> "step-active"
+      phase_skipped?(mission, phase) -> "step-skipped"
       phase_done?(mission, phase) -> "step-done"
       true -> "step-future"
     end

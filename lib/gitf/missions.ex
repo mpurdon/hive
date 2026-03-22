@@ -98,6 +98,18 @@ defmodule GiTF.Missions do
 
   defp derive_status(mission), do: mission
 
+  @doc "Update fields on a mission record."
+  @spec update(String.t(), map()) :: {:ok, map()} | {:error, :not_found}
+  def update(mission_id, attrs) do
+    case Archive.get(:missions, mission_id) do
+      nil -> {:error, :not_found}
+      mission ->
+        updated = Map.merge(mission, attrs)
+        Archive.put(:missions, updated)
+        {:ok, updated}
+    end
+  end
+
   @doc """
   Deletes a mission by ID.
 

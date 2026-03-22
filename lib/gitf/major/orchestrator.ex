@@ -38,9 +38,10 @@ defmodule GiTF.Major.Orchestrator do
     with {:ok, mission} <- GiTF.Missions.get(mission_id),
          :ok <- validate_quest_ready(mission) do
       force = Keyword.get(opts, :force_fast_path, false)
+      force_full = Keyword.get(opts, :force_full_pipeline, false)
 
-      # Fast path: skip all phases for focused tasks
-      if FastPath.eligible?(mission, force: force) do
+      # Fast path: skip all phases for focused tasks (unless user forced full pipeline)
+      if not force_full and FastPath.eligible?(mission, force: force) do
         Logger.info("Quest #{mission_id} eligible for fast path, skipping phase pipeline")
         GiTF.Missions.update(mission_id, %{pipeline_mode: "fast"})
         FastPath.execute(mission_id)

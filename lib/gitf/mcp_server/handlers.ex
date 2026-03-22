@@ -238,7 +238,11 @@ defmodule GiTF.MCPServer.Handlers do
 
   def call("start_mission", %{"id" => id} = args) do
     with :ok <- require_confirm(args) do
-      opts = if args["fast"], do: [force_fast_path: true], else: []
+      opts = cond do
+        args["fast"] -> [force_fast_path: true]
+        args["full"] -> [force_full_pipeline: true]
+        true -> []
+      end
 
       case GiTF.Major.Orchestrator.start_quest(id, opts) do
         {:ok, phase} ->
