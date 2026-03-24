@@ -803,32 +803,38 @@ defmodule GiTF.Major do
         op_id = ghost.op_id
         feedback = link_msg.body
 
-        # Read persisted retry count from op record (survives Major restarts)
-        attempts =
-          case GiTF.Ops.get(op_id) do
-            {:ok, op} -> Map.get(op, :retry_count, 0)
-            _ -> 0
-          end
-
-        if attempts < state.max_retries do
-          # Exponential backoff: 30s, 2min, 8min
-          delay_ms = retry_backoff_ms(attempts)
-          Logger.info("Scheduling retry for op #{op_id} in #{div(delay_ms, 1000)}s (attempt #{attempts + 1}/#{state.max_retries})")
-
-          Process.send_after(self(), {:delayed_retry, op_id, feedback}, delay_ms)
+        # Guard: don't create duplicate retries if one already exists
+        if retry_exists?(op_id) do
+          Logger.debug("Retry already exists for op #{op_id}, skipping duplicate")
           state
         else
-          Logger.warning("Job #{op_id} exhausted #{state.max_retries} retries")
-          # Unblock dependents so downstream work isn't permanently stuck
-          GiTF.Ops.unblock_dependents(op_id)
-          # Handle recon op exhaustion: unblock parent explicitly
-          unblock_scout_parent(op_id)
-          best_effort_update_quest_status(op_id)
-          state
+          maybe_retry_job_inner(op_id, feedback, state)
         end
 
       _ ->
         state
+    end
+  end
+
+  defp maybe_retry_job_inner(op_id, feedback, state) do
+    attempts =
+      case GiTF.Ops.get(op_id) do
+        {:ok, op} -> Map.get(op, :retry_count, 0)
+        _ -> 0
+      end
+
+    if attempts < state.max_retries do
+      delay_ms = retry_backoff_ms(attempts)
+      Logger.info("Scheduling retry for op #{op_id} in #{div(delay_ms, 1000)}s (attempt #{attempts + 1}/#{state.max_retries})")
+
+      Process.send_after(self(), {:delayed_retry, op_id, feedback}, delay_ms)
+      state
+    else
+      Logger.warning("Job #{op_id} exhausted #{state.max_retries} retries")
+      GiTF.Ops.unblock_dependents(op_id)
+      unblock_scout_parent(op_id)
+      best_effort_update_quest_status(op_id)
+      state
     end
   end
 
@@ -1130,6 +1136,15 @@ defmodule GiTF.Major do
   defp scout_exists?(parent_op_id) do
     GiTF.Archive.filter(:ops, fn j ->
       Map.get(j, :scout_for) == parent_op_id
+    end)
+    |> Enum.any?()
+  rescue
+    _ -> false
+  end
+
+  defp retry_exists?(op_id) do
+    GiTF.Archive.filter(:ops, fn j ->
+      Map.get(j, :retry_of) == op_id
     end)
     |> Enum.any?()
   rescue

@@ -39,6 +39,10 @@ defmodule GiTF.Application do
     # Start Config.Provider early — loads global config, then project overlay
     GiTF.Config.Provider.start_link(gitf_root: gitf_root)
 
+    # Push LLM timeout into ReqLLM's application env so all providers respect it
+    llm_timeout = GiTF.Config.Provider.get([:llm, :receive_timeout_ms]) || 60_000
+    Application.put_env(:req_llm, :receive_timeout, llm_timeout)
+
     GiTF.Runtime.Keys.load()
 
     if GiTF.Runtime.ModelResolver.ollama_mode?() do
