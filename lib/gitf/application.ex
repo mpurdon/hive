@@ -136,20 +136,34 @@ defmodule GiTF.Application do
     Supervisor.start_link(children, opts)
   end
 
-  # Only start the web endpoint if the port is available.
-  # This allows CLI commands to work when a server is already running.
+  # Start the web endpoint, retrying briefly if the port is still releasing
+  # from a previous Ctrl+C abort.
   defp endpoint_child do
     port = Application.get_env(:gitf, GiTF.Web.Endpoint)[:http][:port] || 4000
+    try_bind_port(port, 3)
+  end
 
-    case :gen_tcp.listen(port, []) do
+  defp try_bind_port(_port, 0) do
+    Logger.info("Port still in use after retries, skipping web endpoint.")
+    []
+  end
+
+  defp try_bind_port(port, retries) do
+    case :gen_tcp.listen(port, [reuseaddr: true]) do
       {:ok, socket} ->
         :gen_tcp.close(socket)
         [{GiTF.Web.Endpoint, []}]
 
       {:error, :eaddrinuse} ->
-        Logger.info("Port #{port} already in use, skipping web endpoint. " <>
-          "A GiTF server may already be running. Use GITF_SERVER=http://localhost:#{port} for remote mode.")
-        []
+        if retries > 1 do
+          Logger.info("Port #{port} busy, waiting for release (#{retries - 1} retries left)...")
+          Process.sleep(1000)
+          try_bind_port(port, retries - 1)
+        else
+          Logger.info("Port #{port} already in use, skipping web endpoint. " <>
+            "A GiTF server may already be running.")
+          []
+        end
 
       {:error, :eacces} ->
         Logger.warning("Permission denied for port #{port}. Try a port above 1024.")

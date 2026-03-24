@@ -124,19 +124,36 @@ defmodule GiTF.MCPServer.SocketListener do
     case File.read(pid_file) do
       {:ok, content} ->
         old_pid = String.trim(content)
+        our_pid = to_string(:os.getpid())
 
-        if process_alive?(old_pid) do
-          {:error, :already_running}
-        else
-          # Stale socket from a crashed process — clean up
-          Logger.info("Removing stale MCP socket (old PID #{old_pid} is dead)")
-          File.rm(path)
-          File.rm(pid_file)
-          :ok
+        cond do
+          old_pid == our_pid ->
+            # Same process (restart within same VM) — clean up
+            File.rm(path)
+            File.rm(pid_file)
+            :ok
+
+          process_alive?(old_pid) ->
+            # Give the old process a moment to die (common after Ctrl+C a)
+            Process.sleep(500)
+            if process_alive?(old_pid) do
+              {:error, :already_running}
+            else
+              Logger.info("Removing stale MCP socket (old PID #{old_pid} died during startup)")
+              File.rm(path)
+              File.rm(pid_file)
+              :ok
+            end
+
+          true ->
+            Logger.info("Removing stale MCP socket (old PID #{old_pid} is dead)")
+            File.rm(path)
+            File.rm(pid_file)
+            :ok
         end
 
       {:error, :enoent} ->
-        # No PID file — remove socket if it exists (leftover from before PID files)
+        # No PID file — remove socket if it exists (leftover)
         File.rm(path)
         :ok
     end
