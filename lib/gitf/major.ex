@@ -433,6 +433,11 @@ defmodule GiTF.Major do
       unless worker_alive? do
         Logger.warning("Recovering stuck op #{op.id} (worker dead)")
         GiTF.Ops.fail(op.id)
+
+        # Trigger retry via delayed_retry (same path as waggle-based failures)
+        unless retry_exists?(op.id) do
+          send(self(), {:delayed_retry, op.id, "Worker process died unexpectedly"})
+        end
       end
     end)
   rescue
