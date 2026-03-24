@@ -364,6 +364,7 @@ defmodule GiTF.Dashboard.MissionDetailLive do
                 <th>Status</th>
                 <th>Audit</th>
                 <th>Ghost</th>
+                <th>Context</th>
                 <th></th>
               </tr>
             </thead>
@@ -386,6 +387,19 @@ defmodule GiTF.Dashboard.MissionDetailLive do
                     <% end %>
                   </td>
                   <td style="font-family:monospace; font-size:0.8rem">{short_id(Map.get(op, :ghost_id))}</td>
+                  <td style="min-width:7rem">
+                    <% ctx_pct = ghost_context_pct(op) %>
+                    <%= if ctx_pct > 0 do %>
+                      <div style="display:flex; align-items:center; gap:0.3rem">
+                        <div style="flex:1; height:6px; background:#1f2937; border-radius:3px; overflow:hidden">
+                          <div style={"width:#{ctx_pct}%; height:100%; border-radius:3px; background:#{context_gauge_color(ctx_pct)}"}></div>
+                        </div>
+                        <span style={"font-size:0.65rem; font-family:monospace; color:#{context_gauge_color(ctx_pct)}"}>{Float.round(ctx_pct, 0) |> trunc()}%</span>
+                      </div>
+                    <% else %>
+                      <span style="font-size:0.65rem; color:#6b7280">-</span>
+                    <% end %>
+                  </td>
                   <td>
                     <%= if Map.get(op, :status) == "failed" do %>
                       <button phx-click="reset_op" phx-value-id={op.id} class="btn btn-grey" style="padding:0.2rem 0.5rem; font-size:0.75rem">
@@ -396,7 +410,7 @@ defmodule GiTF.Dashboard.MissionDetailLive do
                 </tr>
                 <%= if MapSet.member?(@expanded_ops, op.id) do %>
                   <tr>
-                    <td colspan="7" style="padding:0">
+                    <td colspan="8" style="padding:0">
                       <div class="detail-content">
                         <dl class="metadata-grid">
                           <dt>Type</dt><dd>{Map.get(op, :type, "-")}</dd>
@@ -464,4 +478,21 @@ defmodule GiTF.Dashboard.MissionDetailLive do
       true -> "step-future"
     end
   end
+
+  defp ghost_context_pct(op) do
+    case Map.get(op, :ghost_id) do
+      nil -> 0.0
+      ghost_id ->
+        case GiTF.Archive.get(:ghosts, ghost_id) do
+          %{context_percentage: pct} when is_number(pct) -> pct * 100
+          _ -> 0.0
+        end
+    end
+  rescue
+    _ -> 0.0
+  end
+
+  defp context_gauge_color(pct) when pct >= 45, do: "#ef4444"
+  defp context_gauge_color(pct) when pct >= 35, do: "#f59e0b"
+  defp context_gauge_color(_pct), do: "#22c55e"
 end

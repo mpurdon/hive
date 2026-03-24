@@ -394,7 +394,19 @@ defmodule GiTF.Ops do
 
       true ->
         record = %{op_id: op_id, depends_on_id: depends_on_id}
-        Archive.insert(:op_dependencies, record)
+        result = Archive.insert(:op_dependencies, record)
+
+        # Block the op if the dependency isn't resolved yet
+        case get(depends_on_id) do
+          {:ok, dep} when dep.status not in ["done", "failed", "rejected"] ->
+            case get(op_id) do
+              {:ok, %{status: "pending"}} -> block(op_id)
+              _ -> :ok
+            end
+          _ -> :ok
+        end
+
+        result
     end
   end
 

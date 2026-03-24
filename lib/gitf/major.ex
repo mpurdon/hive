@@ -352,21 +352,26 @@ defmodule GiTF.Major do
   def handle_info({:delayed_retry, op_id, feedback}, state) do
     Logger.info("Executing delayed retry for op #{op_id}")
 
-    # Re-check that the op still needs retry (may have been manually reset/killed)
-    case GiTF.Ops.get(op_id) do
-      {:ok, %{status: status}} when status in ["failed", "pending"] ->
-        case try_intelligent_retry(op_id, feedback, state) do
-          {:ok, _} -> {:noreply, state}
-          {:error, _} -> {:noreply, simple_retry(op_id, feedback, state)}
-        end
+    # Skip if a retry of this op already exists (succeeded or in progress)
+    if retry_exists?(op_id) do
+      Logger.debug("Delayed retry skipped for op #{op_id}: retry already exists")
+      {:noreply, state}
+    else
+      case GiTF.Ops.get(op_id) do
+        {:ok, %{status: "failed"}} ->
+          case try_intelligent_retry(op_id, feedback, state) do
+            {:ok, _} -> {:noreply, state}
+            {:error, _} -> {:noreply, simple_retry(op_id, feedback, state)}
+          end
 
-      {:ok, %{status: status}} ->
-        Logger.debug("Delayed retry skipped for op #{op_id}: status is #{status}")
-        {:noreply, state}
+        {:ok, %{status: status}} ->
+          Logger.debug("Delayed retry skipped for op #{op_id}: status is #{status}")
+          {:noreply, state}
 
-      {:error, _} ->
-        Logger.debug("Delayed retry skipped for op #{op_id}: op not found")
-        {:noreply, state}
+        {:error, _} ->
+          Logger.debug("Delayed retry skipped for op #{op_id}: op not found")
+          {:noreply, state}
+      end
     end
   end
 
