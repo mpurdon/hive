@@ -309,9 +309,6 @@ defmodule GiTF.Major.Orchestrator do
     end
   end
 
-  # Minimum plan score to auto-proceed. Below this, request human approval.
-  @plan_confidence_threshold 0.5
-
   defp start_implementation(mission) do
     planning_artifact = GiTF.Missions.get_artifact(mission.id, "planning")
 
@@ -484,78 +481,6 @@ defmodule GiTF.Major.Orchestrator do
     end
   end
 
-  # TODO: Remove — dead code from when planning had multi-ghost strategies.
-  # Kept temporarily to avoid large deletion in a single edit.
-  defp request_plan_approval(mission, best_plan) do
-    candidates = Map.get(mission, :plan_candidates, [])
-
-    summary =
-      candidates
-      |> Enum.map(fn c ->
-        "- #{c[:strategy] || c.strategy}: score #{Float.round(c[:score] || c.score || 0.0, 2)}, " <>
-          "#{length(c[:tasks] || c.tasks || [])} tasks"
-      end)
-      |> Enum.join("\n")
-
-    best_tasks = best_plan[:tasks] || best_plan.tasks || []
-
-    task_list =
-      best_tasks
-      |> Enum.with_index(1)
-      |> Enum.map(fn {t, i} ->
-        title = t["title"] || Map.get(t, :title, "Task #{i}")
-        model = t["model_recommendation"] || Map.get(t, :model_recommendation, "general")
-        deps = t["depends_on"] || Map.get(t, :depends_on, [])
-        dep_str = if deps != [], do: " (depends on: #{Enum.join(deps, ", ")})", else: ""
-        "  #{i}. #{title} [#{model}]#{dep_str}"
-      end)
-      |> Enum.join("\n")
-
-    body = """
-    Plan confidence is low (score: #{Float.round(best_plan[:score] || best_plan.score || 0.0, 2)}).
-    Human review recommended before proceeding.
-
-    ## Plan Candidates
-    #{summary}
-
-    ## Best Plan: #{best_plan[:strategy] || best_plan.strategy}
-    #{task_list}
-
-    To approve: use the approve_mission tool or `gitf mission approve #{mission.id}`
-    To reject: the plan will be regenerated on the next advance cycle.
-    """
-
-    # Store as pending plan approval
-    GiTF.Missions.store_artifact(mission.id, "plan_approval", %{
-      "status" => "pending",
-      "best_plan" => %{
-        "strategy" => best_plan[:strategy] || best_plan.strategy,
-        "score" => best_plan[:score] || best_plan.score,
-        "task_count" => length(best_tasks)
-      },
-      "requested_at" => DateTime.utc_now() |> DateTime.to_iso8601()
-    })
-
-    GiTF.Link.send("system", "major", "plan_approval_needed", body)
-
-    GiTF.Telemetry.emit([:gitf, :alert, :raised], %{}, %{
-      type: :plan_approval_needed,
-      message: "Mission #{mission.id} plan needs human approval (score: #{Float.round(best_plan[:score] || best_plan.score || 0.0, 2)})"
-    })
-
-    # Transition back to planning phase so advance_quest can re-check
-    GiTF.Missions.transition_phase(mission.id, "planning", "Plan approval requested (low confidence)")
-  rescue
-    e ->
-      Logger.warning("Plan approval request failed for mission #{mission.id}: #{Exception.message(e)}, proceeding anyway")
-      best_tasks = best_plan[:tasks] || best_plan.tasks || []
-      if is_list(best_tasks) and best_tasks != [] do
-        Planner.create_jobs_from_specs(mission.id, best_tasks)
-      end
-  end
-
-  # -- Planning phase: parallel ghost completion + scoring --------------------
-
   defp check_design_complete(mission) do
     design_ops = Archive.filter(:ops, fn j ->
       j.mission_id == mission.id and
@@ -586,178 +511,10 @@ defmodule GiTF.Major.Orchestrator do
     end
   end
 
-  defp check_planning_complete(mission) do
-    # Find all planning phase ops for this mission
-    planning_ops = Archive.filter(:ops, fn j ->
-      j.mission_id == mission.id and
-        j[:phase_job] == true and
-        j[:phase] == "planning"
-    end)
-
-    if planning_ops == [] do
-      # No planning ops exist yet (race condition) — stay in planning
-      {:ok, "planning"}
-    else
-      done_ops = Enum.filter(planning_ops, &(&1.status == "done"))
-      failed_ops = Enum.filter(planning_ops, &(&1.status == "failed"))
-      total = length(planning_ops)
-      terminal = length(done_ops) + length(failed_ops)
-
-      cond do
-        # All done or failed — evaluate what we have
-        terminal == total ->
-          evaluate_planning_results(mission, done_ops)
-
-        # All in-progress — wait
-        true ->
-          {:ok, "planning"}
-      end
-    end
-  end
-
-  defp evaluate_planning_results(mission, done_ops) do
-    if done_ops == [] do
-      # All planning ghosts failed — fall back to synthetic planning
-      Logger.warning("Quest #{mission.id}: all planning ghosts failed, generating fallback")
-      {:ok, mission} = GiTF.Missions.get(mission.id)
-      start_implementation(mission)
-    else
-      if length(done_ops) == 1 do
-        # Single planning ghost — its artifact is either "planning" or "planning_<strategy>"
-        strategy = extract_strategy_from_title(hd(done_ops).title)
-        artifact_key = if strategy != "normal", do: "planning_#{strategy}", else: "planning"
-        artifact = GiTF.Missions.get_artifact(mission.id, artifact_key)
-        # Also check the base "planning" key as fallback
-        artifact = artifact || GiTF.Missions.get_artifact(mission.id, "planning")
-
-        if artifact do
-          # Copy to the canonical "planning" key if stored under strategy key
-          if artifact_key != "planning" do
-            GiTF.Missions.store_artifact(mission.id, "planning", artifact)
-          end
-          {:ok, mission} = GiTF.Missions.get(mission.id)
-          start_implementation(mission)
-        else
-          {:ok, "planning"}
-        end
-      else
-        # Multiple planning ghosts — score and pick best
-        select_best_plan(mission, done_ops, nil)
-      end
-    end
-  end
-
-  defp select_best_plan(mission, done_ops, _planning_artifact) do
-    # Each planning ghost stored its output as "planning_<strategy>" artifact
-    candidates =
-      done_ops
-      |> Enum.map(fn op ->
-        strategy = extract_strategy_from_title(op.title)
-        artifact_key = "planning_#{strategy}"
-        artifact = GiTF.Missions.get_artifact(mission.id, artifact_key)
-
-        cond do
-          is_list(artifact) and artifact != [] ->
-            plan = %{tasks: artifact, strategy: strategy}
-            score = Planner.score_plan(plan)
-            Map.put(plan, :score, score)
-
-          is_map(artifact) and not Map.get(artifact, "parse_failed", false) ->
-            # Artifact is a map (e.g. from PhaseCollector) — try to extract tasks
-            tasks = artifact["tasks"] || artifact[:tasks] || [artifact]
-            plan = %{tasks: List.wrap(tasks), strategy: strategy}
-            score = Planner.score_plan(plan)
-            Map.put(plan, :score, score)
-
-          true ->
-            nil
-        end
-      end)
-      |> Enum.reject(&is_nil/1)
-
-    if candidates == [] do
-      # Couldn't parse individual plans — use the latest planning artifact
-      {:ok, mission} = GiTF.Missions.get(mission.id)
-      start_implementation(mission)
-    else
-      # Store all candidates
-      GiTF.Missions.store_artifact(mission.id, "plan_candidates", %{
-        "candidates" => Enum.map(candidates, fn c ->
-          %{"strategy" => c.strategy, "score" => c.score, "task_count" => length(c.tasks)}
-        end),
-        "generated_at" => DateTime.utc_now() |> DateTime.to_iso8601()
-      })
-
-      # Pick the best
-      best = Enum.max_by(candidates, & &1.score)
-
-      Logger.info("Quest #{mission.id}: selected plan '#{best.strategy}' " <>
-        "(score: #{Float.round(best.score, 2)}) from #{length(candidates)} candidates")
-
-      # Store best as the definitive planning artifact
-      GiTF.Missions.store_artifact(mission.id, "planning", best.tasks)
-
-      # Store candidates on mission record for fallback
-      quest_record = Archive.get(:missions, mission.id)
-      if quest_record do
-        Archive.put(:missions, Map.merge(quest_record, %{
-          draft_plan: best,
-          plan_candidates: candidates
-        }))
-      end
-
-      score = best.score
-
-      {:ok, mission} = GiTF.Missions.get(mission.id)
-      review_plan = Map.get(mission, :review_plan, false)
-
-      if review_plan or score < @plan_confidence_threshold do
-        reason = if review_plan, do: "manual review requested", else: "score #{Float.round(score, 2)} below threshold"
-        Logger.info("Quest #{mission.id}: pausing for plan review (#{reason})")
-        request_plan_approval(mission, best)
-        {:ok, "planning"}
-      else
-        start_implementation(mission)
-      end
-    end
-  end
-
   defp extract_strategy_from_title(title) do
-    case Regex.run(~r/\[(\w+)\]/, title) do
+    case Regex.run(~r/\[([^\]]+)\]/, title) do
       [_, strategy] -> strategy
       _ -> "normal"
-    end
-  end
-
-  defp handle_plan_approval(mission, plan_approval) do
-    case GiTF.Override.approval_status(mission.id) do
-      :approved ->
-        Logger.info("Quest #{mission.id}: plan approved by human, proceeding to implementation")
-        GiTF.Missions.store_artifact(mission.id, "plan_approval",
-          Map.put(plan_approval, "status", "approved"))
-        {:ok, mission} = GiTF.Missions.get(mission.id)
-        start_implementation(mission)
-
-      :rejected ->
-        Logger.info("Quest #{mission.id}: plan rejected, regenerating")
-        GiTF.Missions.store_artifact(mission.id, "plan_approval",
-          Map.put(plan_approval, "status", "rejected"))
-        GiTF.Missions.store_artifact(mission.id, "planning", nil)
-        {:ok, mission} = GiTF.Missions.get(mission.id)
-        start_planning(mission)
-
-      _ ->
-        requested_at = plan_approval["requested_at"]
-
-        if plan_approval_timed_out?(requested_at) do
-          Logger.info("Quest #{mission.id}: plan auto-approved after timeout")
-          GiTF.Missions.store_artifact(mission.id, "plan_approval",
-            Map.put(plan_approval, "status", "auto_approved"))
-          {:ok, mission} = GiTF.Missions.get(mission.id)
-          start_implementation(mission)
-        else
-          {:ok, "planning"}
-        end
     end
   end
 
@@ -836,21 +593,6 @@ defmodule GiTF.Major.Orchestrator do
       Logger.warning("Re-validation failed for mission #{mission.id}: #{Exception.message(e)}, allowing")
       true
   end
-
-  defp plan_approval_timed_out?(nil), do: false
-
-  defp plan_approval_timed_out?(requested_at_str) when is_binary(requested_at_str) do
-    case DateTime.from_iso8601(requested_at_str) do
-      {:ok, requested_at, _} ->
-        hours_elapsed = DateTime.diff(DateTime.utc_now(), requested_at, :second) / 3600
-        hours_elapsed > approval_timeout_hours()
-
-      _ ->
-        false
-    end
-  end
-
-  defp plan_approval_timed_out?(_), do: false
 
   defp approval_timed_out?(mission_id) do
     case Archive.find_one(:approval_requests, fn r -> r.mission_id == mission_id and r.status == "pending" end) do
