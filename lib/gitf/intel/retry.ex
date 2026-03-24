@@ -119,7 +119,9 @@ defmodule GiTF.Intel.Retry do
   end
 
   defp retry_job(op, strategy, metadata) do
-    # Create a new op based on the failed one
+    # Create a new op based on the failed one, carrying forward all required fields
+    new_model = if is_map(metadata), do: metadata[:model], else: nil
+
     new_job = %{
       id: generate_id("op"),
       mission_id: op.mission_id,
@@ -127,9 +129,23 @@ defmodule GiTF.Intel.Retry do
       title: op.title,
       description: op.description,
       status: "pending",
+      ghost_id: nil,
       retry_of: op.id,
       retry_strategy: strategy,
       retry_metadata: metadata,
+      assigned_model: new_model || Map.get(op, :assigned_model),
+      recommended_model: Map.get(op, :recommended_model),
+      risk_level: Map.get(op, :risk_level, "low"),
+      verification_status: "pending",
+      acceptance_criteria: Map.get(op, :acceptance_criteria, []),
+      phase_job: Map.get(op, :phase_job, false),
+      phase: Map.get(op, :phase),
+      skip_verification: Map.get(op, :skip_verification, false),
+      depends_on: Map.get(op, :depends_on, []),
+      retry_count: (Map.get(op, :retry_count, 0) || 0) + 1,
+      files_changed: nil,
+      changed_files: nil,
+      inserted_at: DateTime.utc_now(),
       created_at: DateTime.utc_now(),
       updated_at: DateTime.utc_now()
     }

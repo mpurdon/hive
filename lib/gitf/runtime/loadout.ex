@@ -69,7 +69,17 @@ defmodule GiTF.Runtime.Loadout do
         ref: [type: :string, doc: "Git ref to diff against (default: HEAD)"]
       ], &git_diff(&1, working_dir)),
 
-      build_tool("git_status", "Show git status", [], &git_status(&1, working_dir))
+      build_tool("git_status", "Show git status", [], &git_status(&1, working_dir)),
+
+      build_tool("github_issue", "Fetch a GitHub issue or PR by repo and number", [
+        repo: [type: :string, required: true, doc: "Repository in owner/repo format"],
+        number: [type: :string, required: true, doc: "Issue or PR number"],
+        type: [type: :string, doc: "Type: 'issue' (default) or 'pr'"]
+      ], &github_fetch/1),
+
+      build_tool("fetch_url", "Fetch content from a URL (for docs, APIs, etc.)", [
+        url: [type: :string, required: true, doc: "The URL to fetch"]
+      ], &fetch_url/1)
     ]
   end
 
@@ -291,6 +301,41 @@ defmodule GiTF.Runtime.Loadout do
     """}
   rescue
     _ -> {:ok, "Error checking costs"}
+  end
+
+  # -- External resource tools -------------------------------------------------
+
+  defp github_fetch(args) do
+    repo = args["repo"] || args[:repo]
+    number = args["number"] || args[:number]
+    type = args["type"] || args[:type] || "issue"
+
+    cmd = if type == "pr", do: "pr", else: "issue"
+
+    case System.cmd("gh", [cmd, "view", to_string(number), "--repo", repo], stderr_to_stdout: true) do
+      {output, 0} -> {:ok, output}
+      {output, _} -> {:ok, "gh #{cmd} view error: #{output}"}
+    end
+  rescue
+    e -> {:ok, "GitHub fetch error: #{Exception.message(e)}"}
+  end
+
+  defp fetch_url(args) do
+    url = args["url"] || args[:url]
+
+    case Req.get(url, receive_timeout: 10_000, redirect: true, max_redirects: 3) do
+      {:ok, %{status: status, body: body}} when status in 200..299 ->
+        text = if is_binary(body), do: body, else: inspect(body)
+        {:ok, String.slice(text, 0, 50_000)}
+
+      {:ok, %{status: status}} ->
+        {:ok, "HTTP #{status} fetching #{url}"}
+
+      {:error, reason} ->
+        {:ok, "Fetch error: #{inspect(reason)}"}
+    end
+  rescue
+    e -> {:ok, "Fetch error: #{Exception.message(e)}"}
   end
 
   # -- Helpers -----------------------------------------------------------------

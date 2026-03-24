@@ -239,8 +239,8 @@ defmodule GiTF.MCPServer.Handlers do
   def call("start_mission", %{"id" => id} = args) do
     with :ok <- require_confirm(args) do
       opts = cond do
-        args["fast"] -> [force_fast_path: true]
-        args["full"] -> [force_full_pipeline: true]
+        args["fast"] == true -> [force_fast_path: true]
+        args["fast"] == false or args["full"] -> [force_full_pipeline: true]
         true -> []
       end
 

@@ -496,8 +496,9 @@ defmodule GiTF.Major do
     if op_id do
       # Phase ops (research, design, etc.) don't need verification — skip straight to advance
       case GiTF.Ops.get(op_id) do
-        {:ok, %{phase_job: true}} ->
+        {:ok, %{phase_job: true} = op} ->
           Logger.info("Phase op #{op_id} completed, skipping verification")
+          GiTF.Archive.put(:ops, Map.put(op, :verification_status, "skipped"))
           notify_run_job_completed(op_id)
           state = advance_quest(link_msg.from, state)
           state

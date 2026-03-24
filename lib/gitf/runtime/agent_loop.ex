@@ -38,6 +38,7 @@ defmodule GiTF.Runtime.AgentLoop do
 
   @default_max_iterations 50
   @default_max_tokens 16_384
+  @default_receive_timeout 60_000
 
   # -- Public API --------------------------------------------------------------
 
@@ -68,9 +69,11 @@ defmodule GiTF.Runtime.AgentLoop do
           include_dynamic: Keyword.get(opts, :include_dynamic, false)
         )
 
-    system_prompt = build_system_prompt(Keyword.get(opts, :system_prompt), working_dir)
+    tool_set = Keyword.get(opts, :tool_set, :standard)
+    system_prompt = build_system_prompt(Keyword.get(opts, :system_prompt), working_dir, tool_set)
     max_iterations = Keyword.get(opts, :max_iterations, @default_max_iterations)
     max_tokens = Keyword.get(opts, :max_tokens, @default_max_tokens)
+    receive_timeout = Keyword.get(opts, :receive_timeout, configured_receive_timeout())
     on_progress = Keyword.get(opts, :on_progress)
     temperature = Keyword.get(opts, :temperature)
 
@@ -95,6 +98,7 @@ defmodule GiTF.Runtime.AgentLoop do
       on_progress: on_progress,
       session_id: session_id,
       last_text: "",
+      receive_timeout: receive_timeout,
       cache_opts: cache_opts
     })
   rescue
@@ -241,11 +245,20 @@ defmodule GiTF.Runtime.AgentLoop do
   # -- Generate Options --------------------------------------------------------
 
   defp build_generate_opts(tools, state) do
-    opts = [tools: tools]
+    opts = [tools: tools, receive_timeout: state.receive_timeout]
     opts = if state.max_tokens, do: Keyword.put(opts, :max_tokens, state.max_tokens), else: opts
     opts = if state.temperature, do: Keyword.put(opts, :temperature, state.temperature), else: opts
     opts = Keyword.merge(opts, Map.get(state, :cache_opts, []))
     opts
+  end
+
+  defp configured_receive_timeout do
+    case GiTF.Config.Provider.get([:llm, :receive_timeout_ms]) do
+      val when is_integer(val) and val > 0 -> val
+      _ -> @default_receive_timeout
+    end
+  rescue
+    _ -> @default_receive_timeout
   end
 
   # -- Usage Tracking ----------------------------------------------------------
@@ -302,8 +315,15 @@ defmodule GiTF.Runtime.AgentLoop do
 
   # -- System Prompt -----------------------------------------------------------
 
-  defp build_system_prompt(base_prompt, working_dir) do
-    agent_content = load_agent_files(working_dir)
+  defp build_system_prompt(base_prompt, working_dir, tool_set) do
+    # Only load agent profiles for implementation ghosts — phase ghosts (research,
+    # requirements, review, validation) don't need them and the bloat causes timeouts
+    agent_content =
+      if tool_set == :readonly do
+        ""
+      else
+        load_agent_files(working_dir)
+      end
 
     case {base_prompt, agent_content} do
       {nil, ""} -> nil

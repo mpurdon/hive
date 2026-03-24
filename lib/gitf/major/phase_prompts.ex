@@ -15,6 +15,7 @@ defmodule GiTF.Major.PhasePrompts do
   @spec research_prompt(map(), map() | nil) :: String.t()
   def research_prompt(mission, sector) do
     sector_path = if sector, do: sector.path, else: "."
+    external_resources = extract_external_resources(mission.goal)
 
     """
     # Research Phase
@@ -28,11 +29,13 @@ defmodule GiTF.Major.PhasePrompts do
 
     ## Instructions
 
-    1. Read key files to understand the project architecture
-    2. Identify coding patterns, conventions, and style
-    3. Understand the tech stack and dependencies
-    4. Identify test setup and testing conventions
-    5. Note any risks or constraints relevant to the goal
+    1. **Fetch any external resources** referenced in the goal FIRST — this is critical
+       to understanding what needs to be built#{external_resources}
+    2. Read key files to understand the project architecture
+    3. Identify coding patterns, conventions, and style
+    4. Understand the tech stack and dependencies
+    5. Identify test setup and testing conventions
+    6. Note any risks or constraints relevant to the goal
 
     ## Output Format
 
@@ -46,12 +49,35 @@ defmodule GiTF.Major.PhasePrompts do
       "tech_stack": ["list of technologies and frameworks"],
       "test_setup": "Description of test framework and conventions",
       "dependencies": ["key dependencies relevant to the goal"],
-      "risks": ["potential risks or challenges for this goal"]
+      "risks": ["potential risks or challenges for this goal"],
+      "external_context": "Summary of any external resources (issues, PRs, docs) referenced in the goal"
     }
     ```
 
     Be thorough but concise. Focus on information relevant to achieving the goal.
     """
+  end
+
+  # Detect GitHub URLs in the goal and generate fetch instructions
+  defp extract_external_resources(goal) do
+    github_issues = Regex.scan(~r{https?://github\.com/([^/]+/[^/]+)/issues/(\d+)}, goal)
+    github_prs = Regex.scan(~r{https?://github\.com/([^/]+/[^/]+)/pull/(\d+)}, goal)
+
+    instructions = []
+
+    instructions = instructions ++ Enum.map(github_issues, fn [_url, repo, number] ->
+      "   - Run `gh issue view #{number} --repo #{repo}` to fetch the issue description"
+    end)
+
+    instructions = instructions ++ Enum.map(github_prs, fn [_url, repo, number] ->
+      "   - Run `gh pr view #{number} --repo #{repo}` to fetch the PR description"
+    end)
+
+    if instructions == [] do
+      ""
+    else
+      "\n" <> Enum.join(instructions, "\n")
+    end
   end
 
   @doc """

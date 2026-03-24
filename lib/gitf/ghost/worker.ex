@@ -238,6 +238,14 @@ defmodule GiTF.Ghost.Worker do
     # Convert agent loop result to parsed events + output
     events = Map.get(result, :events, [])
     text = Map.get(result, :text, "")
+    usage = Map.get(result, :usage, %{})
+
+    # Track context usage from API result
+    input_tokens = Map.get(usage, :input_tokens, 0)
+    output_tokens = Map.get(usage, :output_tokens, 0)
+    if input_tokens > 0 or output_tokens > 0 do
+      track_context_usage(state.ghost_id, [%{"type" => "result", "usage" => usage}])
+    end
 
     state = %{state |
       parsed_events: Enum.reverse(events) ++ state.parsed_events,
@@ -689,12 +697,14 @@ defmodule GiTF.Ghost.Worker do
           :standard
       end
 
+    worker_pid = self()
+
     agent_opts =
       spawn_opts
       |> Keyword.put(:tool_set, tool_set)
       |> Keyword.put(:include_dynamic, true)
       |> Keyword.put(:on_progress, fn event ->
-        send(self(), {:agent_progress, ghost_id, event})
+        send(worker_pid, {:agent_progress, ghost_id, event})
       end)
 
     task = Task.async(fn ->
