@@ -958,13 +958,13 @@ defmodule GiTF.Ghost.Worker do
       GiTF.Missions.store_artifact(op.mission_id, artifact_key, fallback_artifact)
   end
 
-  # For parallel phase ops (planning, simplify) with a [strategy] tag in the
-  # title, use a strategy-specific artifact key so parallel ghosts don't collide.
+  # For parallel phase ops (design, planning, simplify) with a [strategy] tag in
+  # the title, use a strategy-specific artifact key so parallel ghosts don't collide.
   defp planning_artifact_key(op) do
     case op.phase do
-      phase when phase in ["planning", "simplify"] ->
-        case Regex.run(~r/\[(\w+)\]/, op.title || "") do
-          [_, strategy] -> "#{phase}_#{strategy}"
+      phase when phase in ["design", "planning", "simplify"] ->
+        case Regex.run(~r/\[([^\]]+)\]/, op.title || "") do
+          [_, strategy] -> "#{phase}_#{String.replace(strategy, ~r/\s+/, "-")}"
           _ -> phase
         end
 

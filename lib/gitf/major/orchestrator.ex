@@ -150,21 +150,13 @@ defmodule GiTF.Major.Orchestrator do
           check_and_advance(mission, "requirements", &start_design/1)
 
         "design" ->
-          check_and_advance(mission, "design", &start_review/1)
+          check_design_complete(mission)
 
         "review" ->
           handle_review_result(mission)
 
         "planning" ->
-          # Check if there's a pending plan approval (low-confidence gate)
-          plan_approval = GiTF.Missions.get_artifact(mission.id, "plan_approval")
-
-          if plan_approval && plan_approval["status"] == "pending" do
-            handle_plan_approval(mission, plan_approval)
-          else
-            # Check if all parallel planning ghosts are done
-            check_planning_complete(mission)
-          end
+          check_and_advance(mission, "planning", &start_implementation/1)
 
         "implementation" ->
           check_implementation_complete(mission)
@@ -222,12 +214,17 @@ defmodule GiTF.Major.Orchestrator do
     end
   end
 
+  @design_strategies [
+    %{name: "minimal", hint: "Simplest approach that satisfies the core requirements"},
+    %{name: "normal", hint: "Standard implementation following existing patterns"},
+    %{name: "complex", hint: "Comprehensive implementation with edge cases and extensibility"}
+  ]
+
   defp start_design(mission) do
     requirements = GiTF.Missions.get_artifact(mission.id, "requirements")
     research = GiTF.Missions.get_artifact(mission.id, "research")
 
     with {:ok, _} <- GiTF.Missions.transition_phase(mission.id, "design", "Requirements complete") do
-      # Check if this is a redesign iteration with review feedback
       review = GiTF.Missions.get_artifact(mission.id, "review")
 
       extra_instructions =
@@ -237,28 +234,66 @@ defmodule GiTF.Major.Orchestrator do
           ""
         end
 
-      prompt =
-        if review && review["approved"] == false do
-          PhasePrompts.design_prompt_with_feedback(mission, requirements, research, review, extra_instructions)
-        else
-          PhasePrompts.design_prompt(mission, requirements, research, extra_instructions)
-        end
+      # Store strategy count so advance logic knows how many to wait for
+      quest_record = Archive.get(:missions, mission.id)
+      if quest_record do
+        Archive.put(:missions, Map.put(quest_record, :design_strategy_count, length(@design_strategies)))
+      end
 
-      spawn_phase_ghost(mission, "design", prompt, model: "thinking")
+      # Spawn 3 parallel design ghosts with different complexity strategies
+      Enum.each(@design_strategies, fn %{name: strategy_name} ->
+        strategy_section = Planner.strategy_instruction(strategy_name, nil)
+
+        base_prompt =
+          if review && review["approved"] == false do
+            PhasePrompts.design_prompt_with_feedback(mission, requirements, research, review, extra_instructions)
+          else
+            PhasePrompts.design_prompt(mission, requirements, research, extra_instructions)
+          end
+
+        prompt = base_prompt <> "\n" <> strategy_section <> "\n"
+
+        spawn_phase_ghost(mission, "design", prompt,
+          model: "thinking",
+          strategy: strategy_name
+        )
+      end)
 
       {:ok, "design"}
     end
   end
 
   defp start_review(mission) do
-    design = GiTF.Missions.get_artifact(mission.id, "design")
     requirements = GiTF.Missions.get_artifact(mission.id, "requirements")
     research = GiTF.Missions.get_artifact(mission.id, "research")
 
+    # Collect all design variants (design_minimal, design_normal, design_complex)
+    designs = collect_design_variants(mission.id)
+
     with {:ok, _} <- GiTF.Missions.transition_phase(mission.id, "review", "Design complete") do
-      prompt = PhasePrompts.review_prompt(mission, design, requirements, research)
+      prompt = PhasePrompts.review_prompt(mission, designs, requirements, research)
       spawn_phase_ghost(mission, "review", prompt, model: "thinking")
       {:ok, "review"}
+    end
+  end
+
+  defp collect_design_variants(mission_id) do
+    @design_strategies
+    |> Enum.map(fn %{name: name} ->
+      key = "design_#{name}"
+      artifact = GiTF.Missions.get_artifact(mission_id, key)
+      if artifact, do: {name, artifact}, else: nil
+    end)
+    |> Enum.reject(&is_nil/1)
+    |> Map.new()
+    |> case do
+      designs when map_size(designs) > 0 -> designs
+      _ ->
+        # Fallback: check for a single "design" artifact (backward compat)
+        case GiTF.Missions.get_artifact(mission_id, "design") do
+          nil -> %{}
+          design -> %{"normal" => design}
+        end
     end
   end
 
@@ -268,41 +303,8 @@ defmodule GiTF.Major.Orchestrator do
     review = GiTF.Missions.get_artifact(mission.id, "review")
 
     with {:ok, _} <- GiTF.Missions.transition_phase(mission.id, "planning", "Review approved") do
-      # Discover whether this needs multiple strategies or just one
-      artifacts = %{research: GiTF.Missions.get_artifact(mission.id, "research"),
-                    requirements: requirements, design: design}
-
-      strategies =
-        try do
-          Planner.discover_strategies(mission, artifacts)
-        rescue
-          _ -> [%{name: "normal", hint: "Standard implementation with reasonable completeness"}]
-        end
-
-      # Simple goals get 1 planning ghost; complex get 3 parallel
-      strategies = if length(strategies) <= 1, do: strategies, else: Enum.take(strategies, 3)
-
-      # Store strategy count so advance logic knows how many to wait for
-      quest_record = Archive.get(:missions, mission.id)
-      if quest_record do
-        Archive.put(:missions, Map.put(quest_record, :planning_strategy_count, length(strategies)))
-      end
-
-      # Spawn a planning ghost for each strategy in parallel
-      Enum.each(strategies, fn %{name: strategy_name, hint: hint} ->
-        strategy_section = Planner.strategy_instruction(strategy_name, hint)
-
-        base_prompt = PhasePrompts.planning_prompt(mission, design, requirements, review)
-        prompt = if strategy_section == "",
-          do: base_prompt,
-          else: base_prompt <> "\n" <> strategy_section <> "\n"
-
-        spawn_phase_ghost(mission, "planning",  prompt,
-          model: "thinking",
-          strategy: strategy_name
-        )
-      end)
-
+      prompt = PhasePrompts.planning_prompt(mission, design, requirements, review)
+      spawn_phase_ghost(mission, "planning", prompt, model: "thinking")
       {:ok, "planning"}
     end
   end
@@ -482,6 +484,8 @@ defmodule GiTF.Major.Orchestrator do
     end
   end
 
+  # TODO: Remove — dead code from when planning had multi-ghost strategies.
+  # Kept temporarily to avoid large deletion in a single edit.
   defp request_plan_approval(mission, best_plan) do
     candidates = Map.get(mission, :plan_candidates, [])
 
@@ -551,6 +555,36 @@ defmodule GiTF.Major.Orchestrator do
   end
 
   # -- Planning phase: parallel ghost completion + scoring --------------------
+
+  defp check_design_complete(mission) do
+    design_ops = Archive.filter(:ops, fn j ->
+      j.mission_id == mission.id and
+        j[:phase_job] == true and
+        j[:phase] == "design"
+    end)
+
+    if design_ops == [] do
+      {:ok, "design"}
+    else
+      done_ops = Enum.filter(design_ops, &(&1.status == "done"))
+      failed_ops = Enum.filter(design_ops, &(&1.status == "failed"))
+      total = length(design_ops)
+      terminal = length(done_ops) + length(failed_ops)
+
+      if terminal == total do
+        # All design ghosts finished — advance to review with all designs
+        if done_ops == [] do
+          Logger.warning("Quest #{mission.id}: all design ghosts failed")
+          fail_quest(mission.id, "All design strategies failed")
+        else
+          {:ok, mission} = GiTF.Missions.get(mission.id)
+          start_review(mission)
+        end
+      else
+        {:ok, "design"}
+      end
+    end
+  end
 
   defp check_planning_complete(mission) do
     # Find all planning phase ops for this mission
@@ -955,15 +989,15 @@ defmodule GiTF.Major.Orchestrator do
         {:ok, "review"}
 
       review["approved"] == true ->
+        # Copy the selected design variant to the canonical "design" key
+        promote_selected_design(mission.id, review)
         {:ok, mission} = GiTF.Missions.get(mission.id)
         start_planning(mission)
 
       true ->
-        # Review rejected — check redesign iteration count
         redesign_count = Map.get(mission, :redesign_count, 0)
 
         if redesign_count < @max_redesign_iterations do
-          # Go back to design with feedback
           quest_record = Archive.get(:missions, mission.id)
           updated = Map.put(quest_record, :redesign_count, redesign_count + 1)
           Archive.put(:missions, updated)
@@ -971,11 +1005,28 @@ defmodule GiTF.Major.Orchestrator do
           {:ok, mission} = GiTF.Missions.get(mission.id)
           start_design(mission)
         else
-          # Max iterations reached — proceed with warnings
           Logger.warning("Quest #{mission.id} exceeded max redesign iterations, proceeding with current design")
+          promote_selected_design(mission.id, review)
           {:ok, mission} = GiTF.Missions.get(mission.id)
           start_planning(mission)
         end
+    end
+  end
+
+  defp promote_selected_design(mission_id, review) do
+    selected = review["selected_design"] || "normal"
+    key = "design_#{selected}"
+
+    case GiTF.Missions.get_artifact(mission_id, key) do
+      nil ->
+        # Fallback: try other variants or existing "design" artifact
+        fallback = Enum.find_value(@design_strategies, fn %{name: name} ->
+          GiTF.Missions.get_artifact(mission_id, "design_#{name}")
+        end)
+        if fallback, do: GiTF.Missions.store_artifact(mission_id, "design", fallback)
+
+      design ->
+        GiTF.Missions.store_artifact(mission_id, "design", design)
     end
   end
 

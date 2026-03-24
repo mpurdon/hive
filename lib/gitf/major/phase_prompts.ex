@@ -249,16 +249,64 @@ defmodule GiTF.Major.PhasePrompts do
   Cross-validates design against requirements.
   """
   @spec review_prompt(map(), map(), map(), map()) :: String.t()
-  def review_prompt(mission, design, requirements, research) do
-    design_json = Jason.encode!(design, pretty: true)
+  def review_prompt(mission, designs, requirements, research) do
     requirements_json = Jason.encode!(requirements, pretty: true)
     research_json = Jason.encode!(research, pretty: true)
+
+    designs_section =
+      if is_map(designs) and map_size(designs) > 1 do
+        # Multiple design variants to compare
+        designs
+        |> Enum.sort_by(fn {name, _} -> name end)
+        |> Enum.map(fn {name, design} ->
+          design_json = Jason.encode!(design, pretty: true)
+          """
+          ### Design: #{String.upcase(name)}
+
+          ```json
+          #{design_json}
+          ```
+          """
+        end)
+        |> Enum.join("\n")
+      else
+        # Single design (backward compat or only one succeeded)
+        {_name, design} = designs |> Enum.at(0) || {"normal", designs}
+        design_json = Jason.encode!(design, pretty: true)
+        """
+        ### Technical Design
+
+        ```json
+        #{design_json}
+        ```
+        """
+      end
+
+    multi_design? = is_map(designs) and map_size(designs) > 1
+
+    selection_instruction =
+      if multi_design? do
+        """
+        6. **Select the best design**: Compare the designs and select the one that best
+           balances completeness, simplicity, and feasibility. Set `selected_design` to
+           its name (minimal, normal, or complex). Prefer "normal" unless there's a
+           strong reason to pick another.
+        """
+      else
+        ""
+      end
+
+    selected_field =
+      if multi_design? do
+        ~s(  "selected_design": "normal",\n)
+      else
+        ""
+      end
 
     """
     # Design Review Phase
 
-    You are a technical reviewer. Cross-validate the design against the
-    requirements. Check for coverage gaps, feasibility issues, and risks.
+    You are a technical reviewer. #{if multi_design?, do: "Compare the design variants and select the best one, then cross-validate", else: "Cross-validate the design"} against the requirements. Check for coverage gaps, feasibility issues, and risks.
 
     **Goal**: #{mission.goal}
 
@@ -274,11 +322,9 @@ defmodule GiTF.Major.PhasePrompts do
     #{requirements_json}
     ```
 
-    ## Technical Design
+    ## Designs
 
-    ```json
-    #{design_json}
-    ```
+    #{designs_section}
 
     ## Instructions
 
@@ -287,7 +333,7 @@ defmodule GiTF.Major.PhasePrompts do
     3. Identify any gaps, inconsistencies, or missing pieces
     4. Assess implementation risks
     5. Approve or reject with specific feedback
-
+    #{selection_instruction}
     ## Output Format
 
     Output ONLY a JSON object in a ```json fence:
@@ -295,7 +341,7 @@ defmodule GiTF.Major.PhasePrompts do
     ```json
     {
       "approved": true,
-      "coverage": [
+    #{selected_field}  "coverage": [
         {
           "req_id": "FR-1",
           "covered": true,
