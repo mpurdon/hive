@@ -234,9 +234,9 @@ defmodule GiTF.Runtime.ModelResolver do
   }
 
   @bedrock_defaults %{
-    "thinking" => "bedrock:anthropic.claude-sonnet-4-6-20250514-v1:0",
-    "general" => "bedrock:anthropic.claude-sonnet-4-6-20250514-v1:0",
-    "fast" => "bedrock:anthropic.claude-haiku-4-5-20251001-v1:0"
+    "thinking" => "amazon_bedrock:anthropic.claude-sonnet-4-6-20250514-v1:0",
+    "general" => "amazon_bedrock:anthropic.claude-sonnet-4-6-20250514-v1:0",
+    "fast" => "amazon_bedrock:anthropic.claude-haiku-4-5-20251001-v1:0"
   }
 
   defp mode_defaults(:ollama) do

@@ -18,9 +18,9 @@ defmodule GiTF.Runtime.ProviderManager do
     },
     "bedrock" => %{
       color: "#f0983e", glyph: "B", auth: :aws_profile,
-      thinking: "bedrock:anthropic.claude-sonnet-4-6-20250514-v1:0",
-      general: "bedrock:anthropic.claude-sonnet-4-6-20250514-v1:0",
-      fast: "bedrock:anthropic.claude-haiku-4-5-20251001-v1:0"
+      thinking: "amazon_bedrock:anthropic.claude-sonnet-4-6-20250514-v1:0",
+      general: "amazon_bedrock:anthropic.claude-sonnet-4-6-20250514-v1:0",
+      fast: "amazon_bedrock:anthropic.claude-haiku-4-5-20251001-v1:0"
     },
     "openai" => %{
       color: "#3fb950", glyph: "O", auth: :api_key,

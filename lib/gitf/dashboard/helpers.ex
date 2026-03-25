@@ -138,6 +138,7 @@ defmodule GiTF.Dashboard.Helpers do
   def provider_class("openai"), do: "model-openai"
   def provider_class("ollama"), do: "model-ollama"
   def provider_class("bedrock"), do: "model-bedrock"
+  def provider_class("amazon_bedrock"), do: "model-bedrock"
   def provider_class(_), do: "model-unknown"
 
   @doc "Returns tier glyph."
