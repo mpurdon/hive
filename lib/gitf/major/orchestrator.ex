@@ -49,13 +49,24 @@ defmodule GiTF.Major.Orchestrator do
       else
         planning_artifact = GiTF.Missions.get_artifact(mission_id, "planning")
 
-        # Check if implementation ops already exist (restart scenario — don't create duplicates)
+        # Check for existing active ops (restart scenario — don't create duplicates)
+        active_ops = Enum.filter(mission.ops, & &1.status in ["pending", "running", "assigned", "blocked"])
+
         existing_impl_ops =
-          mission.ops
+          active_ops
           |> Enum.reject(& &1[:phase_job])
-          |> Enum.filter(& &1.status in ["pending", "running", "assigned", "blocked"])
+
+        existing_phase_ops =
+          active_ops
+          |> Enum.filter(& &1[:phase_job])
 
         cond do
+          existing_phase_ops != [] ->
+            Logger.info("Quest #{mission_id} has #{length(existing_phase_ops)} active phase ops, triggering spawner")
+            GiTF.Missions.update(mission_id, %{pipeline_mode: "full", status: "active"})
+            send(Process.whereis(GiTF.Major), :spawn_ready_jobs)
+            {:ok, mission[:current_phase] || "research"}
+
           existing_impl_ops != [] ->
             Logger.info("Quest #{mission_id} has #{length(existing_impl_ops)} existing impl ops, triggering spawner")
             GiTF.Missions.update(mission_id, %{pipeline_mode: "full", status: "active"})
@@ -1221,6 +1232,24 @@ defmodule GiTF.Major.Orchestrator do
   # -- Ghost Spawning ----------------------------------------------------------
 
   defp spawn_phase_ghost(mission, phase, prompt, opts) do
+    strategy = Keyword.get(opts, :strategy)
+
+    # Guard: don't create duplicate phase ops (prevents retry loops from spawning 100+ ops)
+    existing = Enum.find(mission.ops, fn op ->
+      op[:phase_job] && op[:phase] == phase &&
+        op.status in ["pending", "running", "assigned"] &&
+        (is_nil(strategy) || String.contains?(op.title || "", "[#{strategy}]"))
+    end)
+
+    if existing do
+      Logger.debug("Phase op already exists for #{phase}#{if strategy, do: " [#{strategy}]"}, skipping duplicate")
+      {:ok, nil}
+    else
+      spawn_phase_ghost_inner(mission, phase, prompt, opts)
+    end
+  end
+
+  defp spawn_phase_ghost_inner(mission, phase, prompt, opts) do
     model = Keyword.get(opts, :model, "general")
     strategy = Keyword.get(opts, :strategy)
 
