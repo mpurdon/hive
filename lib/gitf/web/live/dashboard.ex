@@ -2,6 +2,7 @@ defmodule GiTF.Web.Live.Dashboard do
   use Phoenix.LiveView
 
   alias GiTF.Archive
+  require GiTF.Ghost.Status, as: GhostStatus
   alias GiTF.PubSubBridge
 
   @refresh_interval 3_000
@@ -51,7 +52,7 @@ defmodule GiTF.Web.Live.Dashboard do
 
   @impl true
   def handle_event("emergency_stop", _params, socket) do
-    active_ghosts = Archive.filter(:ghosts, fn b -> b[:status] == "working" end)
+    active_ghosts = Archive.filter(:ghosts, fn b -> b[:status] == GhostStatus.working() end)
 
     Enum.each(active_ghosts, fn ghost ->
       GiTF.Ghosts.stop(ghost[:id])
@@ -202,7 +203,11 @@ defmodule GiTF.Web.Live.Dashboard do
     |> assign_stats()
     |> assign(:sync_queue, safe_call(fn -> GiTF.Sync.Queue.status() end, socket.assigns.sync_queue))
     |> assign(:runs, safe_call(fn -> GiTF.Run.list(status: "active") end, socket.assigns.runs))
-    |> assign(:alerts, safe_call(fn -> GiTF.Observability.Alerts.check_alerts() end, socket.assigns.alerts))
+    |> then(fn s ->
+      assign(s, :alerts, safe_call(fn ->
+        GiTF.Observability.Alerts.check_alerts(ops: s.assigns.ops, missions: s.assigns.missions)
+      end, s.assigns.alerts))
+    end)
   end
 
   defp maybe_refresh_slow(socket, count) when rem(count, 5) == 0 do
@@ -210,7 +215,7 @@ defmodule GiTF.Web.Live.Dashboard do
 
     backups =
       ghosts
-      |> Enum.filter(&(&1[:status] == "working"))
+      |> Enum.filter(&(&1[:status] == GhostStatus.working()))
       |> Enum.reduce(%{}, fn ghost, acc ->
         case safe_call(fn -> GiTF.Backup.load(ghost[:id]) end, :error) do
           {:ok, cp} -> Map.put(acc, ghost[:id], cp)
@@ -236,10 +241,10 @@ defmodule GiTF.Web.Live.Dashboard do
   defp maybe_refresh_tab(socket), do: socket
 
   defp assign_stats(socket) do
-    stats = GiTF.Observability.Metrics.collect_metrics()
     missions = Archive.all(:missions)
     ops = Archive.all(:ops)
     ghosts = Archive.all(:ghosts)
+    stats = GiTF.Observability.Metrics.collect_metrics(missions: missions, ops: ops, ghosts: ghosts)
 
     selected_job =
       case socket.assigns[:selected_op_id] do

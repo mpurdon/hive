@@ -5,6 +5,8 @@ defmodule GiTF.Dashboard.ProgressLive do
 
   import GiTF.Dashboard.Helpers
 
+  require GiTF.Ghost.Status, as: GhostStatus
+
   @refresh_interval :timer.seconds(2)
 
   @impl true
@@ -36,7 +38,7 @@ defmodule GiTF.Dashboard.ProgressLive do
 
   defp assign_data(socket) do
     progress_entries = GiTF.Progress.all()
-    ghosts = GiTF.Ghosts.list(status: "working")
+    ghosts = GiTF.Ghosts.list(status: GhostStatus.working())
 
     # Build a rich view per ghost: progress + ghost metadata + op info
     ghost_activities =

@@ -1,11 +1,13 @@
 defmodule GiTF.MCPServer.Handlers do
   @moduledoc "Tool execution handlers for the MCP server."
 
+  require GiTF.Ghost.Status, as: GhostStatus
+
   def call("factory_status", _args) do
     missions = GiTF.Missions.list()
     active_missions = Enum.reject(missions, &(&1[:status] in ["completed", "closed", "killed"]))
     ghosts = GiTF.Ghosts.list()
-    active_ghosts = Enum.reject(ghosts, &(&1.status in ["stopped", "crashed"]))
+    active_ghosts = Enum.reject(ghosts, &GhostStatus.terminal?(&1.status))
     summary = GiTF.Costs.summary()
     health = GiTF.Observability.Health.check()
 
@@ -121,7 +123,7 @@ defmodule GiTF.MCPServer.Handlers do
         ghosts
       else
         case args["status"] do
-          nil -> Enum.reject(ghosts, &(&1.status in ["stopped", "crashed"]))
+          nil -> Enum.reject(ghosts, &GhostStatus.terminal?(&1.status))
           status -> Enum.filter(ghosts, &(&1.status == status))
         end
       end
@@ -316,7 +318,7 @@ defmodule GiTF.MCPServer.Handlers do
     with :ok <- require_confirm(args) do
       case GiTF.Ghosts.stop(id) do
         :ok ->
-          {:ok, json_text(%{id: id, status: "stopped"})}
+          {:ok, json_text(%{id: id, status: GhostStatus.stopped()})}
 
         {:error, :not_found} ->
           # Worker process already gone — update the archive record directly
@@ -325,8 +327,8 @@ defmodule GiTF.MCPServer.Handlers do
               {:error, "Ghost not found: #{id}"}
 
             ghost ->
-              GiTF.Archive.put(:ghosts, %{ghost | status: "stopped"})
-              {:ok, json_text(%{id: id, status: "stopped", note: "Process already exited, record updated"})}
+              GiTF.Archive.put(:ghosts, %{ghost | status: GhostStatus.stopped()})
+              {:ok, json_text(%{id: id, status: GhostStatus.stopped(), note: "Process already exited, record updated"})}
           end
       end
     end

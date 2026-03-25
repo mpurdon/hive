@@ -16,6 +16,7 @@ defmodule GiTF.Medic do
   """
 
   alias GiTF.Archive
+  require GiTF.Ghost.Status, as: GhostStatus
 
   @type check_result :: %{
           name: atom(),
@@ -329,8 +330,8 @@ defmodule GiTF.Medic do
     count =
       Archive.update_matching(
         :ghosts,
-        fn b -> b.status in ["starting", "working"] and (b.pid == "" or is_nil(b.pid)) end,
-        fn b -> %{b | status: "crashed", updated_at: now} end
+        fn b -> GhostStatus.active?(b.status) and (b.pid == "" or is_nil(b.pid)) end,
+        fn b -> %{b | status: GhostStatus.crashed(), updated_at: now} end
       )
 
     case count do
@@ -445,7 +446,7 @@ defmodule GiTF.Medic do
     Enum.count(active_cells, fn shell ->
       case Archive.get(:ghosts, shell.ghost_id) do
         nil -> true
-        ghost -> ghost.status in ["stopped", "crashed"]
+        ghost -> GhostStatus.terminal?(ghost.status)
       end
     end)
   rescue
@@ -454,7 +455,7 @@ defmodule GiTF.Medic do
 
   defp count_stale_ghosts do
     Archive.count(:ghosts, fn b ->
-      b.status in ["starting", "working"] and (b.pid == "" or is_nil(b.pid))
+      GhostStatus.active?(b.status) and (b.pid == "" or is_nil(b.pid))
     end)
   rescue
     _ -> 0

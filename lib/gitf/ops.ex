@@ -18,6 +18,7 @@ defmodule GiTF.Ops do
   """
 
   alias GiTF.Archive
+  require GiTF.Ghost.Status, as: GhostStatus
 
   # -- Valid transitions -------------------------------------------------------
 
@@ -252,7 +253,7 @@ defmodule GiTF.Ops do
 
     # Mark ghost as stopped
     case GiTF.Ghosts.get(ghost_id) do
-      {:ok, ghost} -> Archive.put(:ghosts, %{ghost | status: "stopped"})
+      {:ok, ghost} -> Archive.put(:ghosts, %{ghost | status: GhostStatus.stopped()})
       _ -> :ok
     end
 

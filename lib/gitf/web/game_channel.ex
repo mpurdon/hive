@@ -2,6 +2,7 @@ defmodule GiTF.Web.GameChannel do
   use Phoenix.Channel
   require Logger
 
+  require GiTF.Ghost.Status, as: GhostStatus
   alias GiTF.PubSubBridge
 
   @doc """
@@ -46,7 +47,7 @@ defmodule GiTF.Web.GameChannel do
     Logger.warning("Emergency Stop received from Game Client")
     
     # Kill active ghosts
-    active_ghosts = GiTF.Archive.filter(:ghosts, fn b -> b.status == "working" end)
+    active_ghosts = GiTF.Archive.filter(:ghosts, fn b -> b.status == GhostStatus.working() end)
     Enum.each(active_ghosts, fn ghost -> GiTF.Ghosts.stop(ghost.id) end)
     
     {:reply, :ok, socket}

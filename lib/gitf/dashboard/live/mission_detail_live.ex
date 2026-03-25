@@ -272,11 +272,17 @@ defmodule GiTF.Dashboard.MissionDetailLive do
             <% "pending" -> %>
               <button phx-click="start" class="btn btn-green">Start Mission</button>
             <% "active" -> %>
+              <%= if has_design_artifacts?(@mission) do %>
+                <a href={"/dashboard/missions/#{@mission.id}/design"} class="btn btn-yellow">View Designs</a>
+              <% end %>
               <%= if has_artifacts?(@mission) do %>
                 <a href={"/dashboard/missions/#{@mission.id}/plan"} class="btn btn-purple">View Plans</a>
               <% end %>
               <button phx-click="kill" class="btn btn-red" data-confirm="Kill this mission?">Kill</button>
             <% "completed" -> %>
+              <%= if has_design_artifacts?(@mission) do %>
+                <a href={"/dashboard/missions/#{@mission.id}/design"} class="btn btn-yellow">View Designs</a>
+              <% end %>
               <%= if has_artifacts?(@mission) do %>
                 <a href={"/dashboard/missions/#{@mission.id}/plan"} class="btn btn-purple">View Plans</a>
               <% end %>
@@ -289,6 +295,9 @@ defmodule GiTF.Dashboard.MissionDetailLive do
                 <% end %>
               </button>
             <% "failed" -> %>
+              <%= if has_design_artifacts?(@mission) do %>
+                <a href={"/dashboard/missions/#{@mission.id}/design"} class="btn btn-yellow">View Designs</a>
+              <% end %>
               <%= if has_artifacts?(@mission) do %>
                 <a href={"/dashboard/missions/#{@mission.id}/plan"} class="btn btn-purple">View Plans</a>
               <% end %>
@@ -518,6 +527,12 @@ defmodule GiTF.Dashboard.MissionDetailLive do
   defp has_artifacts?(mission) do
     artifacts = Map.get(mission, :artifacts, %{})
     is_map(artifacts) and map_size(artifacts) > 0
+  end
+
+  defp has_design_artifacts?(mission) do
+    artifacts = Map.get(mission, :artifacts, %{})
+    is_map(artifacts) and
+      Enum.any?(["design_minimal", "design_normal", "design_complex", "design"], &Map.has_key?(artifacts, &1))
   end
 
   defp context_gauge_color(pct) when pct >= 45, do: "#ef4444"

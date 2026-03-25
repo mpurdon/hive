@@ -15,6 +15,7 @@ defmodule GiTF.Budget.Watchdog do
 
   alias GiTF.Archive
   alias GiTF.Budget
+  require GiTF.Ghost.Status, as: GhostStatus
 
   @check_interval :timer.seconds(10)
   @max_budget_multiplier 2.0
@@ -110,7 +111,7 @@ defmodule GiTF.Budget.Watchdog do
     # Stop active ghosts but don't fail their ops (they can resume)
     active_ghosts =
       Archive.filter(:ghosts, fn b ->
-        b.op_id != nil and b.status == "working"
+        b.op_id != nil and b.status == GhostStatus.working()
       end)
       |> Enum.filter(fn b ->
         case Archive.get(:ops, b.op_id) do

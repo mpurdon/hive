@@ -395,7 +395,53 @@ defmodule GiTF.Dashboard.Layouts do
           /* -- Card value red ------------------------------------------------- */
           .card-value.red { color: #f85149; }
 
+          /* -- Design viewer ------------------------------------------------- */
+          .design-layout { display: grid; grid-template-columns: 1fr 300px; gap: 1rem; }
+          .tab-minimal.tab-active { border-bottom-color: #58a6ff; }
+          .tab-normal.tab-active { border-bottom-color: #3fb950; }
+          .tab-complex.tab-active { border-bottom-color: #a78bfa; }
+          .design-winner { border: 2px solid #d29922; background: rgba(210,153,34,0.07); border-radius: 8px; padding: 1rem; position: relative; }
+          .design-winner::before { content: "AI PICK"; position: absolute; top: -10px; right: 12px; background: #d29922; color: #0d1117; font-size: 0.65rem; font-weight: 700; padding: 1px 8px; border-radius: 4px; }
+          .section-header { display: flex; align-items: center; gap: 0.5rem; cursor: pointer; padding: 0.6rem 0; border-bottom: 1px solid #21262d; color: #f0f6fc; font-weight: 600; font-size: 0.9rem; user-select: none; }
+          .section-header:hover { color: #58a6ff; }
+          .section-chevron { transition: transform 0.15s; display: inline-block; }
+          .section-chevron.open { transform: rotate(90deg); }
+          .coverage-item { display: flex; align-items: center; gap: 0.4rem; padding: 0.25rem 0; font-size: 0.85rem; }
+          .coverage-ok { color: #3fb950; }
+          .coverage-gap { color: #f85149; }
+          .issue-item { padding: 0.4rem 0 0.4rem 0.6rem; margin: 0.25rem 0; font-size: 0.85rem; }
+          .issue-high { border-left: 3px solid #f85149; }
+          .issue-medium { border-left: 3px solid #d29922; }
+          .issue-low { border-left: 3px solid #8b949e; }
+          .strategy-card { border: 1px solid #30363d; border-radius: 8px; padding: 1rem; background: #161b22; }
+          .strategy-card.selected { border-color: #d29922; }
+          .override-btn { padding: 0.4rem 1rem; border-radius: 6px; border: 1px solid #30363d; background: #21262d; color: #c9d1d9; cursor: pointer; font-size: 0.85rem; }
+          .override-btn:hover { border-color: #58a6ff; }
+          .override-btn.active { border-color: #d29922; background: rgba(210,153,34,0.15); color: #d29922; }
+          .component-card { border: 1px solid #21262d; border-radius: 6px; padding: 0.75rem; margin: 0.5rem 0; background: #0d1117; }
+          .file-tag { display: inline-block; background: #21262d; padding: 0.15rem 0.5rem; border-radius: 4px; font-family: monospace; font-size: 0.8rem; margin: 0.15rem; }
+
+          /* -- Plan checklist ------------------------------------------------ */
+          .checklist-item { display: flex; align-items: center; gap: 0.6rem; padding: 0.6rem 0.75rem; border-bottom: 1px solid #21262d; cursor: pointer; transition: background 0.15s; }
+          .checklist-item:hover { background: #1c2128; }
+          .checklist-item-done { opacity: 0.7; }
+          .status-icon { font-size: 1rem; min-width: 1.2rem; text-align: center; }
+          .status-icon-pending { color: #8b949e; }
+          .status-icon-running { color: #58a6ff; }
+          .status-icon-done { color: #3fb950; }
+          .status-icon-failed { color: #f85149; }
+          .status-icon-blocked { color: #d29922; }
+          .criteria-item { display: flex; align-items: flex-start; gap: 0.4rem; padding: 0.2rem 0; font-size: 0.85rem; color: #8b949e; }
+          .ghost-tag { display: inline-flex; align-items: center; gap: 0.25rem; background: rgba(31,111,235,0.13); padding: 0.1rem 0.5rem; border-radius: 10px; font-size: 0.75rem; color: #58a6ff; }
+          .group-progress { width: 60px; height: 4px; background: #30363d; border-radius: 2px; overflow: hidden; margin-left: auto; }
+          .group-progress-fill { height: 100%; background: #3fb950; border-radius: 2px; transition: width 0.5s ease; }
+          .plan-progress { height: 8px; background: #30363d; border-radius: 4px; overflow: hidden; margin-top: 0.5rem; }
+          .plan-progress-fill { height: 100%; border-radius: 4px; transition: width 0.5s ease; background: linear-gradient(90deg, #3fb950, #58a6ff); }
+          @keyframes check-in { from { transform: scale(0.5); opacity: 0; } to { transform: scale(1); opacity: 1; } }
+          .status-just-done .status-icon { animation: check-in 0.3s ease-out; }
+
           /* -- Responsive ---------------------------------------------------- */
+          @media (max-width: 1024px) { .design-layout { grid-template-columns: 1fr; } }
           @media (max-width: 768px) {
             .nav { flex-direction: column; height: auto; padding: 0.75rem; gap: 0.5rem; }
             .cards { grid-template-columns: 1fr 1fr; }

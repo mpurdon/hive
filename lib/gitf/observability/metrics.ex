@@ -8,6 +8,7 @@ defmodule GiTF.Observability.Metrics do
   """
 
   alias GiTF.Archive
+  require GiTF.Ghost.Status, as: GhostStatus
 
   @table :gitf_metrics_ring
   @max_points 1000
@@ -21,6 +22,14 @@ defmodule GiTF.Observability.Metrics do
     :ok
   rescue
     ArgumentError -> :ok
+  end
+
+  @doc "Returns uptime in seconds since server boot."
+  @spec uptime_seconds() :: non_neg_integer()
+  def uptime_seconds do
+    System.system_time(:second) - :persistent_term.get(:gitf_boot_time)
+  rescue
+    _ -> :erlang.statistics(:wall_clock) |> elem(0) |> div(1000)
   end
 
   # -- Ring buffer API -------------------------------------------------------
@@ -116,37 +125,134 @@ defmodule GiTF.Observability.Metrics do
 
   # -- Point-in-time collection (legacy API) ---------------------------------
 
-  @doc "Collect all system metrics"
-  def collect_metrics do
+  @doc """
+  Collect all system metrics (single pass per collection).
+
+  Accepts optional pre-fetched data to avoid redundant Archive reads
+  when the caller already has the collections loaded.
+  """
+  def collect_metrics(opts \\ []) do
+    ghosts = opts[:ghosts] || Archive.all(:ghosts)
+    ops = opts[:ops] || Archive.all(:ops)
+    missions = opts[:missions] || Archive.all(:missions)
+    costs = opts[:costs] || Archive.all(:costs)
+
+    ghost_counts = tally_statuses(ghosts)
+    op_counts = tally_statuses(ops)
+    mission_counts = tally_statuses(missions)
+
+    active_ghosts = Map.get(ghost_counts, GhostStatus.working(), 0) + Map.get(ghost_counts, GhostStatus.starting(), 0)
+    scores = Enum.map(ops, & &1[:quality_score]) |> Enum.reject(&is_nil/1)
+
     %{
-      system: system_metrics(),
-      missions: quest_metrics(),
-      ops: job_metrics(),
-      ghosts: bee_metrics(),
-      quality: quality_metrics(),
-      costs: cost_metrics()
+      system: %{
+        uptime: uptime_seconds(),
+        memory_bytes: :erlang.memory(:total),
+        memory_mb: :erlang.memory(:total) / 1_024 / 1_024,
+        worker_count: active_ghosts
+      },
+      missions: %{
+        total: length(missions),
+        active: Map.get(mission_counts, "active", 0) + Map.get(mission_counts, "pending", 0),
+        completed: Map.get(mission_counts, "completed", 0),
+        failed: Map.get(mission_counts, "failed", 0)
+      },
+      ops: %{
+        total: length(ops),
+        pending: Map.get(op_counts, "pending", 0),
+        running: Map.get(op_counts, "running", 0),
+        done: Map.get(op_counts, "done", 0),
+        failed: Map.get(op_counts, "failed", 0)
+      },
+      ghosts: %{
+        total: length(ghosts),
+        active: active_ghosts,
+        idle: Map.get(ghost_counts, GhostStatus.idle(), 0),
+        stopped: Map.get(ghost_counts, GhostStatus.stopped(), 0) + Map.get(ghost_counts, GhostStatus.crashed(), 0)
+      },
+      quality: %{
+        average: if(scores == [], do: 0, else: Enum.sum(scores) / length(scores)),
+        count: length(scores)
+      },
+      costs: %{
+        total: Enum.sum(Enum.map(costs, &Map.get(&1, :cost_usd, 0.0))),
+        count: length(costs)
+      }
     }
   end
 
-  @doc "Export metrics in Prometheus format"
+  @doc "Export metrics in Prometheus exposition format"
   def export_prometheus do
     metrics = collect_metrics()
 
-    [
-      "gitf_quests_total #{metrics.missions.total}",
-      "gitf_quests_active #{metrics.missions.active}",
-      "gitf_quests_completed #{metrics.missions.completed}",
-      "gitf_quests_failed #{metrics.missions.failed}",
-      "gitf_bees_active #{metrics.ghosts.active}",
-      "gitf_bees_idle #{metrics.ghosts.idle}",
-      "gitf_quality_score_avg #{metrics.quality.average}",
+    lines = [
+      "# HELP gitf_uptime_seconds Seconds since server boot",
+      "# TYPE gitf_uptime_seconds gauge",
+      "gitf_uptime_seconds #{metrics.system.uptime}",
+      "",
+      "# HELP gitf_missions_total Total number of missions",
+      "# TYPE gitf_missions_total gauge",
+      "gitf_missions_total #{metrics.missions.total}",
+      "# HELP gitf_missions_active Currently active missions",
+      "# TYPE gitf_missions_active gauge",
+      "gitf_missions_active #{metrics.missions.active}",
+      "# HELP gitf_missions_completed Completed missions",
+      "# TYPE gitf_missions_completed counter",
+      "gitf_missions_completed #{metrics.missions.completed}",
+      "# HELP gitf_missions_failed Failed missions",
+      "# TYPE gitf_missions_failed counter",
+      "gitf_missions_failed #{metrics.missions.failed}",
+      "",
+      "# HELP gitf_ops_total Total operations",
+      "# TYPE gitf_ops_total gauge",
+      "gitf_ops_total #{metrics.ops.total}",
+      "# HELP gitf_ops_pending Pending operations",
+      "# TYPE gitf_ops_pending gauge",
+      "gitf_ops_pending #{metrics.ops.pending}",
+      "# HELP gitf_ops_running Running operations",
+      "# TYPE gitf_ops_running gauge",
+      "gitf_ops_running #{metrics.ops.running}",
+      "# HELP gitf_ops_done Completed operations",
+      "# TYPE gitf_ops_done counter",
+      "gitf_ops_done #{metrics.ops.done}",
+      "# HELP gitf_ops_failed Failed operations",
+      "# TYPE gitf_ops_failed counter",
+      "gitf_ops_failed #{metrics.ops.failed}",
+      "",
+      "# HELP gitf_ghosts_active Active ghost workers",
+      "# TYPE gitf_ghosts_active gauge",
+      "gitf_ghosts_active #{metrics.ghosts.active}",
+      "# HELP gitf_ghosts_total Total ghosts spawned",
+      "# TYPE gitf_ghosts_total gauge",
+      "gitf_ghosts_total #{metrics.ghosts.total}",
+      "",
+      "# HELP gitf_cost_total_usd Total LLM cost in USD",
+      "# TYPE gitf_cost_total_usd counter",
       "gitf_cost_total_usd #{metrics.costs.total}",
-      "gitf_cost_trend #{trend(:cost_usd)}"
+      "# HELP gitf_cost_trend Cost trend ratio (>1 = increasing)",
+      "# TYPE gitf_cost_trend gauge",
+      "gitf_cost_trend #{trend(:cost_usd)}",
+      "",
+      "# HELP gitf_quality_score_avg Average quality score",
+      "# TYPE gitf_quality_score_avg gauge",
+      "gitf_quality_score_avg #{metrics.quality.average}",
+      "",
+      "# HELP gitf_memory_bytes BEAM VM memory usage",
+      "# TYPE gitf_memory_bytes gauge",
+      "gitf_memory_bytes #{metrics.system.memory_bytes}",
+      "# HELP gitf_process_count BEAM process count",
+      "# TYPE gitf_process_count gauge",
+      "gitf_process_count #{:erlang.system_info(:process_count)}"
     ]
-    |> Enum.join("\n")
+
+    Enum.join(lines, "\n") <> "\n"
   end
 
   # -- Private ---------------------------------------------------------------
+
+  defp tally_statuses(records) do
+    Enum.frequencies_by(records, &Map.get(&1, :status, "unknown"))
+  end
 
   defp maybe_evict(metric) do
     match_spec = [{{{metric, :_}, :_}, [], [true]}]
@@ -162,67 +268,4 @@ defmodule GiTF.Observability.Metrics do
     ArgumentError -> :ok
   end
 
-  defp system_metrics do
-    ghosts = Archive.all(:ghosts)
-    workers = Enum.count(ghosts, &(Map.get(&1, :status) in ["working", "starting"]))
-
-    %{
-      uptime: System.monotonic_time(:second),
-      memory_mb: :erlang.memory(:total) / 1_024 / 1_024,
-      worker_count: workers
-    }
-  end
-
-  defp quest_metrics do
-    missions = Archive.all(:missions)
-
-    %{
-      total: length(missions),
-      active: Enum.count(missions, &(Map.get(&1, :status) in ["active", "pending"])),
-      completed: Enum.count(missions, &(Map.get(&1, :status) == "completed")),
-      failed: Enum.count(missions, &(Map.get(&1, :status) == "failed"))
-    }
-  end
-
-  defp job_metrics do
-    ops = Archive.all(:ops)
-
-    %{
-      total: length(ops),
-      pending: Enum.count(ops, &(Map.get(&1, :status) == "pending")),
-      running: Enum.count(ops, &(Map.get(&1, :status) == "running")),
-      done: Enum.count(ops, &(Map.get(&1, :status) == "done")),
-      failed: Enum.count(ops, &(Map.get(&1, :status) == "failed"))
-    }
-  end
-
-  defp bee_metrics do
-    ghosts = Archive.all(:ghosts)
-
-    %{
-      total: length(ghosts),
-      active: Enum.count(ghosts, &(Map.get(&1, :status) in ["working", "starting"])),
-      idle: Enum.count(ghosts, &(Map.get(&1, :status) == "idle")),
-      stopped: Enum.count(ghosts, &(Map.get(&1, :status) in ["stopped", "crashed"]))
-    }
-  end
-
-  defp quality_metrics do
-    ops = Archive.all(:ops)
-    scores = Enum.map(ops, & &1[:quality_score]) |> Enum.reject(&is_nil/1)
-
-    %{
-      average: if(Enum.empty?(scores), do: 0, else: Enum.sum(scores) / length(scores)),
-      count: length(scores)
-    }
-  end
-
-  defp cost_metrics do
-    costs = Archive.all(:costs)
-
-    %{
-      total: Enum.sum(Enum.map(costs, &Map.get(&1, :cost_usd, 0.0))),
-      count: length(costs)
-    }
-  end
 end

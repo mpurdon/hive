@@ -5,6 +5,8 @@ defmodule GiTF.TUI.Views.Activity do
   """
   import Ratatouille.View
 
+  require GiTF.Ghost.Status, as: GhostStatus
+
   @phases ~w(research requirements design review planning implementation validation sync)
 
   def render(model) do
@@ -188,9 +190,9 @@ defmodule GiTF.TUI.Views.Activity do
   defp to_s(val) when is_binary(val), do: val
   defp to_s(val), do: inspect(val)
 
-  defp status_color("working"), do: :green
-  defp status_color("provisioning"), do: :yellow
-  defp status_color("stopped"), do: :white
+  defp status_color(GhostStatus.working()), do: :green
+  defp status_color(GhostStatus.provisioning()), do: :yellow
+  defp status_color(GhostStatus.stopped()), do: :white
   defp status_color("failed"), do: :red
   defp status_color(_), do: :white
 end

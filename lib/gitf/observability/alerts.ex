@@ -16,9 +16,15 @@ defmodule GiTF.Observability.Alerts do
   ]
 
   @doc "Check all alert rules and return triggered alerts"
-  def check_alerts do
+  def check_alerts(opts \\ []) do
+    data = %{
+      ops: opts[:ops] || Archive.all(:ops),
+      missions: opts[:missions] || Archive.all(:missions),
+      costs: opts[:costs] || Archive.all(:costs)
+    }
+
     Enum.flat_map(@alert_rules, fn {rule, threshold} ->
-      case check_rule(rule, threshold) do
+      case check_rule(rule, threshold, data) do
         {:alert, message} -> [{rule, message}]
         :ok -> []
       end
@@ -83,9 +89,8 @@ defmodule GiTF.Observability.Alerts do
     _ -> :ok
   end
 
-  defp check_rule(:validation_failed, threshold_seconds) do
-    ops = Archive.all(:ops)
-    recent_failures = Enum.filter(ops, fn j ->
+  defp check_rule(:validation_failed, threshold_seconds, data) do
+    recent_failures = Enum.filter(data.ops, fn j ->
       j.status == "done" &&
       Map.get(j, :verification_status) == "failed" &&
       j.verified_at &&
@@ -100,13 +105,12 @@ defmodule GiTF.Observability.Alerts do
     end
   end
 
-  defp check_rule(:quest_stuck, threshold_seconds) do
-    missions = Archive.all(:missions)
-    stuck = Enum.filter(missions, fn q ->
-      q.status == "active" && 
+  defp check_rule(:quest_stuck, threshold_seconds, data) do
+    stuck = Enum.filter(data.missions, fn q ->
+      q.status == "active" &&
       DateTime.diff(DateTime.utc_now(), q.updated_at) > threshold_seconds
     end)
-    
+
     if length(stuck) > 0 do
       {:alert, "#{length(stuck)} mission(s) stuck for > #{threshold_seconds}s"}
     else
@@ -114,35 +118,28 @@ defmodule GiTF.Observability.Alerts do
     end
   end
 
-  defp check_rule(:quality_drop, threshold) do
-    ops = Archive.all(:ops)
-    recent = Enum.take(ops, -10)
+  defp check_rule(:quality_drop, threshold, data) do
+    recent = Enum.take(data.ops, -10)
     scores = Enum.map(recent, & &1[:quality_score]) |> Enum.reject(&is_nil/1)
-    
+
     if !Enum.empty?(scores) do
       avg = Enum.sum(scores) / length(scores)
-      if avg < threshold do
-        {:alert, "Quality score dropped to #{Float.round(avg, 1)}"}
-      else
-        :ok
-      end
+      if avg < threshold, do: {:alert, "Quality score dropped to #{Float.round(avg, 1)}"}, else: :ok
     else
       :ok
     end
   end
 
-  defp check_rule(:cost_spike, multiplier) do
-    costs = Archive.all(:costs)
-    
-    if length(costs) < 10 do
+  defp check_rule(:cost_spike, multiplier, data) do
+    if length(data.costs) < 10 do
       :ok
     else
-      recent = Enum.take(costs, -5) |> Enum.map(& (&1[:total_cost_usd] || &1[:cost_usd] || 0))
-      older = Enum.slice(costs, -15..-6) |> Enum.map(& (&1[:total_cost_usd] || &1[:cost_usd] || 0))
-      
+      recent = Enum.take(data.costs, -5) |> Enum.map(& (&1[:total_cost_usd] || &1[:cost_usd] || 0))
+      older = Enum.slice(data.costs, -15..-6) |> Enum.map(& (&1[:total_cost_usd] || &1[:cost_usd] || 0))
+
       recent_avg = Enum.sum(recent) / length(recent)
       older_avg = Enum.sum(older) / length(older)
-      
+
       if recent_avg > older_avg * multiplier do
         {:alert, "Cost spike: $#{Float.round(recent_avg, 2)} vs $#{Float.round(older_avg, 2)}"}
       else
@@ -151,19 +148,13 @@ defmodule GiTF.Observability.Alerts do
     end
   end
 
-  defp check_rule(:failure_rate_high, threshold) do
-    ops = Archive.all(:ops)
-    recent = Enum.take(ops, -20)
-    
+  defp check_rule(:failure_rate_high, threshold, data) do
+    recent = Enum.take(data.ops, -20)
+
     if length(recent) > 0 do
       failed = Enum.count(recent, & &1.status == "failed")
       rate = failed / length(recent)
-      
-      if rate > threshold do
-        {:alert, "Failure rate: #{Float.round(rate * 100, 1)}%"}
-      else
-        :ok
-      end
+      if rate > threshold, do: {:alert, "Failure rate: #{Float.round(rate * 100, 1)}%"}, else: :ok
     else
       :ok
     end

@@ -34,21 +34,6 @@ defmodule GiTF.Link do
     {:ok, link_msg} = Archive.insert(:links, record)
     broadcast(to, {:waggle_received, link_msg})
 
-    # Direct delivery to Major process — PubSub topic mismatch fallback
-    try do
-      if to == "major" do
-        case Process.whereis(GiTF.Major) do
-          pid when is_pid(pid) ->
-            Kernel.send(pid, {:waggle_received, link_msg})
-          _ ->
-            require Logger
-            Logger.warning("Link: Major process not registered, direct delivery skipped")
-        end
-      end
-    rescue
-      _ -> :ok
-    end
-
     GiTF.Telemetry.emit([:gitf, :link_msg, :sent], %{}, %{
       from: from,
       to: to,

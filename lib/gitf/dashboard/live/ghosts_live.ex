@@ -11,6 +11,8 @@ defmodule GiTF.Dashboard.GhostsLive do
 
   import GiTF.Dashboard.Helpers
 
+  require GiTF.Ghost.Status, as: GhostStatus
+
   @refresh_interval :timer.seconds(5)
 
   @impl true
@@ -94,7 +96,7 @@ defmodule GiTF.Dashboard.GhostsLive do
                 <tr class="detail-toggle" phx-click="toggle" phx-value-id={ghost.id}>
                   <td style="width:1.5rem">{if MapSet.member?(Map.get(assigns, :expanded, MapSet.new()), ghost.id), do: "v", else: ">"}</td>
                   <td style="width:1rem">
-                    <span style={"display:inline-block; width:8px; height:8px; border-radius:50%; background:#{status_dot_color(Map.get(ghost, :status, "unknown"))}"} class={if Map.get(ghost, :status) == "working", do: "pulse"}></span>
+                    <span style={"display:inline-block; width:8px; height:8px; border-radius:50%; background:#{status_dot_color(Map.get(ghost, :status, "unknown"))}"} class={if Map.get(ghost, :status) == GhostStatus.working(), do: "pulse"}></span>
                   </td>
                   <td style="font-family:monospace; font-size:0.8rem">{short_id(ghost.id)}</td>
                   <td>{Map.get(ghost, :name, "-")}</td>
@@ -117,7 +119,7 @@ defmodule GiTF.Dashboard.GhostsLive do
                     <% end %>
                   </td>
                   <td>
-                    <%= if Map.get(ghost, :status) == "working" do %>
+                    <%= if Map.get(ghost, :status) == GhostStatus.working() do %>
                       <button phx-click="stop" phx-value-id={ghost.id} class="btn btn-red" style="padding:0.2rem 0.6rem; font-size:0.75rem">
                         Stop
                       </button>
@@ -165,12 +167,12 @@ defmodule GiTF.Dashboard.GhostsLive do
     """
   end
 
-  defp status_dot_color("working"), do: "#3fb950"
-  defp status_dot_color("starting"), do: "#58a6ff"
-  defp status_dot_color("idle"), do: "#8b949e"
+  defp status_dot_color(GhostStatus.working()), do: "#3fb950"
+  defp status_dot_color(GhostStatus.starting()), do: "#58a6ff"
+  defp status_dot_color(GhostStatus.idle()), do: "#8b949e"
   defp status_dot_color("paused"), do: "#d29922"
-  defp status_dot_color("stopped"), do: "#484f58"
-  defp status_dot_color("crashed"), do: "#f85149"
+  defp status_dot_color(GhostStatus.stopped()), do: "#484f58"
+  defp status_dot_color(GhostStatus.crashed()), do: "#f85149"
   defp status_dot_color(_), do: "#484f58"
   
   defp context_badge(percentage) when percentage >= 45, do: "badge-red"

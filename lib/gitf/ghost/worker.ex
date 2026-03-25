@@ -25,26 +25,30 @@ defmodule GiTF.Ghost.Worker do
 
   ## Restart strategy
 
-  Workers use `restart: :temporary` because the Major decides whether
-  and how to retry failed ghosts -- not the supervisor.
+  Workers use `restart: :transient` — they auto-restart on abnormal exit
+  (e.g., code reload crash) but stay down on normal exit (success/graceful
+  failure). On restart, the worker detects the "restarting" ghost status
+  and resumes from the last checkpoint/transfer context.
   """
 
   use GenServer
   require Logger
 
   alias GiTF.Archive
+  require GiTF.Ghost.Status, as: GhostStatus
 
   @registry GiTF.Registry
 
   # -- Types -------------------------------------------------------------------
+
+  @type handle :: {:task, Task.t()} | {:port, port()} | nil
 
   @type state :: %{
           ghost_id: String.t(),
           op_id: String.t(),
           sector_id: String.t(),
           shell_id: String.t() | nil,
-          port: port() | nil,
-          task: Task.t() | nil,
+          handle: handle(),
           execution_mode: :api | :cli | :ollama | :bedrock,
           status: :provisioning | :running | :done | :failed,
           gitf_root: String.t(),
@@ -60,7 +64,7 @@ defmodule GiTF.Ghost.Worker do
     %{
       id: {__MODULE__, ghost_id},
       start: {__MODULE__, :start_link, [opts]},
-      restart: :temporary,
+      restart: :transient,
       type: :worker
     }
   end
@@ -133,8 +137,7 @@ defmodule GiTF.Ghost.Worker do
       op_id: op_id,
       sector_id: sector_id,
       shell_id: nil,
-      port: nil,
-      task: nil,
+      handle: nil,
       execution_mode: GiTF.Runtime.ModelResolver.execution_mode(),
       status: :provisioning,
       gitf_root: gitf_root,
@@ -196,7 +199,7 @@ defmodule GiTF.Ghost.Worker do
   end
 
   @impl true
-  def handle_info({port, {:data, data}}, %{port: port} = state) do
+  def handle_info({port, {:data, data}}, %{handle: {:port, port}} = state) do
     events = GiTF.Runtime.Models.parse_output(data)
     update_progress(state.ghost_id, events)
     
@@ -207,7 +210,7 @@ defmodule GiTF.Ghost.Worker do
      %{state | output: [state.output, data], parsed_events: Enum.reverse(events) ++ state.parsed_events}}
   end
 
-  def handle_info({port, {:exit_status, 0}}, %{port: port} = state) do
+  def handle_info({port, {:exit_status, 0}}, %{handle: {:port, port}} = state) do
     Logger.info("Ghost #{state.ghost_id} completed successfully")
 
     try do
@@ -218,29 +221,26 @@ defmodule GiTF.Ghost.Worker do
         mark_failed(state, "Success handler crashed: #{Exception.message(e)}")
     end
 
-    {:stop, :normal, %{state | status: :done, port: nil}}
+    {:stop, :normal, %{state | status: :done, handle: nil}}
   end
 
-  def handle_info({port, {:exit_status, exit_code}}, %{port: port} = state) do
+  def handle_info({port, {:exit_status, exit_code}}, %{handle: {:port, port}} = state) do
     Logger.warning("Ghost #{state.ghost_id} exited with status #{exit_code}")
     output = IO.iodata_to_binary(state.output)
     mark_failed(state, "Exit code #{exit_code}: #{String.slice(output, 0, 500)}")
-    {:stop, :normal, %{state | status: :failed, port: nil}}
+    {:stop, :normal, %{state | status: :failed, handle: nil}}
   end
 
   # -- API mode: Task completion -----------------------------------------------
 
-  def handle_info({ref, {:ok, result}}, %{task: %Task{ref: ref}} = state) do
-    # Task completed successfully — treat like exit_status 0
+  def handle_info({ref, {:ok, result}}, %{handle: {:task, %Task{ref: ref}}} = state) do
     Process.demonitor(ref, [:flush])
     Logger.info("Ghost #{state.ghost_id} API task completed successfully")
 
-    # Convert agent loop result to parsed events + output
     events = Map.get(result, :events, [])
     text = Map.get(result, :text, "")
     usage = Map.get(result, :usage, %{})
 
-    # Track context usage from API result
     input_tokens = Map.get(usage, :input_tokens, 0)
     output_tokens = Map.get(usage, :output_tokens, 0)
     if input_tokens > 0 or output_tokens > 0 do
@@ -250,7 +250,7 @@ defmodule GiTF.Ghost.Worker do
     state = %{state |
       parsed_events: Enum.reverse(events) ++ state.parsed_events,
       output: [state.output, text],
-      task: nil
+      handle: nil
     }
 
     try do
@@ -264,29 +264,26 @@ defmodule GiTF.Ghost.Worker do
     {:stop, :normal, %{state | status: :done}}
   end
 
-  def handle_info({ref, {:error, reason}}, %{task: %Task{ref: ref}} = state) do
+  def handle_info({ref, {:error, reason}}, %{handle: {:task, %Task{ref: ref}}} = state) do
     Process.demonitor(ref, [:flush])
     Logger.warning("Ghost #{state.ghost_id} API task failed: #{inspect(reason)}")
 
-    # Try model fallback before giving up
     case maybe_fallback_model(state) do
       {:ok, new_task, fallback_model} ->
         Logger.info("Ghost #{state.ghost_id} falling back to model #{fallback_model}")
-        {:noreply, %{state | task: new_task, fallback_attempted: true}}
+        {:noreply, %{state | handle: {:task, new_task}, fallback_attempted: true}}
 
       :no_fallback ->
-        # Record API failure in circuit breaker so global outage is detected
         GiTF.CircuitBreaker.call("api:llm", fn -> {:error, reason} end)
         mark_failed(state, "API error: #{inspect(reason)}")
-        {:stop, :normal, %{state | status: :failed, task: nil}}
+        {:stop, :normal, %{state | status: :failed, handle: nil}}
     end
   end
 
-  def handle_info({:DOWN, ref, :process, _pid, reason}, %{task: %Task{ref: ref}} = state) do
-    # Task process crashed
+  def handle_info({:DOWN, ref, :process, _pid, reason}, %{handle: {:task, %Task{ref: ref}}} = state) do
     Logger.error("Ghost #{state.ghost_id} API task crashed: #{inspect(reason)}")
     mark_failed(state, "Task crash: #{inspect(reason)}")
-    {:stop, :normal, %{state | status: :failed, task: nil}}
+    {:stop, :normal, %{state | status: :failed, handle: nil}}
   end
 
   def handle_info({:agent_progress, ghost_id, event}, state) when ghost_id == state.ghost_id do
@@ -349,11 +346,7 @@ defmodule GiTF.Ghost.Worker do
 
   def handle_info(:verify_beacon, %{status: :running} = state) do
     alive? =
-      cond do
-        state.task != nil -> Process.alive?(state.task.pid)
-        state.port != nil -> port_alive?(state.port)
-        true -> false
-      end
+      handle_alive?(state)
 
     has_output? = state.parsed_events != []
 
@@ -385,57 +378,87 @@ defmodule GiTF.Ghost.Worker do
   end
 
   @impl true
-  def terminate(_reason, state) do
-    # If ghost was actively running, preserve context via backup + transfer
-    if state.status == :running do
-      try do
-        # Save final backup so transfer has latest progress
-        backup_data = build_checkpoint_data(state)
-        GiTF.Backup.save(state.ghost_id, backup_data)
+  def terminate(reason, state) do
+    shutdown_handle(state, 2_000)
 
-        # Create transfer so replacement ghost has context
-        GiTF.Transfer.create(state.ghost_id)
-        Logger.info("Ghost #{state.ghost_id} crash transfer saved")
-      rescue
-        e ->
-          Logger.debug("Crash transfer failed for ghost #{state.ghost_id}: #{inspect(e)}")
-      end
-    end
+    case classify_exit(reason) do
+      :clean ->
+        # Normal exit — success/failure already reported via mark_success/mark_failed
+        :ok
 
-    # Mark ghost as crashed if still in an active state and notify Major
-    if state.status in [:provisioning, :running] do
-      update_ghost_status(state.ghost_id, "crashed")
-      GiTF.Ops.fail(state.op_id)
+      :crash ->
+        # Unexpected crash (code reload, linked Task death, etc.)
+        # Supervisor will restart us with :transient — save context for auto-resume
+        if state.status in [:provisioning, :running] do
+          save_crash_context(state)
+          update_ghost_status(state.ghost_id, GhostStatus.restarting())
+          Logger.info("Ghost #{state.ghost_id} saving context for auto-resume (reason: #{inspect(reason)})")
+        end
 
-      try do
-        GiTF.Link.send(
-          state.ghost_id,
-          "major",
-          "job_failed",
-          "Job #{state.op_id} failed: ghost process terminated unexpectedly"
-        )
-      rescue
-        _ -> :ok
-      end
-    end
+      :shutdown ->
+        # Application shutting down — no restart coming, fail the op
+        if state.status in [:provisioning, :running] do
+          save_crash_context(state)
+          update_ghost_status(state.ghost_id, GhostStatus.crashed())
+          GiTF.Ops.fail(state.op_id)
 
-    # Exfil API task if running (allow 2s for graceful cleanup)
-    if state.task != nil do
-      Task.shutdown(state.task, 2_000)
-    end
-
-    # Close CLI port if running
-    try do
-      if state.port != nil and port_alive?(state.port) do
-        Port.close(state.port)
-      end
-    rescue
-      _ -> :ok
+          try do
+            GiTF.Link.send(
+              state.ghost_id,
+              "major",
+              "job_failed",
+              "Job #{state.op_id} failed: application shutdown"
+            )
+          rescue
+            _ -> :ok
+          end
+        end
     end
 
     :ok
   rescue
     _ -> :ok
+  end
+
+  defp classify_exit(:normal), do: :clean
+  defp classify_exit(:shutdown), do: :shutdown
+  defp classify_exit({:shutdown, _}), do: :shutdown
+  defp classify_exit(_), do: :crash
+
+  defp shutdown_handle(state, timeout) do
+    case state.handle do
+      {:task, task} ->
+        Task.shutdown(task, timeout)
+
+      {:port, port} ->
+        try do
+          if port_alive?(port), do: Port.close(port)
+        rescue
+          _ -> :ok
+        end
+
+      nil ->
+        :ok
+    end
+  end
+
+  defp handle_alive?(state) do
+    case state.handle do
+      {:task, task} -> Process.alive?(task.pid)
+      {:port, port} -> port_alive?(port)
+      nil -> false
+    end
+  end
+
+  defp save_crash_context(state) do
+    try do
+      backup_data = build_checkpoint_data(state)
+      GiTF.Backup.save(state.ghost_id, backup_data)
+      GiTF.Transfer.create(state.ghost_id)
+    rescue
+      e ->
+        Logger.debug("Crash context save failed for ghost #{state.ghost_id}: #{inspect(e)}")
+    end
   end
 
   # -- Private: agent progress formatting --------------------------------------
@@ -481,10 +504,16 @@ defmodule GiTF.Ghost.Worker do
       {:ok, delay_ms} -> Process.sleep(delay_ms)
     end
 
-    if Keyword.get(state.opts, :revive, false) do
-      provision_revive(state)
-    else
-      provision_fresh(state)
+    cond do
+      Keyword.get(state.opts, :revive, false) ->
+        provision_revive(state)
+
+      ghost_restarting?(state.ghost_id) ->
+        Logger.info("Ghost #{state.ghost_id} auto-resuming after crash recovery")
+        provision_auto_resume(state)
+
+      true ->
+        provision_fresh(state)
     end
   end
 
@@ -516,29 +545,12 @@ defmodule GiTF.Ghost.Worker do
         maybe_build_task_skill(build_prompt(state), shell.worktree_path, state.op_id)
       end
 
-      # API mode spawns Task.async directly (no timeout wrapper needed —
-      # the task runs asynchronously). CLI mode uses spawn_process_with_timeout
-      # to handle executable lookup and port creation with a timeout.
-      spawn_result =
-        if state.execution_mode in [:api, :ollama, :bedrock] do
-          spawn_process(state, shell)
-        else
-          spawn_process_with_timeout(state, shell)
-        end
-
-      case spawn_result do
+      case spawn_api_or_cli(state, shell) do
         {:ok, handle} ->
-          # Schedule beacon verification to confirm the process actually started
           Process.send_after(self(), :verify_beacon, 10_000)
-
-          if is_struct(handle, Task) do
-            {:ok, %{state | shell_id: shell.id, task: handle, status: :running}}
-          else
-            {:ok, %{state | shell_id: shell.id, port: handle, status: :running}}
-          end
+          {:ok, attach_handle(state, shell, handle)}
 
         {:error, reason} ->
-          # Rollback: clean up the shell/worktree on spawn failure
           Logger.warning("Spawn failed for ghost #{state.ghost_id}, rolling back shell #{shell.id}")
           rollback_cell(shell.id)
           {:error, reason}
@@ -554,17 +566,115 @@ defmodule GiTF.Ghost.Worker do
     end
   end
 
+  defp ghost_restarting?(ghost_id) do
+    case Archive.get(:ghosts, ghost_id) do
+      %{status: status} -> status == GhostStatus.restarting()
+      _ -> false
+    end
+  rescue
+    _ -> false
+  end
+
+  defp provision_auto_resume(state) do
+    # Look up shell via ghost record (O(1)) or fall back to linear scan
+    shell_record =
+      case Archive.get(:ghosts, state.ghost_id) do
+        %{shell_id: sid} when is_binary(sid) -> Archive.get(:shells, sid)
+        _ -> Archive.find_one(:shells, fn c -> c.ghost_id == state.ghost_id end)
+      end
+
+    case shell_record do
+      %{worktree_path: path} = shell when is_binary(path) ->
+        if File.dir?(path) do
+          # Build resume context from transfer/backup
+          resume_context = build_resume_context(state.ghost_id)
+          original_prompt = build_prompt(state)
+
+          prompt =
+            if resume_context do
+              resume_context <> "\n\n---\n\nContinue the following task:\n\n" <> original_prompt
+            else
+              original_prompt
+            end
+
+          # Reset op back to running
+          case GiTF.Ops.get(state.op_id) do
+            {:ok, %{status: s}} when s in ["failed", "pending"] -> GiTF.Ops.start(state.op_id)
+            _ -> :ok
+          end
+
+          state = %{state | opts: Keyword.put(state.opts, :prompt, prompt)}
+
+          with :ok <- update_bee_working(state, shell),
+               {:ok, handle} <- spawn_api_or_cli(state, shell) do
+            Process.send_after(self(), :verify_beacon, 10_000)
+            {:ok, attach_handle(state, shell, handle)}
+          else
+            error ->
+              Logger.warning("Auto-resume failed for ghost #{state.ghost_id}: #{inspect(error)}, falling back to fresh")
+              provision_fresh(state)
+          end
+        else
+          Logger.warning("Shell path #{path} gone for ghost #{state.ghost_id}, falling back to fresh")
+          provision_fresh(state)
+        end
+
+      _ ->
+        Logger.warning("No shell found for ghost #{state.ghost_id}, falling back to fresh")
+        provision_fresh(state)
+    end
+  end
+
+  defp build_resume_context(ghost_id) do
+    case GiTF.Transfer.detect_handoff(ghost_id) do
+      {:ok, link_msg} ->
+        case GiTF.Transfer.resume(ghost_id, link_msg.id) do
+          {:ok, briefing} -> briefing
+          _ -> build_resume_from_backup(ghost_id)
+        end
+
+      _ ->
+        build_resume_from_backup(ghost_id)
+    end
+  rescue
+    _ -> nil
+  end
+
+  defp build_resume_from_backup(ghost_id) do
+    case GiTF.Backup.load(ghost_id) do
+      {:ok, backup} -> GiTF.Backup.build_resume_prompt(backup)
+      _ -> nil
+    end
+  rescue
+    _ -> nil
+  end
+
+  defp spawn_api_or_cli(state, shell) do
+    result =
+      if state.execution_mode in [:api, :ollama, :bedrock] do
+        spawn_process(state, shell)
+      else
+        spawn_process_with_timeout(state, shell)
+      end
+
+    case result do
+      {:ok, %Task{} = task} -> {:ok, {:task, task}}
+      {:ok, port} when is_port(port) -> {:ok, {:port, port}}
+      error -> error
+    end
+  end
+
+  defp attach_handle(state, shell, handle) do
+    %{state | shell_id: shell.id, status: :running, handle: handle}
+  end
+
   defp provision_revive(state) do
     shell_id = Keyword.fetch!(state.opts, :shell_id)
 
     with {:ok, shell} <- GiTF.Shell.get(shell_id),
          :ok <- update_bee_working(state, shell),
-         {:ok, handle} <- spawn_process(state, shell) do
-      if is_struct(handle, Task) do
-        {:ok, %{state | shell_id: shell.id, task: handle, status: :running}}
-      else
-        {:ok, %{state | shell_id: shell.id, port: handle, status: :running}}
-      end
+         {:ok, handle} <- spawn_api_or_cli(state, shell) do
+      {:ok, attach_handle(state, shell, handle)}
     end
   end
 
@@ -586,7 +696,12 @@ defmodule GiTF.Ghost.Worker do
 
       ghost ->
         updated =
-          Map.merge(ghost, %{status: "working", shell_path: shell.worktree_path, pid: inspect(self())})
+          Map.merge(ghost, %{
+            status: GhostStatus.working(),
+            shell_id: shell.id,
+            shell_path: shell.worktree_path,
+            pid: inspect(self())
+          })
 
         Archive.put(:ghosts, updated)
         :ok
@@ -839,7 +954,7 @@ defmodule GiTF.Ghost.Worker do
   # -- Private: completion handling --------------------------------------------
 
   defp mark_success(state) do
-    update_ghost_status(state.ghost_id, "stopped")
+    update_ghost_status(state.ghost_id, GhostStatus.stopped())
 
     # Collect phase output or auto-commit BEFORE marking op as done,
     # so that downstream consumers (SyncQueue, tests) see committed changes.
@@ -1048,7 +1163,7 @@ defmodule GiTF.Ghost.Worker do
   end
 
   defp mark_failed(state, reason) do
-    update_ghost_status(state.ghost_id, "crashed")
+    update_ghost_status(state.ghost_id, GhostStatus.crashed())
     GiTF.Ops.fail(state.op_id)
 
     GiTF.Telemetry.emit([:gitf, :ghost, :failed], %{}, %{
@@ -1192,18 +1307,11 @@ defmodule GiTF.Ghost.Worker do
   end
 
   defp do_stop(state) do
-    if state.task != nil do
-      Task.shutdown(state.task, 5_000)
-    end
-
-    if state.port != nil and port_alive?(state.port) do
-      Port.close(state.port)
-    end
-
-    update_ghost_status(state.ghost_id, "stopped")
-    %{state | status: :done, port: nil, task: nil}
+    shutdown_handle(state, 5_000)
+    update_ghost_status(state.ghost_id, GhostStatus.stopped())
+    %{state | status: :done, handle: nil}
   rescue
-    ArgumentError -> %{state | status: :done, port: nil, task: nil}
+    ArgumentError -> %{state | status: :done, handle: nil}
   end
 
   defp update_ghost_status(ghost_id, status) do

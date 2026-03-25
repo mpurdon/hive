@@ -15,6 +15,7 @@ defmodule GiTF.Exfil do
   use GenServer
 
   require Logger
+  require GiTF.Ghost.Status, as: GhostStatus
 
   @default_drain_timeout 5_000
 
@@ -103,7 +104,7 @@ defmodule GiTF.Exfil do
   end
 
   defp save_active_checkpoints do
-    GiTF.Archive.filter(:ghosts, fn b -> b.status == "working" end)
+    GiTF.Archive.filter(:ghosts, fn b -> b.status == GhostStatus.working() end)
     |> Enum.each(fn ghost ->
       try do
         GiTF.Transfer.create(ghost.id)

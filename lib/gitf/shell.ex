@@ -8,6 +8,7 @@ defmodule GiTF.Shell do
 
   alias GiTF.Git
   alias GiTF.Archive
+  require GiTF.Ghost.Status, as: GhostStatus
 
   # -- Public API ------------------------------------------------------------
 
@@ -114,7 +115,7 @@ defmodule GiTF.Shell do
         orphan? =
           case Archive.get(:ghosts, shell.ghost_id) do
             nil -> true
-            ghost -> ghost.status in ["stopped", "crashed"]
+            ghost -> GhostStatus.terminal?(ghost.status)
           end
 
         if orphan? do

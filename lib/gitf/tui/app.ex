@@ -13,6 +13,7 @@ defmodule GiTF.TUI.App do
 
   require Logger
 
+  require GiTF.Ghost.Status, as: GhostStatus
   alias GiTF.TUI.Context.{Input, Chat, Activity, Plan}
   alias GiTF.TUI.{Constants, Views}
   alias Ratatouille.Runtime.{Command, Subscription}
@@ -260,7 +261,7 @@ defmodule GiTF.TUI.App do
 
     backups =
       ghosts
-      |> Enum.filter(&(&1[:status] == "working"))
+      |> Enum.filter(&(&1[:status] == GhostStatus.working()))
       |> Enum.reduce(%{}, fn ghost, acc ->
         case safe_call(fn -> GiTF.Backup.load(ghost[:id]) end, :error) do
           {:ok, cp} -> Map.put(acc, ghost[:id], cp)
@@ -506,7 +507,7 @@ defmodule GiTF.TUI.App do
     ops = try do GiTF.Archive.all(:ops) rescue _ -> [] end
 
     # Only show active ghosts in context — crashed/stopped are noise
-    active_ghosts = Enum.filter(ghosts, fn b -> (b[:status] || b[:state]) in ["working", "provisioning"] end)
+    active_ghosts = Enum.filter(ghosts, fn b -> (b[:status] || b[:state]) in [GhostStatus.working(), GhostStatus.provisioning()] end)
 
     bee_summary = if active_ghosts == [], do: "None active", else:
       Enum.map_join(active_ghosts, "\n", fn b ->
@@ -729,7 +730,7 @@ defmodule GiTF.TUI.App do
 
     # Filter to active ghosts and attach mission_id
     active_ghosts = ghosts
-    |> Enum.filter(fn b -> (b[:status] || b[:state]) in ["working", "provisioning"] end)
+    |> Enum.filter(fn b -> (b[:status] || b[:state]) in [GhostStatus.working(), GhostStatus.provisioning()] end)
     |> Enum.map(fn b -> Map.put(b, :mission_id, job_quest_map[b[:op_id]]) end)
 
     bee_logs = read_bee_logs(active_ghosts)
@@ -747,7 +748,7 @@ defmodule GiTF.TUI.App do
         run_dir = Path.join([root, ".gitf", "run"])
 
         ghosts
-        |> Enum.filter(fn b -> (b[:status] || b[:state]) == "working" end)
+        |> Enum.filter(fn b -> (b[:status] || b[:state]) == GhostStatus.working() end)
         |> Enum.flat_map(fn ghost ->
           log_path = Path.join(run_dir, "#{ghost[:id]}.log")
           script_path = Path.join(run_dir, "#{ghost[:id]}.sh")
@@ -866,15 +867,10 @@ defmodule GiTF.TUI.App do
 
   defp mark_bee_done(ghost) do
     try do
-      updated = Map.put(ghost, :status, "stopped")
-      GiTF.Archive.put(:ghosts, updated)
+      GiTF.Ghosts.complete(ghost[:id])
 
+      # Tell Major to advance the mission
       if ghost[:op_id] do
-        GiTF.Ops.complete(ghost[:op_id])
-        GiTF.Ops.unblock_dependents(ghost[:op_id])
-        GiTF.Link.send(ghost[:id], "major", "job_complete", "Job #{ghost[:op_id]} completed (reaped)")
-
-        # Tell Major to advance
         case Process.whereis(GiTF.Major) do
           nil -> :ok
           _pid ->
@@ -893,13 +889,7 @@ defmodule GiTF.TUI.App do
 
   defp mark_bee_failed(ghost, reason) do
     try do
-      updated = Map.put(ghost, :status, "crashed")
-      GiTF.Archive.put(:ghosts, updated)
-
-      if ghost[:op_id] do
-        GiTF.Ops.fail(ghost[:op_id])
-        GiTF.Link.send(ghost[:id], "major", "job_failed", "Job #{ghost[:op_id]} failed: #{reason}")
-      end
+      GiTF.Ghosts.fail(ghost[:id], reason)
     rescue
       _ -> :ok
     end
@@ -911,7 +901,7 @@ defmodule GiTF.TUI.App do
         run_dir = Path.join([root, ".gitf", "run"])
 
         ghosts
-        |> Enum.filter(fn b -> (b[:status] || b[:state]) in ["working", "provisioning"] end)
+        |> Enum.filter(fn b -> (b[:status] || b[:state]) in [GhostStatus.working(), GhostStatus.provisioning()] end)
         |> Map.new(fn ghost ->
           log_path = Path.join(run_dir, "#{ghost[:id]}.log")
           lines = tail_file(log_path, 3)

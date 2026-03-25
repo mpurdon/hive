@@ -13,6 +13,7 @@ defmodule GiTF.Ghosts do
   require Logger
 
   alias GiTF.Archive
+  require GiTF.Ghost.Status, as: GhostStatus
 
   # -- Public API --------------------------------------------------------------
 
@@ -215,6 +216,59 @@ defmodule GiTF.Ghosts do
     GiTF.Ghost.Worker.stop(ghost_id)
   end
 
+  @doc """
+  Marks a ghost as completed — updates status, completes the op,
+  unblocks dependents, and notifies Major.
+  """
+  @spec complete(String.t()) :: :ok | {:error, :not_found}
+  def complete(ghost_id) do
+    case get(ghost_id) do
+      {:ok, ghost} ->
+        Archive.put(:ghosts, %{ghost | status: GhostStatus.stopped()})
+
+        if ghost[:op_id] do
+          GiTF.Ops.complete(ghost[:op_id])
+          GiTF.Ops.unblock_dependents(ghost[:op_id])
+
+          GiTF.Link.send(
+            ghost_id, "major", "job_complete",
+            "Job #{ghost[:op_id]} completed successfully"
+          )
+        end
+
+        :ok
+
+      {:error, :not_found} ->
+        {:error, :not_found}
+    end
+  end
+
+  @doc """
+  Marks a ghost as failed — updates status, fails the op,
+  and notifies Major with the reason.
+  """
+  @spec fail(String.t(), String.t()) :: :ok | {:error, :not_found}
+  def fail(ghost_id, reason \\ "unknown") do
+    case get(ghost_id) do
+      {:ok, ghost} ->
+        Archive.put(:ghosts, %{ghost | status: GhostStatus.crashed()})
+
+        if ghost[:op_id] do
+          GiTF.Ops.fail(ghost[:op_id])
+
+          GiTF.Link.send(
+            ghost_id, "major", "job_failed",
+            "Job #{ghost[:op_id]} failed: #{reason}"
+          )
+        end
+
+        :ok
+
+      {:error, :not_found} ->
+        {:error, :not_found}
+    end
+  end
+
   # -- Private helpers ---------------------------------------------------------
 
   defp check_not_already_assigned(op_id) do
@@ -257,7 +311,7 @@ defmodule GiTF.Ghosts do
 
     record = %{
       name: name,
-      status: "starting",
+      status: GhostStatus.starting(),
       op_id: op_id,
       shell_path: nil,
       pid: nil,
@@ -306,7 +360,7 @@ defmodule GiTF.Ghosts do
         {:error, :bee_not_found}
 
       ghost ->
-        updated = Map.merge(ghost, %{status: "working", shell_path: shell.worktree_path, pid: nil})
+        updated = Map.merge(ghost, %{status: GhostStatus.working(), shell_path: shell.worktree_path, pid: nil})
         Archive.put(:ghosts, updated)
         :ok
     end
@@ -519,7 +573,7 @@ defmodule GiTF.Ghosts do
   defp cleanup_orphaned_ghost(ghost_id, op_id) do
     case Archive.get(:ghosts, ghost_id) do
       nil -> :ok
-      ghost -> Archive.put(:ghosts, %{ghost | status: "crashed"})
+      ghost -> Archive.put(:ghosts, %{ghost | status: GhostStatus.crashed()})
     end
 
     GiTF.Ops.reset(op_id)
@@ -530,8 +584,9 @@ defmodule GiTF.Ghosts do
 
   # -- Revive helpers ----------------------------------------------------------
 
-  defp validate_dead(%{status: status}) when status in ["stopped", "crashed"], do: :ok
-  defp validate_dead(_bee), do: {:error, :bee_still_active}
+  defp validate_dead(%{status: status}) do
+    if GhostStatus.terminal?(status), do: :ok, else: {:error, :bee_still_active}
+  end
 
   defp find_active_cell(ghost_id) do
     case Archive.find_one(:shells, fn c -> c.ghost_id == ghost_id and c.status == "active" end) do

@@ -3,17 +3,37 @@ defmodule GiTF.Web.ApiController do
 
   use Phoenix.Controller, formats: [:json]
 
+  require GiTF.Ghost.Status, as: GhostStatus
+
   # -- Health ------------------------------------------------------------------
 
   def health(conn, _params) do
+    boot_time =
+      try do
+        :persistent_term.get(:gitf_boot_time)
+      rescue
+        _ -> 0
+      end
+
     json(conn, %{
       data: %{
         status: "ok",
         node: to_string(node()),
-        uptime_seconds: :erlang.statistics(:wall_clock) |> elem(0) |> div(1000),
+        uptime_seconds: GiTF.Observability.Metrics.uptime_seconds(),
+        boot_time: DateTime.from_unix!(boot_time) |> to_string(),
         version: GiTF.version()
       }
     })
+  end
+
+  # -- Metrics -----------------------------------------------------------------
+
+  def metrics(conn, _params) do
+    body = GiTF.Observability.Metrics.export_prometheus()
+
+    conn
+    |> put_resp_content_type("text/plain; version=0.0.4", nil)
+    |> send_resp(200, body)
   end
 
   # -- Quests ------------------------------------------------------------------
@@ -381,7 +401,7 @@ defmodule GiTF.Web.ApiController do
         ghosts
       else
         case params["status"] do
-          nil -> Enum.reject(ghosts, &(&1.status in ["stopped", "crashed"]))
+          nil -> Enum.reject(ghosts, &GhostStatus.terminal?(&1.status))
           status -> Enum.filter(ghosts, &(&1.status == status))
         end
       end
@@ -397,48 +417,24 @@ defmodule GiTF.Web.ApiController do
   end
 
   def complete_bee(conn, %{"id" => ghost_id}) do
+    # Phase ops: extract artifact before completing
     case GiTF.Ghosts.get(ghost_id) do
-      {:ok, ghost} ->
-        GiTF.Archive.put(:ghosts, %{ghost | status: "stopped"})
+      {:ok, ghost} when not is_nil(ghost.op_id) -> maybe_collect_phase_artifact(ghost_id, ghost.op_id)
+      _ -> :ok
+    end
 
-        if ghost[:op_id] do
-          # For phase ops, extract artifact from the ghost's log before completing
-          maybe_collect_phase_artifact(ghost_id, ghost[:op_id])
-
-          GiTF.Ops.complete(ghost[:op_id])
-          GiTF.Ops.unblock_dependents(ghost[:op_id])
-
-          GiTF.Link.send(
-            ghost_id,
-            "major",
-            "job_complete",
-            "Job #{ghost[:op_id]} completed successfully"
-          )
-        end
-
-        json(conn, %{data: %{completed: true}})
-
-      {:error, :not_found} ->
-        error(conn, 404, :not_found)
+    case GiTF.Ghosts.complete(ghost_id) do
+      :ok -> json(conn, %{data: %{completed: true}})
+      {:error, :not_found} -> error(conn, 404, :not_found)
     end
   end
 
   def fail_bee(conn, %{"id" => ghost_id} = params) do
     reason = params["reason"] || "unknown"
 
-    case GiTF.Ghosts.get(ghost_id) do
-      {:ok, ghost} ->
-        GiTF.Archive.put(:ghosts, %{ghost | status: "crashed"})
-
-        if ghost[:op_id] do
-          GiTF.Ops.fail(ghost[:op_id])
-          GiTF.Link.send(ghost_id, "major", "job_failed", "Job #{ghost[:op_id]} failed: #{reason}")
-        end
-
-        json(conn, %{data: %{failed: true}})
-
-      {:error, :not_found} ->
-        error(conn, 404, :not_found)
+    case GiTF.Ghosts.fail(ghost_id, reason) do
+      :ok -> json(conn, %{data: %{failed: true}})
+      {:error, :not_found} -> error(conn, 404, :not_found)
     end
   end
 

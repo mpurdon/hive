@@ -12,6 +12,7 @@ defmodule GiTF.Run do
   """
 
   alias GiTF.Archive
+  require GiTF.Ghost.Status, as: GhostStatus
 
   # -- Public API --------------------------------------------------------------
 
@@ -183,7 +184,7 @@ defmodule GiTF.Run do
         Enum.all?(run.ghost_ids, fn ghost_id ->
           case Archive.get(:ghosts, ghost_id) do
             nil -> true
-            %{status: status} -> status in ["stopped", "crashed", "done"]
+            %{status: status} -> GhostStatus.terminal?(status)
           end
         end)
     end

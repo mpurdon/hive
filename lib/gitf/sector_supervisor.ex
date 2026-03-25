@@ -51,6 +51,8 @@ defmodule GiTF.SectorSupervisor do
   @impl true
   def init(_opts) do
     # Future scaling: For >10k ghosts, consider PartitionSupervisor
-    DynamicSupervisor.init(strategy: :one_for_one)
+    # max_restarts raised to handle code-reload scenarios where all ghosts
+    # crash simultaneously and need :transient restart
+    DynamicSupervisor.init(strategy: :one_for_one, max_restarts: 20, max_seconds: 10)
   end
 end

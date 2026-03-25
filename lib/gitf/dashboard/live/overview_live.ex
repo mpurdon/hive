@@ -11,6 +11,8 @@ defmodule GiTF.Dashboard.OverviewLive do
 
   import GiTF.Dashboard.Helpers
 
+  require GiTF.Ghost.Status, as: GhostStatus
+
   @refresh_interval :timer.seconds(5)
 
   @impl true
@@ -89,11 +91,9 @@ defmodule GiTF.Dashboard.OverviewLive do
     cost_summary = GiTF.Costs.summary()
     recent_waggles = GiTF.Link.list(limit: 5)
 
-    active_ghosts = Enum.count(ghosts, &(Map.get(&1, :status) in ["working", "starting"]))
+    active_ghost_list = Enum.filter(ghosts, &GhostStatus.active?(Map.get(&1, :status)))
+    active_ghosts = length(active_ghost_list)
     active_quests = Enum.count(missions, &(Map.get(&1, :status) == "active"))
-    
-    # Context monitoring — only active ghosts for the gauge
-    active_ghost_list = Enum.filter(ghosts, &(Map.get(&1, :status) in ["working", "starting"]))
 
     {avg_context, peak_context, high_context_bees} =
       case active_ghost_list do

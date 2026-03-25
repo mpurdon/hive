@@ -3,17 +3,19 @@ defmodule GiTF.Dashboard.Helpers do
 
   use Phoenix.Component
 
+  require GiTF.Ghost.Status, as: GhostStatus
+
   def status_badge("completed"), do: "badge-green"
   def status_badge("done"), do: "badge-green"
   def status_badge("active"), do: "badge-blue"
   def status_badge("running"), do: "badge-blue"
   def status_badge("assigned"), do: "badge-blue"
-  def status_badge("working"), do: "badge-green"
-  def status_badge("starting"), do: "badge-blue"
-  def status_badge("idle"), do: "badge-grey"
+  def status_badge(GhostStatus.working()), do: "badge-green"
+  def status_badge(GhostStatus.starting()), do: "badge-blue"
+  def status_badge(GhostStatus.idle()), do: "badge-grey"
   def status_badge("paused"), do: "badge-yellow"
-  def status_badge("stopped"), do: "badge-grey"
-  def status_badge("crashed"), do: "badge-red"
+  def status_badge(GhostStatus.stopped()), do: "badge-grey"
+  def status_badge(GhostStatus.crashed()), do: "badge-red"
   def status_badge("failed"), do: "badge-red"
   def status_badge("blocked"), do: "badge-yellow"
   def status_badge("pending"), do: "badge-grey"
@@ -75,5 +77,52 @@ defmodule GiTF.Dashboard.Helpers do
   def strategy_label(:fresh_start), do: "Fresh Start"
   def strategy_label(:split_task), do: "Split Task"
   def strategy_label(strategy) when is_atom(strategy), do: strategy |> Atom.to_string() |> String.replace("_", " ") |> String.capitalize()
+  def strategy_label(strategy) when is_binary(strategy), do: String.capitalize(strategy)
   def strategy_label(strategy), do: "#{strategy}"
+
+  @doc "Maps design strategy name to badge color suffix."
+  def design_strategy_badge("minimal"), do: "blue"
+  def design_strategy_badge("normal"), do: "green"
+  def design_strategy_badge("complex"), do: "purple"
+  def design_strategy_badge(_), do: "grey"
+
+  @doc "Safely gets a list from a map key, returning [] on nil/missing."
+  def get_list(nil, _key), do: []
+  def get_list(map, key) when is_map(map), do: Map.get(map, key, []) |> List.wrap()
+  def get_list(_, _), do: []
+
+  @doc "Counts unique files across design components."
+  def count_design_files(design) do
+    get_list(design, "components")
+    |> Enum.flat_map(&(Map.get(&1, "files", []) |> List.wrap()))
+    |> Enum.uniq()
+    |> length()
+  end
+
+  @doc "Sorts review issues by severity (high > medium > low)."
+  def sort_issues(issues) do
+    order = %{"high" => 0, "medium" => 1, "low" => 2}
+    Enum.sort_by(issues, &Map.get(order, &1["severity"], 3))
+  end
+
+  @doc "Toggles membership in a MapSet."
+  def toggle_set(set, key) do
+    if MapSet.member?(set, key), do: MapSet.delete(set, key), else: MapSet.put(set, key)
+  end
+
+  @doc "Returns a status icon character for op status."
+  def status_icon("done"), do: "✓"
+  def status_icon("running"), do: "◐"
+  def status_icon("assigned"), do: "◐"
+  def status_icon("failed"), do: "✗"
+  def status_icon("blocked"), do: "⊘"
+  def status_icon(_), do: "○"
+
+  @doc "Returns the CSS class suffix for an op status icon."
+  def status_icon_class("done"), do: "done"
+  def status_icon_class("running"), do: "running"
+  def status_icon_class("assigned"), do: "running"
+  def status_icon_class("failed"), do: "failed"
+  def status_icon_class("blocked"), do: "blocked"
+  def status_icon_class(_), do: "pending"
 end

@@ -5,7 +5,7 @@ ghosts = data[:ghosts] || %{}
 ops = data[:ops] || %{}
 
 ghosts = Map.new(ghosts, fn {id, b} ->
-  if b.status in ["working", "provisioning"] do
+  if b.status in ["working", "provisioning", "restarting", "starting"] do
     IO.puts("ghost #{id}: #{b.status} -> crashed")
     {id, %{b | status: "crashed"}}
   else

@@ -1,27 +1,31 @@
 defmodule GiTF.Dashboard.PlanLive do
-  @moduledoc "Interactive planning UI for mission plan generation, comparison, and confirmation."
+  @moduledoc "Real-time plan viewer with grouped checklists tracking op execution."
 
   use Phoenix.LiveView
+  import GiTF.Dashboard.Helpers
+  alias GiTF.Dashboard.PlanGrouping
+
+  @refresh_ms 5_000
 
   @impl true
   def mount(%{"id" => id}, _session, socket) do
     case GiTF.Missions.get(id) do
       {:ok, mission} ->
-        # Check if plans already exist
-        existing_plans = GiTF.Missions.get_artifact(id, "planning")
-        step = if existing_plans, do: :compare, else: :generate
+        if connected?(socket) do
+          Phoenix.PubSub.subscribe(GiTF.PubSub, "link:major")
+          Phoenix.PubSub.subscribe(GiTF.PubSub, "section:monitor")
+          Process.send_after(self(), :refresh, @refresh_ms)
+        end
 
-        {:ok,
-         socket
-         |> assign(:page_title, "Plan: #{Map.get(mission, :name, "Mission")}")
-         |> assign(:current_path, "/dashboard/missions")
-         |> assign(:mission, mission)
-         |> assign(:step, step)
-         |> assign(:plans, if(existing_plans, do: normalize_plans(existing_plans), else: []))
-         |> assign(:selected_plan, nil)
-         |> assign(:loading, false)
-         |> assign(:feedback, "")
-         |> assign(:created_ops, [])}
+        socket =
+          socket
+          |> assign(:page_title, "Plan: #{Map.get(mission, :name, "Mission")}")
+          |> assign(:current_path, "/dashboard/missions")
+          |> assign(:collapsed, MapSet.new())
+          |> assign(:expanded_ops, MapSet.new())
+          |> refresh_data(mission)
+
+        {:ok, socket}
 
       {:error, _} ->
         {:ok,
@@ -31,237 +35,235 @@ defmodule GiTF.Dashboard.PlanLive do
     end
   end
 
+  # -- Events ----------------------------------------------------------------
+
   @impl true
-  def handle_event("generate", _params, socket) do
-    mission = socket.assigns.mission
-
-    Task.async(fn ->
-      {:plans, GiTF.Major.Planner.generate_candidate_plans(mission.id, %{goal: mission.goal})}
-    end)
-
-    {:noreply, assign(socket, :loading, true)}
+  def handle_event("toggle_group", %{"group" => group}, socket) do
+    {:noreply, assign(socket, :collapsed, toggle_set(socket.assigns.collapsed, group))}
   end
 
-  def handle_event("select_plan", %{"index" => idx_str}, socket) do
-    idx = String.to_integer(idx_str)
-    plan = Enum.at(socket.assigns.plans, idx)
-    {:noreply, assign(socket, selected_plan: plan, step: :review)}
+  def handle_event("toggle_op", %{"id" => op_id}, socket) do
+    {:noreply, assign(socket, :expanded_ops, toggle_set(socket.assigns.expanded_ops, op_id))}
   end
 
-  def handle_event("back_to_compare", _params, socket) do
-    {:noreply, assign(socket, step: :compare, selected_plan: nil)}
+  def handle_event("expand_all", _params, socket) do
+    all_ids = socket.assigns.ops |> Enum.map(& &1.id) |> MapSet.new()
+    {:noreply, assign(socket, expanded_ops: all_ids, collapsed: MapSet.new())}
   end
 
-  def handle_event("update_feedback", %{"feedback" => text}, socket) do
-    {:noreply, assign(socket, :feedback, text)}
-  end
-
-  def handle_event("revise", _params, socket) do
-    mission = socket.assigns.mission
-
-    Task.async(fn ->
-      {:plans,
-       GiTF.Major.Planner.generate_candidate_plans(mission.id, %{
-         goal: mission.goal,
-         feedback: socket.assigns.feedback
-       })}
-    end)
-
-    {:noreply, assign(socket, loading: true, step: :generate, feedback: "")}
-  end
-
-  def handle_event("confirm", _params, socket) do
-    mission = socket.assigns.mission
-    plan = socket.assigns.selected_plan
-
-    case GiTF.Major.Planner.create_jobs_from_plan(mission.id, plan) do
-      {:ok, ops} ->
-        {:noreply,
-         socket
-         |> assign(:step, :confirmed)
-         |> assign(:created_ops, ops)}
-
-      {:error, reason} ->
-        {:noreply, put_flash(socket, :error, "Failed to confirm plan: #{inspect(reason)}")}
-    end
+  def handle_event("collapse_all", _params, socket) do
+    all_groups = socket.assigns.grouped_items |> Enum.map(&elem(&1, 0)) |> MapSet.new()
+    {:noreply, assign(socket, expanded_ops: MapSet.new(), collapsed: all_groups)}
   end
 
   @impl true
-  def handle_info({ref, {:plans, result}}, socket) when is_reference(ref) do
-    Process.demonitor(ref, [:flush])
-
-    case result do
-      {:ok, plan_data} ->
-        plans = normalize_plans(plan_data)
-
-        {:noreply,
-         socket
-         |> assign(:loading, false)
-         |> assign(:plans, plans)
-         |> assign(:step, :compare)}
-
-      {:error, reason} ->
-        {:noreply,
-         socket
-         |> assign(:loading, false)
-         |> put_flash(:error, "Plan generation failed: #{inspect(reason)}")}
+  def handle_info(:refresh, socket) do
+    Process.send_after(self(), :refresh, @refresh_ms)
+    case GiTF.Missions.get(socket.assigns.mission.id) do
+      {:ok, mission} -> {:noreply, refresh_data(socket, mission)}
+      _ -> {:noreply, socket}
     end
   end
 
-  def handle_info({:DOWN, _ref, :process, _pid, _reason}, socket), do: {:noreply, socket}
-  def handle_info(_msg, socket), do: {:noreply, socket}
+  def handle_info({:waggle_received, _}, socket) do
+    case GiTF.Missions.get(socket.assigns.mission.id) do
+      {:ok, mission} -> {:noreply, refresh_data(socket, mission)}
+      _ -> {:noreply, socket}
+    end
+  end
 
-  defp normalize_plans(%{candidates: candidates}) when is_list(candidates), do: candidates
-  defp normalize_plans(%{plans: plans}) when is_list(plans), do: plans
-  defp normalize_plans(plans) when is_list(plans), do: plans
-  defp normalize_plans(plan) when is_map(plan), do: [plan]
-  defp normalize_plans(_), do: []
+  def handle_info({:gitf_event, _}, socket) do
+    case GiTF.Missions.get(socket.assigns.mission.id) do
+      {:ok, mission} -> {:noreply, refresh_data(socket, mission)}
+      _ -> {:noreply, socket}
+    end
+  end
+
+  def handle_info(_, socket), do: {:noreply, socket}
+
+  # -- Render ----------------------------------------------------------------
 
   @impl true
   def render(assigns) do
     ~H"""
     <.live_component module={GiTF.Dashboard.AppLayout} id="layout" current_path={@current_path} flash={@flash}>
-      <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:1.25rem">
-        <div>
-          <h1 class="page-title" style="margin-bottom:0.25rem">Plan: {Map.get(@mission, :name, "Mission")}</h1>
-          <div style="color:#8b949e; font-size:0.85rem">{Map.get(@mission, :goal, "")}</div>
+
+    <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:1rem">
+      <div>
+        <h1 class="page-title" style="margin-bottom:0.25rem">Plan: {Map.get(@mission, :name, "Mission")}</h1>
+        <div style="color:#8b949e; font-size:0.85rem">{@mission[:goal]}</div>
+      </div>
+      <div style="display:flex; gap:0.5rem; align-items:center">
+        <span class={"badge #{phase_badge(@mission[:current_phase] || "pending")}"}>{@mission[:current_phase] || "pending"}</span>
+        <a href={"/dashboard/missions/#{@mission.id}"} class="btn btn-grey">Back</a>
+      </div>
+    </div>
+
+    <div class="panel" style="margin-bottom:1rem">
+      <div style="display:flex; justify-content:space-between; align-items:center">
+        <span style="font-size:0.9rem">Plan Progress: {@done_count}/{@total_count} ops complete</span>
+        <div style="display:flex; gap:0.5rem">
+          <button phx-click="expand_all" class="btn btn-grey" style="font-size:0.75rem; padding:0.2rem 0.5rem">Expand All</button>
+          <button phx-click="collapse_all" class="btn btn-grey" style="font-size:0.75rem; padding:0.2rem 0.5rem">Collapse All</button>
         </div>
-        <a href={"/dashboard/missions/#{@mission.id}"} class="btn btn-grey">Back to Mission</a>
+      </div>
+      <div class="plan-progress">
+        <div class="plan-progress-fill" style={"width: #{progress_pct(@done_count, @total_count)}%"}></div>
+      </div>
+    </div>
+
+    <div :if={@mode == :plan_only} class="panel" style="padding:1.5rem; text-align:center; margin-bottom:1rem; color:#8b949e">
+      Awaiting implementation — ops will appear when the mission enters the implementation phase.
+    </div>
+
+    <div :for={{group_label, items} <- @grouped_items}>
+      <% done = Enum.count(items, &(Map.get(&1, :status, "pending") == "done"))
+         total = length(items)
+         has_running = Enum.any?(items, &(Map.get(&1, :status) in ["running", "assigned"]))
+         group_open = has_running or not MapSet.member?(@collapsed, group_label) %>
+
+      <div class="section-header" phx-click="toggle_group" phx-value-group={group_label}>
+        <span class={"section-chevron #{if group_open, do: "open"}"}>▸</span>
+        {group_label}
+        <span style="color:#8b949e; font-weight:400; font-size:0.85rem; margin-left:0.25rem">{done}/{total} complete</span>
+        <div class="group-progress">
+          <div class="group-progress-fill" style={"width: #{progress_pct(done, total)}%"}></div>
+        </div>
       </div>
 
-      <%!-- Step indicator --%>
-      <div class="tab-bar" style="margin-bottom:1.5rem">
-        <div class={"tab #{if @step == :generate, do: "tab-active"}"}>1. Generate</div>
-        <div class={"tab #{if @step == :compare, do: "tab-active"}"}>2. Compare</div>
-        <div class={"tab #{if @step == :review, do: "tab-active"}"}>3. Review</div>
-        <div class={"tab #{if @step == :confirmed, do: "tab-active"}"}>4. Confirmed</div>
+      <div :if={group_open} style="margin-bottom:0.5rem">
+        <div :for={item <- items}>
+          <% item_status = Map.get(item, :status, "pending")
+             item_id = Map.get(item, :id) || Map.get(item, "title", "")
+             expanded = MapSet.member?(@expanded_ops, item_id)
+             ghost_name = if item[:ghost_id], do: Map.get(@ghost_names, item[:ghost_id]) %>
+
+          <div
+            class={"checklist-item #{if item_status == "done", do: "checklist-item-done"}"}
+            phx-click="toggle_op"
+            phx-value-id={item_id}
+          >
+            <span class={"status-icon status-icon-#{status_icon_class(item_status)}"}>{status_icon(item_status)}</span>
+            <span style="flex:1; color:#f0f6fc">{Map.get(item, :title) || Map.get(item, "title", "Untitled")}</span>
+            <span :if={ghost_name} class="ghost-tag">{ghost_name}</span>
+            <span :if={item[:ghost_id] && is_nil(ghost_name)} class="ghost-tag">{short_id(item[:ghost_id])}</span>
+            <span class={"badge #{status_badge(item_status)}"}>{item_status}</span>
+            <span :if={item[:verification_status] == "passed"} class="badge badge-green" style="font-size:0.7rem">verified</span>
+            <span :if={item[:verification_status] == "failed"} class="badge badge-red" style="font-size:0.7rem">failed</span>
+          </div>
+
+          <div :if={expanded} style="padding:0.5rem 0.75rem 0.75rem 2.5rem; border-bottom:1px solid #21262d; background:#0d1117">
+            <div :if={item[:description] || item["description"]} style="font-size:0.85rem; color:#8b949e; margin-bottom:0.5rem; white-space:pre-wrap">
+              {item[:description] || item["description"]}
+            </div>
+
+            <% criteria = List.wrap(item[:acceptance_criteria] || item["acceptance_criteria"] || []) %>
+            <div :if={criteria != []} style="margin-bottom:0.5rem">
+              <div style="font-size:0.8rem; color:#8b949e; margin-bottom:0.25rem; font-weight:600">Acceptance Criteria</div>
+              <div :for={c <- criteria} class="criteria-item">
+                <span :if={item[:verification_status] == "passed"} class="coverage-ok">✓</span>
+                <span :if={item[:verification_status] == "failed"} class="coverage-gap">✗</span>
+                <span :if={item[:verification_status] not in ["passed", "failed"]} style="color:#8b949e">○</span>
+                <span>{c}</span>
+              </div>
+            </div>
+
+            <% target_files = List.wrap(item[:target_files] || item["target_files"] || []) %>
+            <div :if={target_files != []} style="margin-bottom:0.5rem">
+              <div style="font-size:0.8rem; color:#8b949e; margin-bottom:0.25rem; font-weight:600">Target Files</div>
+              <span :for={f <- target_files} class="file-tag">{f}</span>
+            </div>
+
+            <% changed = List.wrap(item[:changed_files] || []) %>
+            <div :if={changed != []} style="margin-bottom:0.5rem">
+              <div style="font-size:0.8rem; color:#3fb950; margin-bottom:0.25rem; font-weight:600">Changed Files ({length(changed)})</div>
+              <span :for={f <- changed} class="file-tag" style="border-color:#3fb950">{f}</span>
+            </div>
+
+            <% deps = Map.get(@dep_map, item_id || item[:id], []) %>
+            <div :if={deps != []} style="margin-top:0.25rem; font-size:0.85rem; color:#d29922">
+              Depends on:
+              <span :for={dep <- deps}>
+                <span class={"badge #{status_badge(dep.status)}"} style="font-size:0.7rem">{dep.title}</span>
+              </span>
+            </div>
+          </div>
+        </div>
       </div>
+    </div>
 
-      <%= case @step do %>
-        <% :generate -> %>
-          <div class="panel" style="text-align:center; padding:3rem">
-            <%= if @loading do %>
-              <div class="loading-spinner" style="margin:0 auto 1rem"></div>
-              <p style="color:#8b949e">Generating plan candidates...</p>
-            <% else %>
-              <p style="color:#8b949e; margin-bottom:1.25rem">
-                The planner will analyze the mission goal and generate multiple candidate strategies.
-              </p>
-              <button phx-click="generate" class="btn btn-green">Generate Plans</button>
-            <% end %>
-          </div>
+    <div :if={@grouped_items == []} class="panel" style="text-align:center; padding:3rem; color:#8b949e">
+      No plan available for this mission.
+    </div>
 
-        <% :compare -> %>
-          <div class="grid-2">
-            <%= for {plan, idx} <- Enum.with_index(@plans) do %>
-              <div
-                class="plan-card"
-                phx-click="select_plan"
-                phx-value-index={idx}
-              >
-                <div class="plan-card-title">
-                  {Map.get(plan, :strategy, Map.get(plan, :name, "Plan #{idx + 1}"))}
-                </div>
-                <%= if Map.get(plan, :score) do %>
-                  <div style="margin-bottom:0.5rem">
-                    <div style="display:flex; justify-content:space-between; font-size:0.8rem; color:#8b949e; margin-bottom:0.25rem">
-                      <span>Score</span>
-                      <span>{Float.round(plan.score * 100, 0)}%</span>
-                    </div>
-                    <div class="score-bar">
-                      <div class="score-bar-fill" style={"width:#{plan.score * 100}%"}></div>
-                    </div>
-                  </div>
-                <% end %>
-                <div style="font-size:0.85rem; color:#8b949e">
-                  {task_count(plan)} tasks
-                </div>
-                <%= if Map.get(plan, :description) do %>
-                  <div style="font-size:0.85rem; color:#8b949e; margin-top:0.5rem">
-                    {String.slice(plan.description, 0, 150)}{if String.length(plan.description || "") > 150, do: "..."}
-                  </div>
-                <% end %>
-              </div>
-            <% end %>
-          </div>
-          <%= if @plans == [] do %>
-            <div class="empty">No plan candidates available. Try generating again.</div>
-          <% end %>
-
-        <% :review -> %>
-          <div class="panel">
-            <div class="panel-title">
-              {Map.get(@selected_plan, :strategy, Map.get(@selected_plan, :name, "Selected Plan"))}
-            </div>
-            <%= if Map.get(@selected_plan, :description) do %>
-              <p style="color:#8b949e; margin-bottom:1rem">{@selected_plan.description}</p>
-            <% end %>
-
-            <div class="panel-title" style="margin-top:1rem">Tasks</div>
-            <%= for {task, idx} <- Enum.with_index(get_tasks(@selected_plan)) do %>
-              <div style="padding:0.75rem 0; border-bottom:1px solid #21262d">
-                <div style="font-weight:500; color:#f0f6fc">
-                  {idx + 1}. {Map.get(task, :title, Map.get(task, :name, "Task #{idx + 1}"))}
-                </div>
-                <%= if Map.get(task, :description) do %>
-                  <div style="font-size:0.85rem; color:#8b949e; margin-top:0.25rem">{task.description}</div>
-                <% end %>
-                <%= if Map.get(task, :target_files) do %>
-                  <div style="font-size:0.8rem; color:#8b949e; margin-top:0.25rem; font-family:monospace">
-                    {Enum.join(List.wrap(task.target_files), ", ")}
-                  </div>
-                <% end %>
-                <%= if Map.get(task, :acceptance_criteria) do %>
-                  <div style="font-size:0.8rem; color:#3fb950; margin-top:0.25rem">
-                    ✓ {task.acceptance_criteria}
-                  </div>
-                <% end %>
-              </div>
-            <% end %>
-
-            <div style="margin-top:1.25rem">
-              <div class="form-group">
-                <label class="form-label">Revision feedback (optional)</label>
-                <textarea
-                  class="form-textarea"
-                  phx-change="update_feedback"
-                  name="feedback"
-                  placeholder="Describe changes you'd like..."
-                  style="min-height:80px"
-                >{@feedback}</textarea>
-              </div>
-            </div>
-
-            <div class="action-bar">
-              <button phx-click="back_to_compare" class="btn btn-grey">Back</button>
-              <%= if String.trim(@feedback) != "" do %>
-                <button phx-click="revise" class="btn btn-blue">Revise</button>
-              <% end %>
-              <button phx-click="confirm" class="btn btn-green">Confirm Plan</button>
-            </div>
-          </div>
-
-        <% :confirmed -> %>
-          <div class="panel" style="text-align:center; padding:2rem">
-            <div style="font-size:1.5rem; color:#3fb950; margin-bottom:0.75rem">✓</div>
-            <h2 style="color:#f0f6fc; margin-bottom:0.5rem">Plan Confirmed</h2>
-            <p style="color:#8b949e; margin-bottom:1.25rem">
-              {length(@created_ops)} ops have been created.
-            </p>
-            <a href={"/dashboard/missions/#{@mission.id}"} class="btn btn-blue">View Mission</a>
-          </div>
-      <% end %>
     </.live_component>
     """
   end
 
-  defp task_count(plan) do
-    tasks = Map.get(plan, :tasks, Map.get(plan, :ops, Map.get(plan, :specs, [])))
-    length(List.wrap(tasks))
+  # -- Data loading ----------------------------------------------------------
+
+  defp refresh_data(socket, mission) do
+    plan_artifact = GiTF.Missions.get_artifact(mission.id, "planning")
+
+    # Get implementation ops (filter out phase ops)
+    all_ops = GiTF.Ops.list(mission_id: mission.id)
+    impl_ops = Enum.reject(all_ops, & &1[:phase_job])
+
+    {mode, grouped_items} =
+      if impl_ops != [] do
+        {:live, PlanGrouping.group_ops(impl_ops)}
+      else
+        specs = normalize_plan_specs(plan_artifact)
+        if specs != [], do: {:plan_only, PlanGrouping.group_specs(specs)}, else: {:plan_only, []}
+      end
+
+    dep_map = build_dep_map(impl_ops)
+    ghost_names = build_ghost_names(impl_ops)
+    done_count = Enum.count(impl_ops, &(&1.status == "done"))
+    total_count = length(impl_ops)
+
+    socket
+    |> assign(:mission, mission)
+    |> assign(:mode, mode)
+    |> assign(:ops, impl_ops)
+    |> assign(:grouped_items, grouped_items)
+    |> assign(:dep_map, dep_map)
+    |> assign(:ghost_names, ghost_names)
+    |> assign(:done_count, done_count)
+    |> assign(:total_count, max(total_count, 1))
   end
 
-  defp get_tasks(plan) do
-    Map.get(plan, :tasks, Map.get(plan, :ops, Map.get(plan, :specs, [])))
-    |> List.wrap()
+  # -- Helpers ---------------------------------------------------------------
+
+  defp normalize_plan_specs(specs) when is_list(specs), do: specs
+  defp normalize_plan_specs(%{"tasks" => tasks}) when is_list(tasks), do: tasks
+  defp normalize_plan_specs(%{tasks: tasks}) when is_list(tasks), do: tasks
+  defp normalize_plan_specs(_), do: []
+
+  defp build_dep_map(ops) do
+    Enum.reduce(ops, %{}, fn op, acc ->
+      deps = GiTF.Ops.dependencies(op.id)
+      if deps == [], do: acc, else: Map.put(acc, op.id, deps)
+    end)
+  rescue
+    _ -> %{}
   end
+
+  defp build_ghost_names(ops) do
+    ops
+    |> Enum.map(& &1[:ghost_id])
+    |> Enum.reject(&is_nil/1)
+    |> Enum.uniq()
+    |> Enum.reduce(%{}, fn gid, acc ->
+      case GiTF.Ghosts.get(gid) do
+        {:ok, ghost} -> Map.put(acc, gid, ghost.name)
+        _ -> acc
+      end
+    end)
+  rescue
+    _ -> %{}
+  end
+
+  defp progress_pct(done, total) when total > 0, do: Float.round(done / total * 100, 1)
+  defp progress_pct(_, _), do: 0
 end

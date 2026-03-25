@@ -41,6 +41,7 @@ defmodule GiTF.Web.Router do
     live "/", OverviewLive
     live "/missions/new", MissionNewLive
     live "/missions/:id/diagnostics", MissionDiagnosticsLive
+    live "/missions/:id/design", DesignLive
     live "/missions/:id/plan", PlanLive
     live "/missions/:id", MissionDetailLive
     live "/missions", MissionsLive
@@ -54,10 +55,11 @@ defmodule GiTF.Web.Router do
     live "/autonomy", AutonomyLive
   end
 
-  # Health endpoint — no auth required (monitoring)
+  # Health + metrics endpoints — no auth required (monitoring/Prometheus scraping)
   scope "/api/v1", GiTF.Web do
     pipe_through :api_public
     get "/health", ApiController, :health
+    get "/metrics", ApiController, :metrics
   end
 
   scope "/api/v1", GiTF.Web do

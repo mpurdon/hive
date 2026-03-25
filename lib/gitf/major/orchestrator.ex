@@ -93,6 +93,59 @@ defmodule GiTF.Major.Orchestrator do
   end
 
   @doc """
+  Approve the selected design and advance to planning.
+
+  If `override_strategy` is given (e.g. "minimal"), overrides the AI's
+  selection before promoting. Otherwise uses the review artifact's pick.
+  """
+  @spec approve_design(String.t(), String.t() | nil) :: {:ok, String.t()} | {:error, term()}
+  def approve_design(mission_id, override_strategy \\ nil) do
+    with {:ok, mission} <- GiTF.Missions.get(mission_id),
+         :ok <- validate_design_phase(mission) do
+      review = GiTF.Missions.get_artifact(mission_id, "review") || %{}
+
+      review =
+        if override_strategy do
+          updated = Map.put(review, "selected_design", override_strategy)
+          GiTF.Missions.store_artifact(mission_id, "review", updated)
+          updated
+        else
+          review
+        end
+
+      promote_selected_design(mission_id, review)
+      {:ok, mission} = GiTF.Missions.get(mission_id)
+      start_planning(mission)
+    end
+  end
+
+  @doc """
+  Reject the current designs and trigger a redesign iteration.
+
+  Returns `{:error, :max_redesigns}` if the limit has been reached.
+  """
+  @spec reject_design(String.t(), String.t()) :: {:ok, String.t()} | {:error, term()}
+  def reject_design(mission_id, reason) do
+    with {:ok, mission} <- GiTF.Missions.get(mission_id),
+         :ok <- validate_design_phase(mission) do
+      redesign_count = Map.get(mission, :redesign_count, 0)
+
+      if redesign_count < @max_redesign_iterations do
+        quest_record = Archive.get(:missions, mission_id)
+        updated = quest_record
+          |> Map.put(:redesign_count, redesign_count + 1)
+          |> Map.put(:redesign_reason, reason)
+        Archive.put(:missions, updated)
+
+        {:ok, mission} = GiTF.Missions.get(mission_id)
+        start_design(mission)
+      else
+        {:error, :max_redesigns}
+      end
+    end
+  end
+
+  @doc """
   Advance mission to next phase if current phase is complete.
 
   Called by the Major when a ghost completes. Checks if the current phase's
@@ -1340,6 +1393,14 @@ defmodule GiTF.Major.Orchestrator do
     e ->
       Logger.warning("Budget preflight check failed for #{mission_id}: #{Exception.message(e)}, allowing")
       :ok
+  end
+
+  defp validate_design_phase(mission) do
+    if Map.get(mission, :current_phase) in ["design", "review"] do
+      :ok
+    else
+      {:error, :not_in_design_phase}
+    end
   end
 
   defp validate_quest_ready(mission) do

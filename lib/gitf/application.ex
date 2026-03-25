@@ -25,6 +25,9 @@ defmodule GiTF.Application do
   end
 
   defp start_full_app do
+    # Store boot timestamp for uptime tracking
+    :persistent_term.put(:gitf_boot_time, System.system_time(:second))
+
     GiTF.Init.init_global()
     File.mkdir_p!(Path.join(GiTF.global_config_dir(), "llm_db"))
 

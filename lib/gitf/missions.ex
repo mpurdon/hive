@@ -243,10 +243,13 @@ defmodule GiTF.Missions do
 
   Returns `{:ok, mission}` or `{:error, reason}`.
   """
+  # Phases where implementation ops are done but the mission isn't finished yet.
+  # Only `complete_quest` (via `transition_phase`) should mark "completed".
+  @post_impl_phases ["validation", "awaiting_approval", "sync", "simplify", "scoring"]
+
   @spec update_status!(String.t()) :: {:ok, map()} | {:error, term()}
   def update_status!(mission_id) do
     with {:ok, mission} <- get(mission_id) do
-      # Filter out phase ops — only implementation ops affect mission status
       impl_jobs = Enum.reject(mission.ops, & &1[:phase_job])
       op_statuses = Enum.map(impl_jobs, & &1.status)
 
@@ -254,6 +257,16 @@ defmodule GiTF.Missions do
         {:ok, mission |> Map.delete(:ops)}
       else
         new_status = compute_status(op_statuses)
+
+        # Don't allow "completed" while still in post-implementation phases —
+        # simplify/scoring/sync must finish first via complete_quest
+        new_status =
+          if new_status == "completed" and Map.get(mission, :current_phase) in @post_impl_phases do
+            "active"
+          else
+            new_status
+          end
+
         updated = %{mission | status: new_status} |> Map.delete(:ops)
         result = Archive.put(:missions, updated)
 

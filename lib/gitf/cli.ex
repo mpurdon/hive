@@ -2,6 +2,7 @@ defmodule GiTF.CLI do
   @moduledoc "Escript entry point. Parses argv and dispatches to subcommand handlers."
 
   require Logger
+  require GiTF.Ghost.Status, as: GhostStatus
   alias GiTF.CLI.Format
 
   # -- Escript entry point ----------------------------------------------------
@@ -1547,58 +1548,16 @@ defmodule GiTF.CLI do
     else
       case GiTF.Ghosts.get(ghost_id) do
         {:ok, ghost} ->
-          GiTF.Archive.put(:ghosts, %{ghost | status: "stopped"})
+          GiTF.Ghosts.complete(ghost_id)
 
+          GiTF.Telemetry.emit([:gitf, :ghost, :completed], %{}, %{
+            ghost_id: ghost_id,
+            op_id: ghost.op_id
+          })
+
+          # Route special op types through their specific notification paths
           if ghost.op_id do
-            GiTF.Ops.complete(ghost.op_id)
-            GiTF.Ops.unblock_dependents(ghost.op_id)
-
-            GiTF.Telemetry.emit([:gitf, :ghost, :completed], %{}, %{
-              ghost_id: ghost_id,
-              op_id: ghost.op_id
-            })
-
-            # Find the ghost's shell and trigger Tachikoma verification pipeline
-            # (same path as Worker.mark_success for standard ops)
-            shell = GiTF.Archive.find_one(:shells, fn c ->
-              c.ghost_id == ghost_id and c.status == "active"
-            end)
-
-            op = case GiTF.Ops.get(ghost.op_id) do
-              {:ok, j} -> j
-              _ -> nil
-            end
-
-            is_phase = op && Map.get(op, :phase_job, false)
-            is_scout = op && Map.get(op, :recon, false)
-            skip_verify = op && Map.get(op, :skip_verification, false)
-
-            cond do
-              is_scout ->
-                GiTF.Link.send(ghost_id, "major", "scout_complete",
-                  Jason.encode!(%{scout_op_id: ghost.op_id, parent_op_id: Map.get(op, :scout_for)}))
-
-              is_phase ->
-                GiTF.Link.send(ghost_id, "major", "job_complete",
-                  "Job #{ghost.op_id} completed successfully (phase: #{op.phase})")
-
-              skip_verify ->
-                GiTF.Link.send(ghost_id, "major", "job_complete",
-                  "Job #{ghost.op_id} completed (skip_verification)")
-
-              shell != nil ->
-                # Standard ops: route through Tachikoma for verification → merge pipeline
-                Phoenix.PubSub.broadcast(
-                  GiTF.PubSub,
-                  "tachikoma:review",
-                  {:review_job, ghost.op_id, ghost_id, shell.id}
-                )
-
-              true ->
-                # No shell found — fall back to direct link to Major
-                GiTF.Link.send(ghost_id, "major", "job_complete",
-                  "Job #{ghost.op_id} completed successfully")
-            end
+            route_cli_completion(ghost_id, ghost.op_id)
           end
 
           Format.success("Ghost #{ghost_id} marked as completed.")
@@ -1619,25 +1578,15 @@ defmodule GiTF.CLI do
         {:error, err} -> Format.error("Failed: #{inspect(err)}")
       end
     else
-      case GiTF.Ghosts.get(ghost_id) do
-        {:ok, ghost} ->
-          GiTF.Archive.put(:ghosts, %{ghost | status: "crashed"})
-
-          if ghost.op_id do
-            GiTF.Ops.fail(ghost.op_id)
-
-            GiTF.Telemetry.emit([:gitf, :ghost, :failed], %{}, %{
-              ghost_id: ghost_id,
-              op_id: ghost.op_id,
-              error: reason
-            })
-
-            GiTF.Link.send(ghost_id, "major", "job_failed", "Job #{ghost.op_id} failed: #{reason}")
-          end
-
+      case GiTF.Ghosts.fail(ghost_id, reason) do
+        :ok ->
+          GiTF.Telemetry.emit([:gitf, :ghost, :failed], %{}, %{
+            ghost_id: ghost_id,
+            error: reason
+          })
           Format.success("Ghost #{ghost_id} marked as failed: #{reason}")
 
-        {:error, _} ->
+        {:error, :not_found} ->
           show_not_found_error(:ghost, ghost_id)
       end
     end
@@ -2726,6 +2675,32 @@ defmodule GiTF.CLI do
   end
 
   # -- Dispatch helpers (not dispatch/2 clauses) -----------------------------
+
+  defp route_cli_completion(ghost_id, op_id) do
+    op = case GiTF.Ops.get(op_id) do
+      {:ok, j} -> j
+      _ -> nil
+    end
+
+    shell = GiTF.Archive.find_one(:shells, fn c ->
+      c.ghost_id == ghost_id and c.status == "active"
+    end)
+
+    cond do
+      op && Map.get(op, :recon, false) ->
+        GiTF.Link.send(ghost_id, "major", "scout_complete",
+          Jason.encode!(%{scout_op_id: op_id, parent_op_id: Map.get(op, :scout_for)}))
+
+      shell != nil && op && !Map.get(op, :phase_job, false) && !Map.get(op, :skip_verification, false) ->
+        Phoenix.PubSub.broadcast(GiTF.PubSub, "tachikoma:review",
+          {:review_job, op_id, ghost_id, shell.id})
+
+      true ->
+        :ok
+    end
+  rescue
+    _ -> :ok
+  end
 
   defp wait_for_mission(mission_id) do
     Process.sleep(2_000)

@@ -11,6 +11,7 @@ defmodule GiTF.Brief do
   """
 
   alias GiTF.Archive
+  require GiTF.Ghost.Status, as: GhostStatus
 
   # -- Public API ------------------------------------------------------------
 
@@ -46,7 +47,7 @@ defmodule GiTF.Brief do
 
   defp build_major_state_summary do
     ghosts = Archive.all(:ghosts)
-    active_ghosts = Enum.filter(ghosts, &(&1.status in ["working", "idle", "starting"]))
+    active_ghosts = Enum.filter(ghosts, &(&1.status in [GhostStatus.working(), GhostStatus.idle(), GhostStatus.starting()]))
 
     pending_quests =
       Archive.filter(:missions, fn q -> q.status in ["pending", "active", "planning"] end)

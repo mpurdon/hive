@@ -25,6 +25,8 @@ defmodule GiTF.Major do
   use GenServer
   require Logger
 
+  require GiTF.Ghost.Status, as: GhostStatus
+
   @name GiTF.Major
   @waggle_recovery_interval :timer.seconds(30)
   @waggle_stale_seconds 30
@@ -101,7 +103,9 @@ defmodule GiTF.Major do
       last_checkpoint: %{},
       stall_timeout: :timer.minutes(10),
       pending_verifications: %{},
-      clarification_timers: %{}
+      clarification_timers: %{},
+      retry_pending: MapSet.new(),
+      recovery_pending: MapSet.new()
     }
 
     # Tachikoma is now supervised by Application — just verify it's running
@@ -227,24 +231,13 @@ defmodule GiTF.Major do
       |> List.first()
 
     if ghost_id do
-      # Ghost worker died — check if it already sent a link_msg
-      unless reason == :normal do
-        Logger.warning("Ghost worker #{ghost_id} died unexpectedly: #{inspect(reason)}")
-
-        case GiTF.Ghosts.get(ghost_id) do
-          {:ok, %{status: status, op_id: op_id}} when status in ["working", "starting"] and not is_nil(op_id) ->
-            # Worker died without completing — mark as crashed and fail the op
-            GiTF.Archive.put(:ghosts, %{GiTF.Archive.get(:ghosts, ghost_id) | status: "crashed"})
-            GiTF.Ops.fail(op_id)
-
-            GiTF.Link.send(ghost_id, "major", "job_failed",
-              "Ghost #{ghost_id} worker process died: #{inspect(reason)}")
-
-          _ ->
-            # Ghost already in terminal state, nothing to do
-            :ok
+      state =
+        if reason != :normal do
+          Logger.warning("Ghost worker #{ghost_id} died unexpectedly: #{inspect(reason)}")
+          handle_ghost_death(ghost_id, state)
+        else
+          state
         end
-      end
 
       {:noreply, update_in(state.active_ghosts, &Map.delete(&1, ghost_id))}
     else
@@ -351,10 +344,10 @@ defmodule GiTF.Major do
 
   def handle_info({:delayed_retry, op_id, feedback}, state) do
     Logger.info("Executing delayed retry for op #{op_id}")
+    state = %{state | retry_pending: MapSet.delete(state.retry_pending, op_id)}
 
-    # Skip if a retry of this op already exists (succeeded or in progress)
     if retry_exists?(op_id) do
-      Logger.debug("Delayed retry skipped for op #{op_id}: retry already exists")
+      Logger.debug("Delayed retry skipped for op #{op_id}: retry already exists in store")
       {:noreply, state}
     else
       case GiTF.Ops.get(op_id) do
@@ -406,6 +399,32 @@ defmodule GiTF.Major do
     e ->
       Logger.warning("Clarification timeout handler failed for ghost #{ghost_id}: #{Exception.message(e)}")
       {:noreply, state}
+  end
+
+  def handle_info({:check_ghost_recovery, ghost_id, op_id}, state) do
+    state = %{state | recovery_pending: MapSet.delete(state.recovery_pending, ghost_id)}
+
+    case GiTF.Ghost.Worker.lookup(ghost_id) do
+      {:ok, _pid} ->
+        Logger.info("Ghost #{ghost_id} recovered by supervisor, re-monitoring")
+        monitor_ghost_worker(ghost_id)
+        {:noreply, state}
+
+      :error ->
+        case GiTF.Ghosts.get(ghost_id) do
+          {:ok, %{status: s} = ghost} when s in [GhostStatus.restarting(), GhostStatus.working(), GhostStatus.starting()] ->
+            Logger.warning("Ghost #{ghost_id} did not recover, failing op #{op_id}")
+            GiTF.Archive.put(:ghosts, %{ghost | status: GhostStatus.crashed()})
+            GiTF.Ops.fail(op_id)
+            GiTF.Link.send(ghost_id, "major", "job_failed",
+              "Ghost #{ghost_id} worker died and could not be auto-resumed")
+
+          _ ->
+            :ok
+        end
+
+        {:noreply, state}
+    end
   end
 
   def handle_info(msg, state) do
@@ -813,9 +832,10 @@ defmodule GiTF.Major do
         op_id = ghost.op_id
         feedback = link_msg.body
 
-        # Guard: don't create duplicate retries if one already exists
-        if retry_exists?(op_id) do
-          Logger.debug("Retry already exists for op #{op_id}, skipping duplicate")
+        # Atomic guard: retry_pending is checked+updated in the same GenServer callback
+        # (no TOCTOU race since Major is a single process with serialized callbacks)
+        if MapSet.member?(state.retry_pending, op_id) or retry_exists?(op_id) do
+          Logger.debug("Retry already pending/exists for op #{op_id}, skipping duplicate")
           state
         else
           maybe_retry_job_inner(op_id, feedback, state)
@@ -838,7 +858,7 @@ defmodule GiTF.Major do
       Logger.info("Scheduling retry for op #{op_id} in #{div(delay_ms, 1000)}s (attempt #{attempts + 1}/#{state.max_retries})")
 
       Process.send_after(self(), {:delayed_retry, op_id, feedback}, delay_ms)
-      state
+      %{state | retry_pending: MapSet.put(state.retry_pending, op_id)}
     else
       Logger.warning("Job #{op_id} exhausted #{state.max_retries} retries")
       GiTF.Ops.unblock_dependents(op_id)
@@ -1023,7 +1043,7 @@ defmodule GiTF.Major do
           |> Enum.filter(&(&1.status == "pending"))
           |> Enum.filter(&GiTF.Ops.ready?(&1.id))
 
-        active_count = GiTF.Ghosts.list(status: "working") |> length()
+        active_count = GiTF.Ghosts.list(status: GhostStatus.working()) |> length()
         available_slots = max(state.max_ghosts - active_count, 0)
         stagger_delay = GiTF.Config.Provider.get([:major, :stagger_delay_ms], 2000)
 
@@ -1153,10 +1173,9 @@ defmodule GiTF.Major do
   end
 
   defp retry_exists?(op_id) do
-    GiTF.Archive.filter(:ops, fn j ->
+    GiTF.Archive.find_one(:ops, fn j ->
       Map.get(j, :retry_of) == op_id
-    end)
-    |> Enum.any?()
+    end) != nil
   rescue
     _ -> false
   end
@@ -1198,6 +1217,25 @@ defmodule GiTF.Major do
 
           state
       end
+    end
+  end
+
+  defp handle_ghost_death(ghost_id, state) do
+    case GiTF.Ghosts.get(ghost_id) do
+      {:ok, %{status: GhostStatus.restarting()}} ->
+        Logger.info("Ghost #{ghost_id} is auto-resuming via supervisor, skipping failure handling")
+        state
+
+      {:ok, %{status: status, op_id: op_id}} when status in [GhostStatus.working(), GhostStatus.starting()] and not is_nil(op_id) ->
+        if MapSet.member?(state.recovery_pending, ghost_id) do
+          state
+        else
+          Process.send_after(self(), {:check_ghost_recovery, ghost_id, op_id}, 5_000)
+          %{state | recovery_pending: MapSet.put(state.recovery_pending, ghost_id)}
+        end
+
+      _ ->
+        state
     end
   end
 
@@ -1314,7 +1352,7 @@ defmodule GiTF.Major do
     now = DateTime.utc_now()
     base_stall_seconds = div(state.stall_timeout, 1000)
 
-    working_bees = GiTF.Ghosts.list(status: "working")
+    working_bees = GiTF.Ghosts.list(status: GhostStatus.working())
 
     Enum.each(working_bees, fn ghost ->
       last_cp = Map.get(state.last_checkpoint, ghost.id)
@@ -1353,7 +1391,7 @@ defmodule GiTF.Major do
           maybe_retry_job(link_msg, state)
         end
 
-        GiTF.Archive.put(:ghosts, %{ghost | status: "failed"})
+        GiTF.Archive.put(:ghosts, %{ghost | status: GhostStatus.crashed()})
       else
         if seconds_since > stall_seconds do
           Logger.warning(
