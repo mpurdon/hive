@@ -298,17 +298,20 @@ defmodule GiTF.Dashboard.ProvidersLive do
                 phx-value-field="aws_profile"
               />
             </div>
-            <div :if={provider.auth == :aws_profile} style="width:120px">
+            <div :if={provider.auth == :aws_profile} style="width:150px">
               <label style="font-size:0.75rem; color:#8b949e; display:block; margin-bottom:0.2rem">AWS Region</label>
-              <input
-                class="form-input"
+              <select
+                class="form-select"
                 style="font-size:0.8rem; font-family:monospace"
-                placeholder="us-east-1"
-                value={Map.get(edits, "aws_region", provider.aws_region || "")}
-                phx-blur="update_field"
+                phx-change="update_field"
                 phx-value-provider={name}
                 phx-value-field="aws_region"
-              />
+                name="value"
+              >
+                <option :for={region <- aws_regions()} value={region} selected={region == (Map.get(edits, "aws_region", provider.aws_region) || "us-east-1")}>
+                  {region}
+                </option>
+              </select>
             </div>
 
             <div>
@@ -412,6 +415,15 @@ defmodule GiTF.Dashboard.ProvidersLive do
   defp format_test_error({:error, reason}) when is_binary(reason), do: reason
   defp format_test_error({:error, reason}), do: inspect(reason)
   defp format_test_error(_), do: "Unknown error"
+
+  defp aws_regions do
+    [
+      "us-east-1", "us-east-2", "us-west-2",
+      "eu-west-1", "eu-west-3", "eu-central-1",
+      "ap-southeast-1", "ap-southeast-2", "ap-northeast-1",
+      "ca-central-1", "sa-east-1"
+    ]
+  end
 
   defp shorten_model_name(model) do
     model
