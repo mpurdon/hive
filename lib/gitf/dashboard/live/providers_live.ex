@@ -82,6 +82,11 @@ defmodule GiTF.Dashboard.ProvidersLive do
     {:noreply, assign(socket, :test_results, test_results)}
   end
 
+  def handle_event("dismiss_test", %{"provider" => name}, socket) do
+    test_results = Map.delete(socket.assigns.test_results, name)
+    {:noreply, assign(socket, :test_results, test_results)}
+  end
+
   def handle_event("add_provider", %{"provider" => name}, socket) do
     priority = socket.assigns.priority ++ [name]
     {:noreply, socket |> assign(:priority, priority) |> assign(:dirty, true) |> reload_providers()}
@@ -293,10 +298,22 @@ defmodule GiTF.Dashboard.ProvidersLive do
                 phx-value-field="aws_profile"
               />
             </div>
+            <div :if={provider.auth == :aws_profile} style="width:120px">
+              <label style="font-size:0.75rem; color:#8b949e; display:block; margin-bottom:0.2rem">AWS Region</label>
+              <input
+                class="form-input"
+                style="font-size:0.8rem; font-family:monospace"
+                placeholder="us-east-1"
+                value={Map.get(edits, "aws_region", provider.aws_region || "")}
+                phx-blur="update_field"
+                phx-value-provider={name}
+                phx-value-field="aws_region"
+              />
+            </div>
 
             <div>
               <button
-                class={"btn #{case test_result do; {:ok, _} -> "btn-green"; {:error, _} -> "btn-red"; :testing -> "btn-grey"; _ -> "btn-blue" end}"}
+                class={"btn #{case test_result do; {:ok, _} -> "btn-green"; :testing -> "btn-grey"; _ -> "btn-blue" end}"}
                 phx-click="test_connection"
                 phx-value-provider={name}
                 disabled={test_result == :testing}
@@ -305,15 +322,22 @@ defmodule GiTF.Dashboard.ProvidersLive do
                 {case test_result do
                   :testing -> "Testing..."
                   {:ok, ms} -> "✓ #{ms}ms"
-                  {:error, _} -> "✗ Failed"
                   _ -> "Test Connection"
                 end}
               </button>
             </div>
           </div>
 
-          <div :if={match?({:error, _}, test_result) and is_binary(elem(test_result, 1))} style="font-size:0.8rem; color:#f85149; margin-top:0.25rem">
-            {elem(test_result, 1)}
+          <div :if={match?({:error, _}, test_result)} style="background:#f8514911; border:1px solid #f8514933; border-radius:6px; padding:0.5rem 0.75rem; margin-top:0.5rem; display:flex; justify-content:space-between; align-items:flex-start; gap:0.5rem">
+            <div style="font-size:0.8rem; color:#f85149; flex:1; word-break:break-word">
+              {format_test_error(test_result)}
+            </div>
+            <button
+              class="btn btn-grey"
+              style="font-size:0.7rem; padding:0.15rem 0.4rem; flex-shrink:0"
+              phx-click="dismiss_test"
+              phx-value-provider={name}
+            >✕</button>
           </div>
         </div>
       </div>
@@ -383,6 +407,11 @@ defmodule GiTF.Dashboard.ProvidersLive do
     |> List.replace_at(i, Enum.at(list, j))
     |> List.replace_at(j, Enum.at(list, i))
   end
+
+  defp format_test_error({:error, %{reason: reason}}) when is_binary(reason), do: reason
+  defp format_test_error({:error, reason}) when is_binary(reason), do: reason
+  defp format_test_error({:error, reason}), do: inspect(reason)
+  defp format_test_error(_), do: "Unknown error"
 
   defp shorten_model_name(model) do
     model

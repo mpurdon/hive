@@ -145,24 +145,64 @@ defmodule GiTF.Runtime.ProviderManager do
   @doc "Tests connection to a provider's fast-tier model. Returns {:ok, latency_ms} or {:error, reason}."
   def test_connection(name) do
     models = tier_models(name)
-    model = models[:fast] || models[:general]
+    model = to_string(models[:fast] || models[:general] || "")
 
-    if model == "" do
-      {:error, :no_model_configured}
-    else
-      start = System.monotonic_time(:millisecond)
+    cond do
+      model == "" ->
+        {:error, "No model configured for #{name}"}
 
-      case ReqLLM.generate_text(model, [%{role: "user", content: "Say OK"}], max_tokens: 5) do
-        {:ok, _response} ->
-          latency = System.monotonic_time(:millisecond) - start
-          {:ok, latency}
+      name == "bedrock" ->
+        ensure_aws_credentials()
+        test_api_call(model)
 
-        {:error, reason} ->
-          {:error, reason}
-      end
+      true ->
+        test_api_call(model)
     end
   rescue
     e -> {:error, Exception.message(e)}
+  end
+
+  defp test_api_call(model) do
+    start = System.monotonic_time(:millisecond)
+
+    case ReqLLM.generate_text(model, [%{role: "user", content: "Say OK"}], max_tokens: 5) do
+      {:ok, _response} ->
+        latency = System.monotonic_time(:millisecond) - start
+        {:ok, latency}
+
+      {:error, %{body: body}} when is_binary(body) ->
+        {:error, body}
+
+      {:error, %{status: status, body: %{"error" => %{"message" => msg}}}} ->
+        {:error, "HTTP #{status}: #{msg}"}
+
+      {:error, %{status: status}} ->
+        {:error, "HTTP #{status}"}
+
+      {:error, reason} when is_binary(reason) ->
+        {:error, reason}
+
+      {:error, reason} ->
+        {:error, inspect(reason)}
+    end
+  end
+
+  defp ensure_aws_credentials do
+    profile = Config.get([:llm, :keys, :aws_profile]) ||
+              Config.get([:llm, :keys, "aws_profile"])
+
+    region = Config.get([:llm, :keys, :aws_region]) ||
+             Config.get([:llm, :keys, "aws_region"])
+
+    if is_binary(region) and region != "" do
+      System.put_env("AWS_REGION", region)
+    end
+
+    if is_binary(profile) and profile != "" do
+      GiTF.Runtime.Keys.load_aws_profile(profile)
+    end
+  rescue
+    _ -> :ok
   end
 
   # -- Write -----------------------------------------------------------------
@@ -200,12 +240,20 @@ defmodule GiTF.Runtime.ProviderManager do
         end
       end)
 
-    # Handle AWS profile for bedrock
+    # Handle AWS profile + region for bedrock
     keys =
       case get_in(provider_configs, ["bedrock", "aws_profile"]) ||
            get_in(provider_configs, ["bedrock", :aws_profile]) do
         profile when is_binary(profile) and profile != "" ->
           Map.put(keys, "aws_profile", profile)
+        _ -> keys
+      end
+
+    keys =
+      case get_in(provider_configs, ["bedrock", "aws_region"]) ||
+           get_in(provider_configs, ["bedrock", :aws_region]) do
+        region when is_binary(region) and region != "" ->
+          Map.put(keys, "aws_region", region)
         _ -> keys
       end
 
@@ -237,6 +285,7 @@ defmodule GiTF.Runtime.ProviderManager do
       status: provider_status(name),
       models: models,
       aws_profile: get_aws_profile(config),
+      aws_region: get_aws_region(config),
       api_key_set: has_api_key?(name)
     }
   end
@@ -280,6 +329,14 @@ defmodule GiTF.Runtime.ProviderManager do
   defp get_aws_profile(config) do
     config[:aws_profile] || config["aws_profile"] ||
       Config.get([:llm, :keys, :aws_profile]) || ""
+  rescue
+    _ -> ""
+  end
+
+  defp get_aws_region(config) do
+    config[:aws_region] || config["aws_region"] ||
+      Config.get([:llm, :keys, :aws_region]) ||
+      System.get_env("AWS_REGION") || ""
   rescue
     _ -> ""
   end

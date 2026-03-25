@@ -140,7 +140,8 @@ defmodule GiTF.Runtime.Keys do
     end
   end
 
-  defp load_aws_profile(profile) do
+  @doc "Loads AWS credentials from ~/.aws/credentials for the given profile."
+  def load_aws_profile(profile) do
     creds_path = Path.join(System.user_home!(), ".aws/credentials")
     config_path = Path.join(System.user_home!(), ".aws/config")
 
