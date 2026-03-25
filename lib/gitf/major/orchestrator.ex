@@ -47,16 +47,29 @@ defmodule GiTF.Major.Orchestrator do
         GiTF.Missions.update(mission_id, %{pipeline_mode: "fast"})
         FastPath.execute(mission_id)
       else
-        # If a confirmed plan (planning artifact) already exists, skip to implementation
         planning_artifact = GiTF.Missions.get_artifact(mission_id, "planning")
 
-        if planning_artifact && is_list(planning_artifact) && planning_artifact != [] do
-          Logger.info("Quest #{mission_id} has pre-confirmed plan, skipping to implementation")
-          GiTF.Missions.update(mission_id, %{pipeline_mode: "full"})
-          start_implementation(mission)
-        else
-          GiTF.Missions.update(mission_id, %{pipeline_mode: "full"})
-          start_research(mission)
+        # Check if implementation ops already exist (restart scenario — don't create duplicates)
+        existing_impl_ops =
+          mission.ops
+          |> Enum.reject(& &1[:phase_job])
+          |> Enum.filter(& &1.status in ["pending", "running", "assigned", "blocked"])
+
+        cond do
+          existing_impl_ops != [] ->
+            Logger.info("Quest #{mission_id} has #{length(existing_impl_ops)} existing impl ops, triggering spawner")
+            GiTF.Missions.update(mission_id, %{pipeline_mode: "full", status: "active"})
+            send(Process.whereis(GiTF.Major), :spawn_ready_jobs)
+            {:ok, "implementation"}
+
+          planning_artifact && is_list(planning_artifact) && planning_artifact != [] ->
+            Logger.info("Quest #{mission_id} has pre-confirmed plan, skipping to implementation")
+            GiTF.Missions.update(mission_id, %{pipeline_mode: "full"})
+            start_implementation(mission)
+
+          true ->
+            GiTF.Missions.update(mission_id, %{pipeline_mode: "full"})
+            start_research(mission)
         end
       end
     else

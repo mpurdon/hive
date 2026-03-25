@@ -220,7 +220,15 @@ defmodule GiTF.Ops do
 
       retry_count = Map.get(op, :retry_count, 0) + 1
       updated = %{op | status: next_status, ghost_id: nil, retry_count: retry_count, description: new_description}
-      Archive.put(:ops, updated)
+      result = Archive.put(:ops, updated)
+
+      # Nudge Major's spawner so the reset op gets picked up immediately
+      case Process.whereis(GiTF.Major) do
+        pid when is_pid(pid) -> send(pid, :spawn_ready_jobs)
+        _ -> :ok
+      end
+
+      result
     end
   end
 
