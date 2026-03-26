@@ -229,7 +229,15 @@ defmodule GiTF.Runtime.ProviderManager do
   def normalize_model_for_reqllm(model) when is_binary(model) do
     if String.starts_with?(model, "arn:aws:bedrock:") do
       ensure_aws_credentials()
-      ReqLLM.model!(%{provider: :amazon_bedrock, id: model})
+      # Inference profile ARNs need a provider_model_id so ReqLLM knows which
+      # formatter to use. The ARN goes as `id` (used in the API URL).
+      # Default to anthropic (most common Bedrock use case).
+      ReqLLM.model!(%{
+        provider: :amazon_bedrock,
+        id: model,
+        provider_model_id: "anthropic.claude-sonnet-4-6-20250514-v1:0",
+        use_converse: true
+      })
     else
       model
     end
