@@ -78,7 +78,17 @@ defmodule GiTF.Dashboard.ProvidersLive do
 
   def handle_event("test_connection", %{"provider" => name}, socket) do
     test_results = Map.put(socket.assigns.test_results, name, :testing)
-    Task.async(fn -> {:test_result, name, ProviderManager.test_connection(name)} end)
+    edits = Map.get(socket.assigns.editing, name, %{})
+    provider = Enum.find(socket.assigns.configured, &(&1.name == name))
+
+    opts = %{
+      aws_profile: Map.get(edits, "aws_profile", provider && provider.aws_profile),
+      aws_region: Map.get(edits, "aws_region", provider && provider.aws_region),
+      fast: Map.get(edits, "fast", provider && to_string(provider.models.fast)),
+      general: Map.get(edits, "general", provider && to_string(provider.models.general))
+    }
+
+    Task.async(fn -> {:test_result, name, ProviderManager.test_connection(name, opts)} end)
     {:noreply, assign(socket, :test_results, test_results)}
   end
 

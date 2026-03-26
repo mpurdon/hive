@@ -143,15 +143,34 @@ defmodule GiTF.Runtime.ProviderManager do
   end
 
   @doc "Tests connection to a provider's fast-tier model. Returns {:ok, latency_ms} or {:error, reason}."
-  def test_connection(name) do
-    models = tier_models(name)
-    model = to_string(models[:fast] || models[:general] || "")
+  def test_connection(name, opts \\ %{}) do
+    model = to_string(opts[:fast] || opts[:general] || "")
+
+    model =
+      if model == "" do
+        models = tier_models(name)
+        to_string(models[:fast] || models[:general] || "")
+      else
+        model
+      end
 
     cond do
       model == "" ->
         {:error, "No model configured for #{name}"}
 
       name == "bedrock" ->
+        # Use provided profile/region or fall back to config
+        profile = opts[:aws_profile]
+        region = opts[:aws_region]
+
+        if is_binary(region) and region != "" do
+          System.put_env("AWS_REGION", region)
+        end
+
+        if is_binary(profile) and profile != "" do
+          GiTF.Runtime.Keys.load_aws_profile(profile)
+        end
+
         ensure_aws_credentials()
         test_api_call(model)
 
@@ -163,6 +182,8 @@ defmodule GiTF.Runtime.ProviderManager do
   end
 
   defp test_api_call(model) do
+    # ARN-based models need amazon_bedrock: prefix for ReqLLM
+    model = normalize_model_for_reqllm(model)
     start = System.monotonic_time(:millisecond)
 
     case ReqLLM.generate_text(model, [%{role: "user", content: "Say OK"}], max_tokens: 5) do
@@ -187,7 +208,17 @@ defmodule GiTF.Runtime.ProviderManager do
     end
   end
 
-  @doc "Ensures AWS credentials are loaded for Bedrock API calls."
+  @doc "Normalizes model strings for ReqLLM — ARNs get amazon_bedrock: prefix."
+  def normalize_model_for_reqllm(model) when is_binary(model) do
+    if String.starts_with?(model, "arn:aws:bedrock:") do
+      ensure_aws_credentials()
+      "amazon_bedrock:#{model}"
+    else
+      model
+    end
+  end
+  def normalize_model_for_reqllm(model), do: model
+
   def ensure_aws_credentials do
     profile = Config.get([:llm, :keys, :aws_profile]) ||
               Config.get([:llm, :keys, "aws_profile"])

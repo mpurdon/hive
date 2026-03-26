@@ -45,6 +45,8 @@ defmodule GiTF.Runtime.LLMClient.Default do
 
   @impl true
   def generate_text(model, messages, opts) do
+    model = GiTF.Runtime.ProviderManager.normalize_model_for_reqllm(model)
+
     case Keyword.pop(opts, :gemini_cache) do
       {nil, _} ->
         ReqLLM.generate_text(model, messages, opts)
