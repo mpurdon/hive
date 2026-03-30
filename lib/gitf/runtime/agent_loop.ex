@@ -1,3 +1,17 @@
+# Implement String.Chars for ReqLLM error structs so to_string()
+# works in ReqLLM.Context.execute_and_append_tools error handling.
+# These use Splode.Error which provides message/1 but not String.Chars.
+for mod <- [
+  ReqLLM.Error.Validation.Error,
+  ReqLLM.Error.Invalid.Parameter,
+  ReqLLM.Error.Invalid.Schema,
+  ReqLLM.Error.Unknown.Unknown
+] do
+  defimpl String.Chars, for: mod do
+    def to_string(error), do: Exception.message(error)
+  end
+end
+
 defmodule GiTF.Runtime.AgentLoop do
   @moduledoc """
   Core agentic execution engine.
