@@ -47,12 +47,12 @@ defmodule GiTF.Test.StoreHelper do
   @doc "Initializes a basic git repository with an initial commit for tests"
   def init_git_repo!(path) do
     File.mkdir_p!(path)
-    System.cmd("git", ["init"], cd: path)
-    System.cmd("git", ["config", "user.email", "test@example.com"], cd: path)
-    System.cmd("git", ["config", "user.name", "Test User"], cd: path)
+    System.cmd("/usr/bin/git", ["init"], cd: path)
+    System.cmd("/usr/bin/git", ["config", "user.email", "test@example.com"], cd: path)
+    System.cmd("/usr/bin/git", ["config", "user.name", "Test User"], cd: path)
     File.write!(Path.join(path, "README.md"), "# Test Repo")
-    System.cmd("git", ["add", "README.md"], cd: path)
-    System.cmd("git", ["commit", "-m", "Initial commit"], cd: path)
+    System.cmd("/usr/bin/git", ["add", "README.md"], cd: path)
+    System.cmd("/usr/bin/git", ["commit", "-m", "Initial commit"], cd: path)
     :ok
   end
 

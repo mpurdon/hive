@@ -83,6 +83,20 @@ defmodule GiTF.Link do
   end
 
   @doc """
+  Lists link_msg messages associated with a specific op ID.
+  """
+  @spec list_by_op(String.t()) :: [map()]
+  def list_by_op(op_id) do
+    Archive.all(:links)
+    |> Enum.filter(fn w ->
+      meta = Map.get(w, :metadata)
+      (is_map(meta) and Map.get(meta, :op_id) == op_id) or
+      (is_binary(meta) and String.contains?(meta, op_id))
+    end)
+    |> Enum.sort_by(& &1.inserted_at, {:desc, DateTime})
+  end
+
+  @doc """
   Lists unread link_msg messages for a given recipient.
   """
   @spec list_unread(String.t()) :: [map()]

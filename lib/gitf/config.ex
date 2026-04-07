@@ -79,6 +79,29 @@ defmodule GiTF.Config do
   end
 
   @doc """
+  Updates the major configuration and persists it to the global config file.
+  """
+  @spec update_major_config(map()) :: :ok | {:error, term()}
+  def update_major_config(new_major_config) do
+    global_path = GiTF.global_config_path()
+    existing = case read_config(global_path) do
+      {:ok, cfg} -> cfg
+      _ -> %{}
+    end
+
+    current_major = Map.get(existing, "major", %{})
+    updated_major = Map.merge(current_major, new_major_config)
+    updated = Map.put(existing, "major", updated_major)
+
+    case write_config(global_path, updated) do
+      :ok ->
+        GiTF.Config.Provider.reload()
+        :ok
+      error -> error
+    end
+  end
+
+  @doc """
   Returns true if the system is in dark factory mode (autonomous approval).
   """
   @spec dark_factory?() :: boolean()

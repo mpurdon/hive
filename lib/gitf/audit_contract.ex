@@ -11,7 +11,7 @@ defmodule GiTF.AuditContract do
   """
 
   @default_contract %{
-    required_checks: [:static, :security],
+    required_checks: [:static, :security, :proof_of_test],
     thresholds: %{composite: 70, security: 60, performance: 50, static: 70},
     skip_checks: [],
     auto_approve_eligible: true,
@@ -180,6 +180,14 @@ defmodule GiTF.AuditContract do
     threshold = Map.get(thresholds, :performance)
     score = result[:performance_score]
     do_threshold_check("performance", threshold, score)
+  end
+
+  defp evaluate_check(:proof_of_test, _thresholds, result) do
+    case result[:proof_of_test] do
+      :pass -> []
+      :fail -> ["proof_of_test: no successful test command execution detected in shell history"]
+      _ -> []
+    end
   end
 
   defp evaluate_check(_check, _thresholds, _result), do: []

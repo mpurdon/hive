@@ -138,6 +138,9 @@ defmodule GiTF.Major do
     # Periodically advance stuck mission phases
     schedule_phase_advancement()
 
+    # Periodically run janitor maintenance when idle
+    schedule_janitor()
+
     # On startup, resume active missions that may have stalled during crash
     Process.send_after(self(), :resume_active_quests, 10_000)
 
@@ -337,6 +340,12 @@ defmodule GiTF.Major do
   def handle_info(:advance_stuck_phases, state) do
     advance_stuck_mission_phases()
     schedule_phase_advancement()
+    {:noreply, state}
+  end
+
+  def handle_info(:janitor_run, state) do
+    GiTF.Major.Janitor.run_if_idle()
+    schedule_janitor()
     {:noreply, state}
   end
 
@@ -1360,6 +1369,7 @@ defmodule GiTF.Major do
   @stall_check_interval :timer.minutes(2)
   @stuck_recovery_interval :timer.minutes(5)
   @phase_advancement_interval :timer.minutes(3)
+  @janitor_interval :timer.minutes(15)
 
   defp schedule_stall_check do
     Process.send_after(self(), :check_stalls, @stall_check_interval)
@@ -1371,6 +1381,10 @@ defmodule GiTF.Major do
 
   defp schedule_phase_advancement do
     Process.send_after(self(), :advance_stuck_phases, @phase_advancement_interval)
+  end
+
+  defp schedule_janitor do
+    Process.send_after(self(), :janitor_run, @janitor_interval)
   end
 
   defp resume_active_quests(_state) do

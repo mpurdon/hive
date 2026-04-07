@@ -14,11 +14,11 @@ defmodule GiTF.OnboardingTest do
     File.mkdir_p!(Path.join(project_dir, "test"))
 
     # Initialize git repo
-    System.cmd("git", ["init"], cd: project_dir)
-    System.cmd("git", ["config", "user.email", "test@example.com"], cd: project_dir)
-    System.cmd("git", ["config", "user.name", "Test User"], cd: project_dir)
-    System.cmd("git", ["add", "-A"], cd: project_dir)
-    System.cmd("git", ["commit", "-m", "Initial commit"], cd: project_dir)
+    System.cmd("/usr/bin/git", ["init"], cd: project_dir)
+    System.cmd("/usr/bin/git", ["config", "user.email", "test@example.com"], cd: project_dir)
+    System.cmd("/usr/bin/git", ["config", "user.name", "Test User"], cd: project_dir)
+    System.cmd("/usr/bin/git", ["add", "-A"], cd: project_dir)
+    System.cmd("/usr/bin/git", ["commit", "-m", "Initial commit"], cd: project_dir)
 
     # Start Archive
     store_dir = Path.join(tmp_dir, "store")

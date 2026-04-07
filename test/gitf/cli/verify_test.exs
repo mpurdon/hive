@@ -26,9 +26,9 @@ defmodule GiTF.CLI.VerifyTest do
     test "records verification results" do
       repo_path = Path.join(@tmp_dir, "test_repo_#{:erlang.unique_integer([:positive])}")
       GiTF.Test.StoreHelper.init_git_repo!(repo_path)
-      System.cmd("git", ["init"], cd: repo_path)
-      System.cmd("git", ["config", "user.email", "test@test.com"], cd: repo_path)
-      System.cmd("git", ["config", "user.name", "Test"], cd: repo_path)
+      System.cmd("/usr/bin/git", ["init"], cd: repo_path)
+      System.cmd("/usr/bin/git", ["config", "user.email", "test@test.com"], cd: repo_path)
+      System.cmd("/usr/bin/git", ["config", "user.name", "Test"], cd: repo_path)
 
       {:ok, sector} = GiTF.Sector.add(repo_path, name: "test")
 
@@ -57,9 +57,9 @@ defmodule GiTF.CLI.VerifyTest do
     test "tracks verification failures" do
       repo_path = Path.join(@tmp_dir, "test_repo_#{:erlang.unique_integer([:positive])}")
       GiTF.Test.StoreHelper.init_git_repo!(repo_path)
-      System.cmd("git", ["init"], cd: repo_path)
-      System.cmd("git", ["config", "user.email", "test@test.com"], cd: repo_path)
-      System.cmd("git", ["config", "user.name", "Test"], cd: repo_path)
+      System.cmd("/usr/bin/git", ["init"], cd: repo_path)
+      System.cmd("/usr/bin/git", ["config", "user.email", "test@test.com"], cd: repo_path)
+      System.cmd("/usr/bin/git", ["config", "user.name", "Test"], cd: repo_path)
 
       {:ok, sector} = GiTF.Sector.add(repo_path, name: "test")
 

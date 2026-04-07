@@ -1352,6 +1352,28 @@ defmodule GiTF.Major.Orchestrator do
   end
 
   defp fail_quest(mission_id, reason) do
+    # Generate post-mortem before rolling back
+    case GiTF.Missions.get(mission_id) do
+      {:ok, mission} -> generate_post_mortem(mission, reason)
+      _ -> :ok
+    end
+
+    # Rollback worktree if mission has a sector
+    case GiTF.Missions.get(mission_id) do
+      {:ok, %{sector_id: sid}} when is_binary(sid) ->
+        case Archive.get(:sectors, sid) do
+          %{path: path} when is_binary(path) ->
+            Logger.info("Quest #{mission_id} failed: rolling back sector at #{path}")
+            GiTF.Git.rollback(path)
+
+          _ ->
+            :ok
+        end
+
+      _ ->
+        :ok
+    end
+
     GiTF.Missions.transition_phase(mission_id, "completed", reason)
     GiTF.Missions.update_status!(mission_id)
 
@@ -1361,6 +1383,43 @@ defmodule GiTF.Major.Orchestrator do
     )
 
     {:ok, "completed"}
+  end
+
+  defp generate_post_mortem(mission, reason) do
+    case Archive.get(:sectors, mission.sector_id) do
+      %{path: path} when is_binary(path) ->
+        if File.dir?(path) do
+          content = """
+          # POST MORTEM: #{mission.name}
+
+          **Status:** FAILED
+          **Reason:** #{reason}
+          **Timestamp:** #{DateTime.utc_now()}
+          **Mission ID:** #{mission.id}
+          **Goal:** #{mission.goal}
+
+          ## Timeline
+
+          #{Enum.map_join(GiTF.Missions.get_phase_transitions(mission.id), "\n", fn t -> "- #{t.from_phase} -> #{t.to_phase}: #{t.reason}" end)}
+
+          ## Failed Ops
+
+          #{Enum.filter(mission.ops, &(&1.status == "failed")) |> Enum.map_join("\n", fn j -> "- **#{j.title}**: #{j.audit_result || "Crashed"}" end)}
+
+          ---
+          *Worktree has been rolled back to a clean state.*
+          """
+
+          filename = "POST_MORTEM_#{mission.id}.md"
+          File.write!(Path.join(path, filename), content)
+          Logger.info("Generated post-mortem for quest #{mission.id} at #{path}/#{filename}")
+        end
+
+      _ ->
+        :ok
+    end
+  rescue
+    e -> Logger.warning("Failed to generate post-mortem: #{Exception.message(e)}")
   end
 
   defp complete_quest(mission_id) do

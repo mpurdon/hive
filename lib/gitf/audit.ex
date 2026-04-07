@@ -66,6 +66,11 @@ defmodule GiTF.Audit do
         # Run quality checks
         quality_result = run_quality_checks(op_id, shell, sector)
 
+        # Proof of Test: verify that tests were actually run and passed
+        # (This parses shell execution history from the ghost's session)
+        proof_of_test = verify_proof_of_test(op_id)
+        quality_result = Map.put(quality_result, :proof_of_test, proof_of_test)
+
         # Run cross-model audit if enabled
         cross_audit_result =
           if GiTF.Runtime.CrossModelAudit.enabled?(sector.id) do
@@ -217,6 +222,40 @@ defmodule GiTF.Audit do
         Archive.put(:ops, updated)
     end
   end
+
+  defp verify_proof_of_test(op_id) do
+    case GiTF.Ops.get(op_id) do
+      {:ok, op} ->
+        # If no files were changed, proof of test is N/A (pass)
+        if (op[:files_changed] || 0) == 0 do
+          :pass
+        else
+          # Check for successful test execution in ghost events
+          events = GiTF.Link.list_by_op(op_id)
+          
+          has_pass = Enum.any?(events, fn e ->
+            # Look for tool_use results from command execution
+            # This is a heuristic: look for test-like commands that succeeded
+            is_test_cmd?(e) and cmd_succeeded?(e)
+          end)
+
+          if has_pass, do: :pass, else: :fail
+        end
+
+      _ -> :fail
+    end
+  end
+
+  # Heuristic: does the command look like a test runner?
+  defp is_test_cmd?(%{"type" => "tool_use", "name" => "run_shell_command", "input" => %{"command" => cmd}}) do
+    cmd = String.downcase(cmd)
+    String.contains?(cmd, "test") or String.contains?(cmd, "check") or String.contains?(cmd, "spec")
+  end
+  defp is_test_cmd?(_), do: false
+
+  # Did the shell command return 0?
+  defp cmd_succeeded?(%{"type" => "tool_result", "output" => %{"exit_code" => 0}}), do: true
+  defp cmd_succeeded?(_), do: false
 
   defp run_quality_checks(op_id, shell, sector) do
     language = detect_language(sector)

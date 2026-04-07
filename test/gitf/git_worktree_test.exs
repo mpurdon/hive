@@ -16,19 +16,19 @@ defmodule GiTF.Git.WorktreeTest do
     path = Path.join(@tmp_dir, name)
     File.mkdir_p!(path)
 
-    System.cmd("git", ["init"], cd: path, stderr_to_stdout: true)
-    System.cmd("git", ["config", "user.email", "test@gitf.local"], cd: path)
-    System.cmd("git", ["config", "user.name", "Test"], cd: path)
+    System.cmd("/usr/bin/git", ["init"], cd: path, stderr_to_stdout: true)
+    System.cmd("/usr/bin/git", ["config", "user.email", "test@gitf.local"], cd: path)
+    System.cmd("/usr/bin/git", ["config", "user.name", "Test"], cd: path)
 
     # Need at least one commit for worktrees to function
     hello_file = Path.join(path, "README.md")
     File.write!(hello_file, "# Test\n")
-    System.cmd("git", ["add", "."], cd: path, stderr_to_stdout: true)
-    System.cmd("git", ["commit", "-m", "initial"], cd: path, stderr_to_stdout: true)
+    System.cmd("/usr/bin/git", ["add", "."], cd: path, stderr_to_stdout: true)
+    System.cmd("/usr/bin/git", ["commit", "-m", "initial"], cd: path, stderr_to_stdout: true)
 
     # Resolve the real path (handles macOS /var -> /private/var symlink)
     {real_path, 0} =
-      System.cmd("git", ["rev-parse", "--show-toplevel"],
+      System.cmd("/usr/bin/git", ["rev-parse", "--show-toplevel"],
         cd: path,
         stderr_to_stdout: true
       )

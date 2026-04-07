@@ -8,12 +8,12 @@ defmodule GiTF.CombTest do
     tmp = Path.join(System.tmp_dir!(), "gitf_comb_test_#{:erlang.unique_integer([:positive])}")
     File.mkdir_p!(tmp)
     
-    System.cmd("git", ["init"], cd: tmp)
-    System.cmd("git", ["config", "user.email", "test@example.com"], cd: tmp)
-    System.cmd("git", ["config", "user.name", "Test User"], cd: tmp)
+    System.cmd("/usr/bin/git", ["init"], cd: tmp)
+    System.cmd("/usr/bin/git", ["config", "user.email", "test@example.com"], cd: tmp)
+    System.cmd("/usr/bin/git", ["config", "user.name", "Test User"], cd: tmp)
     File.write!(Path.join(tmp, "README.md"), "# Test Repo")
-    System.cmd("git", ["add", "README.md"], cd: tmp)
-    System.cmd("git", ["commit", "-m", "Initial commit"], cd: tmp)
+    System.cmd("/usr/bin/git", ["add", "README.md"], cd: tmp)
+    System.cmd("/usr/bin/git", ["commit", "-m", "Initial commit"], cd: tmp)
 
     on_exit(fn -> File.rm_rf!(tmp) end)
 

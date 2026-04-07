@@ -294,13 +294,31 @@ defmodule GiTF.Git do
   end
 
   @doc """
+  Rolls back a repository to its last committed state.
+  Runs `git reset --hard HEAD` and `git clean -fd`.
+  """
+  @spec rollback(String.t()) :: :ok | {:error, String.t()}
+  def rollback(repo_path) do
+    case safe_cmd(["reset", "--hard", "HEAD"], cd: repo_path, stderr_to_stdout: true) do
+      {_, 0} ->
+        case safe_cmd(["clean", "-fd"], cd: repo_path, stderr_to_stdout: true) do
+          {_, 0} -> :ok
+          {output, _} -> {:error, "clean failed: #{String.trim(output)}"}
+        end
+
+      {output, _} ->
+        {:error, "reset failed: #{String.trim(output)}"}
+    end
+  end
+
+  @doc """
   Runs a git command with a timeout to prevent hangs.
 
   Wraps `System.cmd/3` in a Task that is killed after `@git_timeout_ms`.
   Returns `{output, exit_code}` or `{"git command timed out", 1}`.
   """
   def safe_cmd(args, opts \\ []) do
-    task = Task.async(fn -> System.cmd("git", args, opts) end)
+    task = Task.async(fn -> System.cmd("/usr/bin/git", args, opts) end)
 
     case Task.yield(task, @git_timeout_ms) || Task.shutdown(task, 5_000) do
       {:ok, result} -> result

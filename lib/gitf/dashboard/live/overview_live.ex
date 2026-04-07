@@ -53,6 +53,21 @@ defmodule GiTF.Dashboard.OverviewLive do
   end
 
   @impl true
+  def handle_event("toggle_dark_factory", _params, socket) do
+    new_val = !socket.assigns.dark_factory
+    case GiTF.Config.update_major_config(%{"dark_factory" => new_val}) do
+      :ok ->
+        {:noreply,
+         socket
+         |> put_flash(:info, "Dark Factory Mode #{if new_val, do: "ENABLED", else: "DISABLED"}")
+         |> assign(:dark_factory, new_val)}
+
+      {:error, reason} ->
+        {:noreply, put_flash(socket, :error, "Failed to update config: #{inspect(reason)}")}
+    end
+  end
+
+  @impl true
   def handle_event("use_sector", %{"id" => sector_id}, socket) do
     case GiTF.Sector.set_current(sector_id) do
       {:ok, sector} ->
@@ -185,9 +200,13 @@ defmodule GiTF.Dashboard.OverviewLive do
       end)
       |> Enum.take(5)
 
+    # Dark Factory status
+    dark_factory = GiTF.Config.dark_factory?()
+
     socket
     |> assign(:page_title, "Overview")
     |> assign(:current_path, "/")
+    |> assign(:dark_factory, dark_factory)
     |> assign(:ghost_count, length(ghosts))
     |> assign(:active_ghosts, active_ghosts)
     |> assign(:quest_count, length(missions))
@@ -321,7 +340,25 @@ defmodule GiTF.Dashboard.OverviewLive do
   def render(assigns) do
     ~H"""
     <.live_component module={GiTF.Dashboard.AppLayout} id="layout" current_path={@current_path} flash={@flash}>
-      <h1 class="page-title">Dashboard Overview</h1>
+      <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:1.5rem">
+        <h1 class="page-title" style="margin-bottom:0">Dashboard Overview</h1>
+        
+        <div style="display:flex; align-items:center; gap:0.75rem; background:#1c2128; border:1px solid #30363d; padding:0.5rem 0.75rem; border-radius:6px">
+          <div style="display:flex; flex-direction:column">
+            <span style="font-size:0.7rem; color:#8b949e; font-weight:500; text-transform:uppercase; letter-spacing:0.05em">Dark Factory</span>
+            <span style={"font-size:0.8rem; font-weight:600; color:#{if @dark_factory, do: "#3fb950", else: "#8b949e"}"}>
+              {if @dark_factory, do: "Fully Autonomous", else: "Manual Review"}
+            </span>
+          </div>
+          <button 
+            phx-click="toggle_dark_factory" 
+            class={"btn #{if @dark_factory, do: "btn-green", else: "btn-grey"}"}
+            style="padding:0.25rem 0.5rem; font-size:0.75rem"
+          >
+            {if @dark_factory, do: "Disable", else: "Enable"}
+          </button>
+        </div>
+      </div>
 
       <div style="display:grid; grid-template-columns:1fr 1fr 1fr; gap:0.75rem; margin-bottom:1.5rem">
         <%!-- Row 1 --%>

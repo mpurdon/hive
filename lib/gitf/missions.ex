@@ -126,6 +126,7 @@ defmodule GiTF.Missions do
   @doc """
   Kills a mission: kills all its ops (stopping ghosts, removing shells),
   removes all op dependencies, deletes all ops, then deletes the mission.
+  In Dark Factory mode, also rolls back the sector worktree to a clean state.
 
   Returns `:ok` or `{:error, :not_found}`.
   """
@@ -135,7 +136,10 @@ defmodule GiTF.Missions do
       nil ->
         {:error, :not_found}
 
-      _quest ->
+      quest ->
+        # Rollback sector if applicable
+        rollback_sector(quest)
+
         GiTF.Ops.list(mission_id: mission_id)
         |> Enum.each(fn op -> GiTF.Ops.kill(op[:id] || op.id) end)
 
@@ -143,6 +147,20 @@ defmodule GiTF.Missions do
         :ok
     end
   end
+
+  defp rollback_sector(%{sector_id: sid}) when is_binary(sid) do
+    case Archive.get(:sectors, sid) do
+      %{path: path} when is_binary(path) ->
+        if File.dir?(path) do
+          GiTF.Git.rollback(path)
+        end
+
+      _ ->
+        :ok
+    end
+  end
+
+  defp rollback_sector(_), do: :ok
 
   @doc """
   Closes a mission: removes all associated ghost shells/worktrees, then marks status as "closed".
