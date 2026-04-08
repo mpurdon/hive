@@ -358,6 +358,71 @@ defmodule GiTF.Missions do
   end
 
   @doc """
+  Compacts artifacts for all completed missions older than `days`.
+
+  Replaces bulky phase artifacts with compact stubs, keeping only
+  requirements and scoring (small and useful for queries).
+  Returns count of missions compacted.
+  """
+  @spec compact_old_artifacts(pos_integer()) :: non_neg_integer()
+  def compact_old_artifacts(days) do
+    cutoff = DateTime.add(DateTime.utc_now(), -days * 86_400, :second)
+
+    Archive.filter(:missions, fn m ->
+      m.status in ["completed", "failed"] and
+        m[:updated_at] != nil and
+        DateTime.compare(m.updated_at, cutoff) == :lt and
+        has_uncompacted_artifacts?(m)
+    end)
+    |> Enum.count(fn mission ->
+      compact_artifacts(mission.id)
+      true
+    end)
+  rescue
+    _ -> 0
+  end
+
+  @keep_artifacts ~w(requirements scoring)
+
+  @doc """
+  Replaces bulky artifacts with compact stubs for a single mission.
+  Keeps requirements and scoring intact.
+  """
+  @spec compact_artifacts(String.t()) :: :ok
+  def compact_artifacts(mission_id) do
+    case Archive.get(:missions, mission_id) do
+      nil ->
+        :ok
+
+      mission ->
+        artifacts = Map.get(mission, :artifacts, %{})
+
+        compacted =
+          Map.new(artifacts, fn {phase, artifact} ->
+            if phase in @keep_artifacts or is_compacted?(artifact) do
+              {phase, artifact}
+            else
+              {phase, %{"compacted" => true, "phase" => phase, "compacted_at" => DateTime.utc_now() |> DateTime.to_iso8601()}}
+            end
+          end)
+
+        Archive.put(:missions, Map.put(mission, :artifacts, compacted))
+        :ok
+    end
+  end
+
+  defp has_uncompacted_artifacts?(mission) do
+    artifacts = Map.get(mission, :artifacts, %{})
+
+    Enum.any?(artifacts, fn {phase, artifact} ->
+      phase not in @keep_artifacts and not is_compacted?(artifact)
+    end)
+  end
+
+  defp is_compacted?(%{"compacted" => true}), do: true
+  defp is_compacted?(_), do: false
+
+  @doc """
   Gets a phase artifact from a mission record.
 
   Returns the artifact map or nil if not found.

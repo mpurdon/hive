@@ -758,10 +758,47 @@ defmodule GiTF.Tachikoma do
     # Prune old events (keep 30 days)
     prune_event_store()
 
-    total = length(pruned_waggles) + length(pruned_runs)
+    # Prune costs and audit_results for completed missions
+    cost_hours = GiTF.Config.get(:cost_retention_hours) || 168
+    cost_cutoff = DateTime.add(DateTime.utc_now(), -cost_hours * 3600, :second)
+    completed_mission_ids = completed_mission_ids()
+
+    pruned_costs = prune_collection(:costs, cost_cutoff, completed_mission_ids)
+    pruned_audits = prune_collection(:audit_results, cost_cutoff, completed_mission_ids)
+
+    # Prune old debriefs (>30 days)
+    thirty_day_cutoff = DateTime.add(DateTime.utc_now(), -30 * 86_400, :second)
+    pruned_debriefs = prune_by_age(:debriefs, thirty_day_cutoff)
+
+    # Prune phase transitions for old completed missions
+    pruned_transitions = prune_by_mission_age(:mission_phase_transitions, thirty_day_cutoff)
+
+    # Prune context snapshots (>7 days)
+    seven_day_cutoff = DateTime.add(DateTime.utc_now(), -7 * 86_400, :second)
+    pruned_snapshots = prune_by_age(:context_snapshots, seven_day_cutoff)
+
+    # Cap pattern collections at max records
+    max_patterns = GiTF.Config.get(:pattern_retention_max) || 200
+    pruned_patterns =
+      cap_collection(:failure_analyses, max_patterns) +
+        cap_collection(:failure_learnings, max_patterns) +
+        cap_collection(:success_patterns, max_patterns)
+
+    # Compact artifacts for old completed missions
+    compact_days = GiTF.Config.get(:artifact_compact_days) || 7
+    compacted = GiTF.Missions.compact_old_artifacts(compact_days)
+
+    total =
+      length(pruned_waggles) + length(pruned_runs) + pruned_costs + pruned_audits +
+        pruned_debriefs + pruned_transitions + pruned_snapshots + pruned_patterns + compacted
 
     if total > 0 do
-      Logger.info("Archive pruned: #{length(pruned_waggles)} links, #{length(pruned_runs)} runs")
+      Logger.info(
+        "Archive pruned: #{length(pruned_waggles)} links, #{length(pruned_runs)} runs, " <>
+          "#{pruned_costs} costs, #{pruned_audits} audits, #{pruned_debriefs} debriefs, " <>
+          "#{pruned_transitions} transitions, #{pruned_snapshots} snapshots, " <>
+          "#{pruned_patterns} patterns, #{compacted} artifacts compacted"
+      )
     end
   rescue
     _ -> :ok
@@ -788,6 +825,80 @@ defmodule GiTF.Tachikoma do
     end
   rescue
     _ -> :ok
+  end
+
+  defp completed_mission_ids do
+    GiTF.Archive.filter(:missions, &(&1.status in ["completed", "failed"]))
+    |> Enum.map(& &1.id)
+    |> MapSet.new()
+  rescue
+    _ -> MapSet.new()
+  end
+
+  # Prune records older than cutoff that belong to completed missions
+  defp prune_collection(collection, cutoff, completed_ids) do
+    to_delete =
+      GiTF.Archive.filter(collection, fn r ->
+        mission_id = r[:mission_id]
+        inserted = r[:inserted_at] || r[:recorded_at]
+
+        (mission_id == nil or MapSet.member?(completed_ids, mission_id)) and
+          inserted != nil and DateTime.compare(inserted, cutoff) == :lt
+      end)
+
+    Enum.each(to_delete, &GiTF.Archive.delete(collection, &1.id))
+    length(to_delete)
+  rescue
+    _ -> 0
+  end
+
+  defp prune_by_age(collection, cutoff) do
+    to_delete =
+      GiTF.Archive.filter(collection, fn r ->
+        inserted = r[:inserted_at] || r[:recorded_at] || r[:completed_at]
+        inserted != nil and DateTime.compare(inserted, cutoff) == :lt
+      end)
+
+    Enum.each(to_delete, &GiTF.Archive.delete(collection, &1.id))
+    length(to_delete)
+  rescue
+    _ -> 0
+  end
+
+  defp prune_by_mission_age(collection, cutoff) do
+    completed_ids = completed_mission_ids()
+
+    to_delete =
+      GiTF.Archive.filter(collection, fn r ->
+        mission_id = r[:mission_id]
+        inserted = r[:inserted_at]
+
+        MapSet.member?(completed_ids, mission_id) and
+          inserted != nil and DateTime.compare(inserted, cutoff) == :lt
+      end)
+
+    Enum.each(to_delete, &GiTF.Archive.delete(collection, &1.id))
+    length(to_delete)
+  rescue
+    _ -> 0
+  end
+
+  defp cap_collection(collection, max) do
+    all = GiTF.Archive.all(collection)
+
+    if length(all) > max do
+      to_delete =
+        all
+        |> Enum.sort_by(&(&1[:inserted_at] || &1[:recorded_at]), {:asc, DateTime})
+        |> Enum.drop(-max)
+
+      Enum.each(to_delete, &GiTF.Archive.delete(collection, &1.id))
+      length(to_delete)
+    else
+      0
+    end
+  rescue
+    _ -> 0
   end
 
   defp check_stuck_jobs do

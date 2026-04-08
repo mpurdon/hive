@@ -108,6 +108,12 @@ defmodule GiTF.Runtime.ProviderCircuit do
     provider = extract_provider(model)
     circuit_key = @circuit_prefix <> provider
 
+    # Per-provider rate limiting to smooth burst load
+    case GiTF.Runtime.ProviderLimiter.acquire(provider) do
+      :ok -> :ok
+      {:ok, delay_ms} -> Process.sleep(delay_ms)
+    end
+
     case CircuitBreaker.get_state(circuit_key) do
       :open ->
         maybe_broadcast_open(provider)

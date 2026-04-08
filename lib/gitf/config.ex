@@ -18,7 +18,10 @@ defmodule GiTF.Config do
     "ghost" => %{"spawn_timeout_ms" => 30_000},
     "tachikoma" => %{
       "patrol_interval_ms" => 30_000,
-      "archive_prune_age_hours" => 48
+      "archive_prune_age_hours" => 48,
+      "cost_retention_hours" => 168,
+      "artifact_compact_days" => 7,
+      "pattern_retention_max" => 200
     },
     "costs" => %{"warn_threshold_usd" => 5.0, "budget_usd" => 10.0},
     "llm" => %{"keys" => %{"google" => "", "anthropic" => ""}},
@@ -148,6 +151,9 @@ defmodule GiTF.Config do
   defp config_path(:spawn_timeout_ms), do: [:ghost, :spawn_timeout_ms]
   defp config_path(:patrol_interval_ms), do: [:tachikoma, :patrol_interval_ms]
   defp config_path(:archive_prune_age_hours), do: [:tachikoma, :archive_prune_age_hours]
+  defp config_path(:cost_retention_hours), do: [:tachikoma, :cost_retention_hours]
+  defp config_path(:artifact_compact_days), do: [:tachikoma, :artifact_compact_days]
+  defp config_path(:pattern_retention_max), do: [:tachikoma, :pattern_retention_max]
   defp config_path(_key), do: []
 
   # -- Private: TOML encoding ------------------------------------------------

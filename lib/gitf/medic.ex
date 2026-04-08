@@ -35,7 +35,8 @@ defmodule GiTF.Medic do
     :orphan_shells,
     :stale_ghosts,
     :major_workspace,
-    :disk_space
+    :disk_space,
+    :collection_sizes
   ]
 
   # -- Public API ------------------------------------------------------------
@@ -84,6 +85,7 @@ defmodule GiTF.Medic do
   def check(:stale_ghosts), do: check_stale_ghosts()
   def check(:major_workspace), do: check_major_workspace()
   def check(:disk_space), do: check_disk_space()
+  def check(:collection_sizes), do: check_collection_sizes()
   def check(:ollama_running), do: check_ollama_running()
 
   @doc """
@@ -322,6 +324,38 @@ defmodule GiTF.Medic do
       {:error, _} ->
         result(:major_workspace, :warn, "Cannot check: not in a gitf workspace")
     end
+  end
+
+  @tracked_collections ~w(missions ops ghosts shells costs events audit_results debriefs backups links runs failure_analyses success_patterns triage_feedback)a
+
+  defp check_collection_sizes do
+    counts =
+      @tracked_collections
+      |> Enum.map(fn col ->
+        count = GiTF.Archive.all(col) |> length()
+        {col, count}
+      end)
+      |> Enum.sort_by(fn {_, c} -> c end, :desc)
+
+    large = Enum.filter(counts, fn {_, c} -> c > 10_000 end)
+    total = Enum.reduce(counts, 0, fn {_, c}, acc -> acc + c end)
+
+    summary =
+      counts
+      |> Enum.filter(fn {_, c} -> c > 0 end)
+      |> Enum.map(fn {col, c} -> "#{col}:#{c}" end)
+      |> Enum.join(", ")
+
+    cond do
+      large != [] ->
+        names = Enum.map(large, fn {col, c} -> "#{col} (#{c})" end) |> Enum.join(", ")
+        result(:collection_sizes, :warn, "Large collections: #{names}. Total: #{total} records")
+
+      true ->
+        result(:collection_sizes, :ok, "#{total} records across #{length(counts)} collections (#{summary})")
+    end
+  rescue
+    _ -> result(:collection_sizes, :warn, "Could not check collection sizes")
   end
 
   defp check_disk_space do
