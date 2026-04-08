@@ -451,7 +451,40 @@ defmodule GiTF.Major.Planner do
         end
       end)
 
-    {:ok, Enum.reverse(ops)}
+    ops = Enum.reverse(ops)
+    add_file_overlap_dependencies(ops)
+    {:ok, ops}
+  end
+
+  # Scan all op pairs for target_files overlap and add implicit dependencies.
+  # Earlier ops (lower index) become dependencies of later ops with shared files.
+  defp add_file_overlap_dependencies(ops) do
+    require Logger
+
+    ops
+    |> Enum.with_index()
+    |> Enum.each(fn {op, idx} ->
+      ops
+      |> Enum.take(idx)
+      |> Enum.each(fn earlier_op ->
+        if GiTF.Conflict.files_overlap?(op.target_files, earlier_op.target_files) do
+          case GiTF.Ops.add_dependency(op.id, earlier_op.id) do
+            :ok ->
+              overlap = GiTF.Conflict.overlapping_files(op.target_files, earlier_op.target_files)
+
+              Logger.info(
+                "Auto-added file overlap dependency: #{op.id} depends on #{earlier_op.id} (shared: #{Enum.join(overlap, ", ")})"
+              )
+
+            {:error, :already_exists} ->
+              :ok
+
+            {:error, reason} ->
+              Logger.debug("Could not add file overlap dependency #{op.id} -> #{earlier_op.id}: #{inspect(reason)}")
+          end
+        end
+      end)
+    end)
   end
 
   defp resolve_model(nil), do: nil

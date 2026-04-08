@@ -50,7 +50,8 @@ defmodule GiTF.Telemetry do
     [:gitf, :health, :checked],
     [:gitf, :store, :data_loss],
     [:gitf, :store, :write_error],
-    [:gitf, :model, :downgraded]
+    [:gitf, :model, :downgraded],
+    [:gitf, :conflict, :prevented]
   ]
 
   @doc "Returns all defined telemetry event names."

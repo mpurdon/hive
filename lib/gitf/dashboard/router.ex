@@ -24,6 +24,7 @@ defmodule GiTF.Dashboard.Router do
     live("/missions", MissionsLive)
     live("/ghosts", GhostsLive)
     live("/costs", CostsLive)
+    live("/models", ModelPerformanceLive)
     live("/links", LinksLive)
     live("/progress", ProgressLive)
     live("/approvals", ApprovalsLive)

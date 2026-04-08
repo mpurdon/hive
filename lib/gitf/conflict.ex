@@ -11,6 +11,24 @@ defmodule GiTF.Conflict do
   alias GiTF.Archive
 
   @doc """
+  Returns true if two file path lists have any overlap.
+  """
+  @spec files_overlap?([String.t()] | nil, [String.t()] | nil) :: boolean()
+  def files_overlap?(files_a, files_b) do
+    set_a = MapSet.new(files_a || [])
+    not MapSet.disjoint?(set_a, MapSet.new(files_b || []))
+  end
+
+  @doc """
+  Returns the list of file paths that appear in both lists.
+  """
+  @spec overlapping_files([String.t()] | nil, [String.t()] | nil) :: [String.t()]
+  def overlapping_files(files_a, files_b) do
+    MapSet.intersection(MapSet.new(files_a || []), MapSet.new(files_b || []))
+    |> MapSet.to_list()
+  end
+
+  @doc """
   Checks a shell's branch for conflicts against the main branch.
 
   Returns `{:ok, :clean}` or `{:error, :conflicts, file_list}`.

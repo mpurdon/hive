@@ -33,6 +33,7 @@ defmodule GiTF.Dashboard.AppLayout do
           <a href={"#{@prefix}/missions"} class={if active?(@current_path, "/missions"), do: "active"}>Missions</a>
           <a href={"#{@prefix}/ghosts"} class={if @current_path == "/ghosts", do: "active"}>Ghosts</a>
           <a href={"#{@prefix}/costs"} class={if @current_path == "/costs", do: "active"}>Costs</a>
+          <a href={"#{@prefix}/models"} class={if @current_path == "/models", do: "active"}>Models</a>
           <a href={"#{@prefix}/links"} class={if @current_path == "/links", do: "active"}>Links</a>
           <a href={"#{@prefix}/approvals"} class={if active?(@current_path, "/approvals"), do: "active"}>
             Approvals

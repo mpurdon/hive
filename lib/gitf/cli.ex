@@ -1482,6 +1482,52 @@ defmodule GiTF.CLI do
     Format.success("Link sent (#{link_msg.id})")
   end
 
+  defp dispatch([:models, :performance], _result) do
+    models = GiTF.ModelPerformance.summary()
+
+    if models == [] do
+      IO.puts("No model performance data recorded yet.")
+    else
+      IO.puts("Model Performance Leaderboard:")
+      IO.puts("")
+
+      headers = ["Model", "Ops", "Success", "Avg Quality", "Retries", "Cost", "Cost/Success"]
+
+      rows =
+        Enum.map(models, fn m ->
+          [
+            m.model || "unknown",
+            "#{m.total_ops}",
+            "#{Float.round(m.success_rate * 100, 1)}%",
+            if(m.avg_quality, do: "#{m.avg_quality}", else: "-"),
+            "#{Float.round(m.retry_rate * 100, 1)}%",
+            "$#{:erlang.float_to_binary(m.total_cost / 1, decimals: 4)}",
+            if(m.cost_per_success, do: "$#{:erlang.float_to_binary(m.cost_per_success / 1, decimals: 4)}", else: "-")
+          ]
+        end)
+
+      Format.table(headers, rows)
+      IO.puts("")
+
+      # Phase comparison summary
+      comparison = GiTF.ModelPerformance.phase_comparison()
+
+      if map_size(comparison) > 0 do
+        IO.puts("Phase Comparison:")
+
+        for {phase, phase_models} <- Enum.sort_by(comparison, fn {p, _} -> p end) do
+          IO.puts("  #{phase}:")
+
+          for m <- phase_models do
+            cost_str = "$#{:erlang.float_to_binary(m.cost / 1, decimals: 4)}"
+            rate_str = "#{Float.round(m.success_rate * 100, 1)}%"
+            IO.puts("    #{String.pad_trailing(m.model || "?", 35)} #{String.pad_leading(rate_str, 7)} success  #{String.pad_leading(cost_str, 10)}")
+          end
+        end
+      end
+    end
+  end
+
   defp dispatch([:shell, :list], _result) do
     case GiTF.Shell.list(status: "active") do
       [] ->
@@ -3816,6 +3862,16 @@ defmodule GiTF.CLI do
                   required: false
                 ]
               ]
+            ]
+          ]
+        ],
+        models: [
+          name: "models",
+          about: "View model performance metrics",
+          subcommands: [
+            performance: [
+              name: "performance",
+              about: "Show model performance leaderboard"
             ]
           ]
         ],

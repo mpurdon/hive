@@ -1113,7 +1113,9 @@ defmodule GiTF.Major do
         available_slots = max(state.max_ghosts - active_count, 0)
         stagger_delay = GiTF.Config.Provider.get([:major, :stagger_delay_ms], 2000)
 
-        jobs_to_spawn = Enum.take(pending_jobs, available_slots)
+        jobs_to_spawn =
+          Enum.take(pending_jobs, available_slots)
+          |> filter_file_overlaps(mission)
 
         # Ensure an active run exists for this mission when spawning ops
         run = ensure_active_run(mission.id, jobs_to_spawn)
@@ -1224,6 +1226,42 @@ defmodule GiTF.Major do
     end
   rescue
     _ -> :ok
+  end
+
+  # -- Private: file overlap guard ---------------------------------------------
+
+  defp filter_file_overlaps(candidates, mission) do
+    # Get target_files of all currently running (non-phase) ops for this mission
+    running_files =
+      mission.ops
+      |> Enum.filter(&(&1.status in ["running", "assigned"] and not (&1[:phase_job] || false)))
+      |> Enum.flat_map(&(&1[:target_files] || []))
+      |> MapSet.new()
+
+    if MapSet.size(running_files) == 0 do
+      candidates
+    else
+      Enum.filter(candidates, fn op ->
+        op_files = MapSet.new(op[:target_files] || [])
+        overlap = MapSet.intersection(op_files, running_files)
+
+        if MapSet.size(overlap) > 0 do
+          Logger.info(
+            "Deferring op #{op.id}: target files overlap with running op (#{Enum.join(overlap, ", ")})"
+          )
+
+          GiTF.Telemetry.emit(
+            [:gitf, :conflict, :prevented],
+            %{},
+            %{op_id: op.id, mission_id: mission.id, overlapping_files: MapSet.to_list(overlap)}
+          )
+
+          false
+        else
+          true
+        end
+      end)
+    end
   end
 
   # -- Private: triage helpers -------------------------------------------------
