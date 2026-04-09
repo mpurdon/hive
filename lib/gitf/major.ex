@@ -1562,41 +1562,181 @@ defmodule GiTF.Major do
     Process.send_after(self(), :spawn_ready_jobs, @job_spawn_interval)
   end
 
+  @actionable_statuses ~w(active pending planning research implementation awaiting_approval)
+
   defp spawn_all_ready_jobs(state) do
-    missions = GiTF.Archive.all(:missions)
-    all_jobs = GiTF.Archive.all(:ops)
+    # Pre-flight health gate — don't spawn into a degraded system
+    case preflight_health_check() do
+      {:degraded, reasons} ->
+        Logger.warning(
+          "Spawn gate: system degraded (#{Enum.join(reasons, ", ")}), skipping spawn cycle"
+        )
 
-    Enum.reduce(missions, state, fn mission, acc ->
-      if mission[:status] in [
-           "active",
-           "pending",
-           "planning",
-           "research",
-           "implementation",
-           "awaiting_approval"
-         ] do
-        # Check for deadlocks before spawning
-        case GiTF.Resilience.detect_deadlock(mission.id) do
-          {:error, {:deadlock, cycles}} ->
-            Logger.warning("Deadlock in mission #{mission.id}, auto-resolving")
-            GiTF.Resilience.resolve_deadlock(mission.id, cycles)
+        state
 
-          _ ->
-            :ok
-        end
-
-        # Attach ops to mission (they're stored separately)
-        quest_jobs = Enum.filter(all_jobs, fn j -> j[:mission_id] == mission[:id] end)
-        quest_with_jobs = Map.put(mission, :ops, quest_jobs)
-        spawn_ready_jobs(quest_with_jobs, acc)
-      else
-        acc
-      end
-    end)
+      :ok ->
+        do_priority_spawn_cycle(state)
+    end
   rescue
     e ->
       Logger.warning("Job spawner error: #{Exception.message(e)}")
       state
+  end
+
+  # Global priority-sorted scheduling: collects all pending-ready ops across
+  # all eligible missions, sorts by effective priority, and fills ghost slots
+  # in priority order with hold-back for low-priority work.
+  defp do_priority_spawn_cycle(state) do
+    missions = GiTF.Archive.all(:missions)
+    all_ops = GiTF.Archive.all(:ops)
+    all_deps = GiTF.Archive.all(:op_dependencies)
+
+    # Build lookup maps once to avoid N+1 Archive scans in the hot path
+    mission_map =
+      missions
+      |> Enum.filter(&(&1[:status] in @actionable_statuses))
+      |> Map.new(&{&1.id, &1})
+
+    ops_by_id = Map.new(all_ops, &{&1.id, &1})
+    deps_by_op = Enum.group_by(all_deps, & &1.op_id)
+
+    # Resolve deadlocks before collecting ops
+    Enum.each(mission_map, fn {mission_id, _mission} ->
+      case GiTF.Resilience.detect_deadlock(mission_id) do
+        {:error, {:deadlock, cycles}} ->
+          Logger.warning("Deadlock in mission #{mission_id}, auto-resolving")
+          GiTF.Resilience.resolve_deadlock(mission_id, cycles)
+
+        _ ->
+          :ok
+      end
+    end)
+
+    # Collect all pending-and-ready ops using pre-loaded dependency data
+    pending_ops =
+      all_ops
+      |> Enum.filter(fn op ->
+        op.status == "pending" and
+          Map.has_key?(mission_map, op[:mission_id]) and
+          GiTF.Ops.ready?(op.id, deps_by_op, ops_by_id)
+      end)
+
+    if pending_ops == [] do
+      state
+    else
+      # Annotate each op with its mission's effective priority and sort
+      annotated =
+        pending_ops
+        |> Enum.map(fn op ->
+          mission = mission_map[op.mission_id]
+          eff_priority = GiTF.Priority.effective_priority(mission)
+          {op, mission, eff_priority}
+        end)
+        |> Enum.sort_by(fn {_op, mission, eff_priority} ->
+          {GiTF.Priority.weight(eff_priority), Map.get(mission, :inserted_at, DateTime.utc_now())}
+        end)
+
+      # Hold-back: if any high-priority work is pending, suppress low/background ops
+      has_high_priority =
+        Enum.any?(annotated, fn {_op, _m, eff} -> GiTF.Priority.high_priority?(eff) end)
+
+      {candidates, held_back} =
+        if has_high_priority do
+          Enum.split_with(annotated, fn {_op, _m, eff} ->
+            not GiTF.Priority.hold_back?(eff)
+          end)
+        else
+          {annotated, []}
+        end
+
+      if held_back != [] do
+        Logger.info(
+          "Priority hold-back: suppressing #{length(held_back)} low-priority ops while high-priority work is pending"
+        )
+      end
+
+      # Compute available slots
+      active_count = GiTF.Ghosts.list(status: GhostStatus.working()) |> length()
+      available_slots = max(state.max_ghosts - active_count, 0)
+      stagger_delay = GiTF.Config.Provider.get([:major, :stagger_delay_ms], 2000)
+
+      # Pre-compute running files per mission (avoids re-scanning all_ops per candidate)
+      running_files_by_mission = precompute_running_files(all_ops)
+
+      # Pre-compute budget status per mission (avoids repeated Archive scans)
+      budget_cache =
+        mission_map
+        |> Map.keys()
+        |> Map.new(fn mid -> {mid, check_quest_budget(mid)} end)
+
+      # Take up to available_slots, filtering file overlaps and budget
+      {ops_to_spawn, _} =
+        Enum.reduce(candidates, {[], MapSet.new()}, fn {op, mission, _eff}, {selected, selected_files} ->
+          if length(selected) >= available_slots do
+            {selected, selected_files}
+          else
+            budget_ok = budget_cache[mission.id] == :ok
+
+            # File overlap check against running ops + already-selected ops
+            op_files = MapSet.new(op[:target_files] || [])
+            mission_running = Map.get(running_files_by_mission, mission.id, MapSet.new())
+            all_blocked = MapSet.union(selected_files, mission_running)
+            overlap = MapSet.intersection(op_files, all_blocked)
+
+            if budget_ok and MapSet.size(overlap) == 0 do
+              {[{op, mission} | selected], MapSet.union(selected_files, op_files)}
+            else
+              {selected, selected_files}
+            end
+          end
+        end)
+
+      ops_to_spawn = Enum.reverse(ops_to_spawn)
+
+      # Spawn each selected op with triage + recon logic
+      Enum.with_index(ops_to_spawn)
+      |> Enum.reduce(state, fn {{op, mission}, idx}, acc ->
+        if idx > 0 and stagger_delay > 0, do: Process.sleep(stagger_delay)
+
+        {complexity, pipeline} = GiTF.Triage.triage(op)
+        triage_store_job(op, complexity, pipeline)
+
+        already_recon? = Map.get(op, :recon, false)
+        phase_job? = Map.get(op, :phase_job, false)
+
+        run = ensure_active_run(mission.id, [op])
+
+        if complexity == :complex and not already_recon? and not phase_job? and
+             GiTF.Recon.should_scout?(op) and not scout_exists?(op.id) do
+          case GiTF.Recon.create_scout_job(op.id, op.sector_id) do
+            {:ok, scout_job} ->
+              Logger.info("Created recon for complex op #{op.id}, deferring spawn")
+              spawn_single_job(scout_job, acc, run)
+
+            {:error, reason} ->
+              Logger.warning(
+                "Failed to create recon for op #{op.id}: #{inspect(reason)}, spawning directly"
+              )
+
+              spawn_single_job(op, acc, run)
+          end
+        else
+          spawn_single_job(op, acc, run)
+        end
+      end)
+    end
+  end
+
+  # Pre-compute running/assigned file sets per mission (single pass over all_ops)
+  defp precompute_running_files(all_ops) do
+    all_ops
+    |> Enum.filter(fn op ->
+      op.status in ["running", "assigned"] and not Map.get(op, :phase_job, false)
+    end)
+    |> Enum.group_by(& &1[:mission_id])
+    |> Map.new(fn {mid, ops} ->
+      {mid, ops |> Enum.flat_map(&(&1[:target_files] || [])) |> MapSet.new()}
+    end)
   end
 
   # -- Private: link_msg recovery ------------------------------------------------

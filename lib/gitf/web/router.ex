@@ -72,6 +72,7 @@ defmodule GiTF.Web.Router do
     get("/missions", ApiController, :list_quests)
     get("/missions/:id", ApiController, :show_quest)
     delete("/missions/:id", ApiController, :delete_quest)
+    put("/missions/:id/priority", ApiController, :update_quest_priority)
     post("/missions/:id/kill", ApiController, :kill_quest)
     post("/missions/:id/close", ApiController, :close_quest)
     post("/missions/:id/start", ApiController, :start_quest)

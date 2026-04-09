@@ -90,6 +90,35 @@ defmodule GiTF.Runtime.ModelResolver do
     _ -> "google"
   end
 
+  @doc """
+  Normalizes a model name into a short key for comparison and lookups.
+
+  Strips provider prefix, "claude-" version prefix, and any version suffix.
+  Used by Trust, Clearance, and intelligence modules to group model variants.
+
+      iex> ModelResolver.normalize_key("anthropic:claude-sonnet-4-6")
+      "sonnet"
+
+      iex> ModelResolver.normalize_key("google:gemini-2.5-pro")
+      "gemini"
+
+      iex> ModelResolver.normalize_key(nil)
+      nil
+  """
+  @spec normalize_key(String.t() | atom() | nil) :: String.t() | nil
+  def normalize_key(nil), do: nil
+
+  def normalize_key(model) when is_binary(model) do
+    model
+    |> String.split(":")
+    |> List.last()
+    |> String.replace("claude-", "")
+    |> String.split("-")
+    |> hd()
+  end
+
+  def normalize_key(model) when is_atom(model), do: normalize_key(Atom.to_string(model))
+
   @doc "Returns the ordered provider priority list."
   def provider_priority do
     GiTF.Runtime.ProviderManager.provider_priority()

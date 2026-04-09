@@ -216,16 +216,5 @@ defmodule GiTF.Intel.DecayDetector do
     end
   end
 
-  defp normalize_model(nil), do: nil
-
-  defp normalize_model(model) when is_binary(model) do
-    model
-    |> String.split(":")
-    |> List.last()
-    |> String.replace("claude-", "")
-    |> String.split("-")
-    |> hd()
-  end
-
-  defp normalize_model(model) when is_atom(model), do: normalize_model(Atom.to_string(model))
+  defp normalize_model(model), do: GiTF.Runtime.ModelResolver.normalize_key(model)
 end

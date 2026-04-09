@@ -102,7 +102,9 @@ defmodule GiTF.Ops do
         # Triage result
         triage_result: attrs[:triage_result],
         # Skip verification (simple ops, recon ops)
-        skip_verification: attrs[:skip_verification] || false
+        skip_verification: attrs[:skip_verification] || false,
+        # Priority (inherited from mission)
+        priority: attrs[:priority] || inherit_mission_priority(attrs[:mission_id])
       }
 
       Archive.insert(:ops, record)
@@ -382,6 +384,17 @@ defmodule GiTF.Ops do
     end
   end
 
+  defp inherit_mission_priority(nil), do: :normal
+
+  defp inherit_mission_priority(mission_id) do
+    case GiTF.Archive.get(:missions, mission_id) do
+      %{priority: p} when is_atom(p) -> p
+      _ -> :normal
+    end
+  rescue
+    _ -> :normal
+  end
+
   defp normalize_risk(level) when is_atom(level), do: level
   defp normalize_risk("low"), do: :low
   defp normalize_risk("medium"), do: :medium
@@ -502,8 +515,36 @@ defmodule GiTF.Ops do
           true
 
         %{status: s} when s in ["failed", "rejected"] ->
-          # Dependency failed — check if a successful retry exists
           retry_completed?(dep.depends_on_id)
+
+        _ ->
+          false
+      end
+    end)
+  end
+
+  @doc """
+  Batch variant of `ready?/1` for hot-path scheduling.
+
+  Takes pre-loaded dependencies grouped by op_id and an ops-by-id map to
+  avoid per-op Archive scans. Used by the scheduler to check readiness
+  for many ops in a single pass.
+  """
+  @spec ready?(String.t(), %{optional(String.t()) => [map()]}, %{optional(String.t()) => map()}) ::
+          boolean()
+  def ready?(op_id, deps_by_op, ops_by_id) do
+    deps = Map.get(deps_by_op, op_id, [])
+
+    Enum.all?(deps, fn dep ->
+      case Map.get(ops_by_id, dep.depends_on_id) do
+        nil ->
+          true
+
+        %{status: "done"} ->
+          true
+
+        %{status: s} when s in ["failed", "rejected"] ->
+          retry_completed_in?(dep.depends_on_id, ops_by_id)
 
         _ ->
           false
@@ -515,6 +556,12 @@ defmodule GiTF.Ops do
     Archive.find_one(:ops, fn j ->
       Map.get(j, :retry_of) == op_id && j.status == "done"
     end) != nil
+  end
+
+  defp retry_completed_in?(op_id, ops_by_id) do
+    Enum.any?(ops_by_id, fn {_id, op} ->
+      Map.get(op, :retry_of) == op_id and op.status == "done"
+    end)
   end
 
   @doc """

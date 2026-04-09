@@ -70,21 +70,49 @@ defmodule GiTF.Ingestion.Watchdog do
     # Simple heuristic: Use filename as title, content as goal/description
     title = Path.rootname(filename) |> String.replace("_", " ") |> String.capitalize()
 
+    # Parse optional frontmatter for priority (e.g., "Priority: critical" on first line)
+    {priority, goal} = parse_priority_frontmatter(content)
+
     # We need a sector. For now, assume the current working directory's main sector.
     # A robust implementation might parse "Sector: xxx" from the file.
     # We'll use the default/first sector found.
 
+    attrs = %{
+      name: title,
+      goal: goal,
+      sector_id: nil,
+      source: "inbox:#{filename}"
+    }
+
+    attrs = if priority, do: Map.put(attrs, :priority, priority), else: attrs
+
     case GiTF.Sector.list() do
       [sector | _] ->
-        GiTF.Missions.create(%{
-          name: title,
-          goal: content,
-          sector_id: sector.id,
-          source: "inbox:#{filename}"
-        })
+        GiTF.Missions.create(Map.put(attrs, :sector_id, sector.id))
 
       [] ->
         {:error, "No sectors available to assign mission"}
+    end
+  end
+
+  # Parses "Priority: <level>" from the first line of the content.
+  # Returns {priority_atom | nil, remaining_content}.
+  defp parse_priority_frontmatter(content) do
+    case String.split(content, "\n", parts: 2) do
+      [first_line, rest] ->
+        case Regex.run(~r/^Priority:\s*(\w+)\s*$/i, String.trim(first_line)) do
+          [_, level] ->
+            case GiTF.Priority.parse(level) do
+              {:ok, priority} -> {priority, String.trim(rest)}
+              _ -> {nil, content}
+            end
+
+          _ ->
+            {nil, content}
+        end
+
+      _ ->
+        {nil, content}
     end
   end
 end

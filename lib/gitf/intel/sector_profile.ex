@@ -577,18 +577,7 @@ defmodule GiTF.Intel.SectorProfile do
     Enum.reverse(patterns)
   end
 
-  defp normalize_model(nil), do: nil
-
-  defp normalize_model(model) when is_binary(model) do
-    model
-    |> String.split(":")
-    |> List.last()
-    |> String.replace("claude-", "")
-    |> String.split("-")
-    |> hd()
-  end
-
-  defp normalize_model(model) when is_atom(model), do: normalize_model(Atom.to_string(model))
+  defp normalize_model(model), do: GiTF.Runtime.ModelResolver.normalize_key(model)
 
   defp round_or_nil(nil), do: nil
   defp round_or_nil(n) when is_number(n), do: round(n)

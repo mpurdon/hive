@@ -8,7 +8,7 @@ defmodule GiTF.Migrations do
 
   alias GiTF.Archive
 
-  @current_version 5
+  @current_version 6
 
   @doc """
   Run all pending migrations.
@@ -124,6 +124,30 @@ defmodule GiTF.Migrations do
     end)
 
     # Initialize audit_results collection (empty)
+    :ok
+  end
+
+  defp run_migration(6) do
+    # Migration 6: Add priority fields to missions and ops
+    missions = Archive.all(:missions)
+
+    Enum.each(missions, fn mission ->
+      updated =
+        mission
+        |> Map.put_new(:priority, :normal)
+        |> Map.put_new(:priority_source, :default)
+        |> Map.put_new(:priority_set_at, Map.get(mission, :inserted_at, DateTime.utc_now()))
+
+      Archive.put(:missions, updated)
+    end)
+
+    ops = Archive.all(:ops)
+
+    Enum.each(ops, fn op ->
+      updated = Map.put_new(op, :priority, :normal)
+      Archive.put(:ops, updated)
+    end)
+
     :ok
   end
 end

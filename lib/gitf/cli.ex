@@ -224,7 +224,7 @@ defmodule GiTF.CLI do
 
   defp find_mode_flag([head | rest], acc, mode), do: find_mode_flag(rest, [head | acc], mode)
 
-  @quest_subcommands ~w(new list show remove sync report close spec plan start status)
+  @quest_subcommands ~w(new list show remove sync report close spec plan start status priority)
 
   defp expand_defaults(["mission" | rest]) when rest != [] do
     case rest do
@@ -1867,6 +1867,35 @@ defmodule GiTF.CLI do
     end
   end
 
+  defp dispatch([:mission, :priority], result) do
+    id = result_get(result, :args, :id)
+    level = result_get(result, :args, :level)
+
+    case GiTF.Priority.parse(level || "") do
+      {:ok, priority} ->
+        case GiTF.Missions.update_priority(id, priority) do
+          {:ok, mission} ->
+            Format.success("Mission #{id} priority set to #{priority}")
+            eff = GiTF.Priority.effective_priority(mission)
+
+            if eff != priority do
+              Format.info("Effective priority: #{eff} (decay adjusted)")
+            end
+
+          {:error, :not_found} ->
+            show_not_found_error(:mission, id)
+
+          {:error, reason} ->
+            Format.error("Failed: #{inspect(reason)}")
+        end
+
+      {:error, _} ->
+        Format.error(
+          "Invalid priority '#{level}'. Use: critical, high, normal, low, background"
+        )
+    end
+  end
+
   defp dispatch([:run], result) do
     goal = result_get(result, :args, :goal)
 
@@ -1925,7 +1954,10 @@ defmodule GiTF.CLI do
 
     if GiTF.Client.remote?() do
       sector_opt = result_get(result, :options, :sector)
-      attrs = if sector_opt, do: %{goal: goal, sector_id: sector_opt}, else: %{goal: goal}
+      priority_opt = result_get(result, :options, :priority)
+      attrs = %{goal: goal}
+      attrs = if sector_opt, do: Map.put(attrs, :sector_id, sector_opt), else: attrs
+      attrs = if priority_opt, do: Map.put(attrs, :priority, priority_opt), else: attrs
 
       case GiTF.Client.create_quest(attrs) do
         {:ok, mission} ->
@@ -1953,10 +1985,14 @@ defmodule GiTF.CLI do
           goal
         end
 
+      priority_opt = result_get(result, :options, :priority)
+      base_attrs = %{goal: goal}
+      base_attrs = if priority_opt, do: Map.put(base_attrs, :priority, priority_opt), else: base_attrs
+
       quest_result =
         case resolve_sector_id(result_get(result, :options, :sector)) do
-          {:ok, cid} -> GiTF.Missions.create(%{goal: goal, sector_id: cid})
-          {:error, :no_sector} -> GiTF.Missions.create(%{goal: goal})
+          {:ok, cid} -> GiTF.Missions.create(Map.put(base_attrs, :sector_id, cid))
+          {:error, :no_sector} -> GiTF.Missions.create(base_attrs)
         end
 
       case quest_result do
@@ -2059,9 +2095,14 @@ defmodule GiTF.CLI do
 
     case quest_result do
       {:ok, mission} ->
-        IO.puts("ID:     #{mission[:id]}")
-        IO.puts("Name:   #{mission[:name] || mission[:goal] || "-"}")
-        IO.puts("Status: #{mission[:status] || "pending"}")
+        IO.puts("ID:       #{mission[:id]}")
+        IO.puts("Name:     #{mission[:name] || mission[:goal] || "-"}")
+        IO.puts("Status:   #{mission[:status] || "pending"}")
+
+        priority = Map.get(mission, :priority, :normal)
+        eff = GiTF.Priority.effective_priority(mission)
+        priority_str = if eff != priority, do: "#{priority} (effective: #{eff})", else: "#{priority}"
+        IO.puts("Priority: #{priority_str}")
 
         if mission[:sector_id] do
           sector_name =
@@ -3471,6 +3512,13 @@ defmodule GiTF.CLI do
                   help: "Sector ID (defaults to current sector)",
                   parser: :string,
                   required: false
+                ],
+                priority: [
+                  short: "-p",
+                  long: "--priority",
+                  help: "Priority level: critical, high, normal, low, background",
+                  parser: :string,
+                  required: false
                 ]
               ],
               flags: [
@@ -3541,6 +3589,24 @@ defmodule GiTF.CLI do
                 id: [
                   value_name: "ID",
                   help: "Quest ID to close",
+                  required: true,
+                  parser: :string
+                ]
+              ]
+            ],
+            priority: [
+              name: "priority",
+              about: "Set mission priority (critical, high, normal, low, background)",
+              args: [
+                id: [
+                  value_name: "ID",
+                  help: "Mission ID",
+                  required: true,
+                  parser: :string
+                ],
+                level: [
+                  value_name: "LEVEL",
+                  help: "Priority level: critical, high, normal, low, background",
                   required: true,
                   parser: :string
                 ]

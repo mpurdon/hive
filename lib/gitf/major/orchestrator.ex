@@ -1836,46 +1836,15 @@ defmodule GiTF.Major.Orchestrator do
     end
   end
 
-  defp normalize_model_key(model) when is_binary(model) do
-    model
-    |> String.split(":")
-    |> List.last()
-    |> String.replace("claude-", "")
-    |> String.split("-")
-    |> hd()
-  end
+  defp normalize_model_key(model), do: GiTF.Runtime.ModelResolver.normalize_key(model)
 
-  defp normalize_model_key(_), do: nil
-
-  defp spawn_implementation_jobs(mission) do
-    case GiTF.gitf_dir() do
-      {:ok, gitf_root} ->
-        mission.ops
-        |> Enum.reject(& &1[:phase_job])
-        |> Enum.filter(&(&1.status == "pending"))
-        |> Enum.filter(&GiTF.Ops.ready?(&1.id))
-        |> Enum.each(fn op ->
-          case GiTF.Ghosts.spawn_detached(op.id, op.sector_id, gitf_root) do
-            {:ok, _ghost} ->
-              :ok
-
-            {:error, reason} ->
-              Logger.warning(
-                "Orchestrator: failed to spawn impl ghost for op #{op.id} " <>
-                  "in mission #{mission.id}: #{inspect(reason)}"
-              )
-
-              GiTF.Telemetry.emit([:gitf, :phase, :spawn_failed], %{}, %{
-                mission_id: mission.id,
-                phase: "implementation",
-                op_id: op.id,
-                reason: inspect(reason)
-              })
-          end
-        end)
-
-      {:error, reason} ->
-        Logger.warning("Orchestrator: cannot spawn impl jobs — no gitf root: #{inspect(reason)}")
+  # Delegates to Major's priority-aware scheduler instead of bypassing it.
+  # The scheduler will pick up pending implementation ops in priority order,
+  # respecting ghost slot limits and budget checks.
+  defp spawn_implementation_jobs(_mission) do
+    case Process.whereis(GiTF.Major) do
+      pid when is_pid(pid) -> send(pid, :spawn_ready_jobs)
+      nil -> Logger.warning("Orchestrator: Major process not found, cannot trigger spawn")
     end
   end
 

@@ -41,7 +41,7 @@ defmodule GiTF.Web.ApiController do
   def create_quest(conn, params) do
     attrs =
       params
-      |> Map.take(["goal", "sector_id"])
+      |> Map.take(["goal", "sector_id", "priority"])
       |> atomize_keys()
 
     case GiTF.Missions.create(attrs) do
@@ -83,6 +83,20 @@ defmodule GiTF.Web.ApiController do
     case GiTF.Missions.get(id) do
       {:ok, mission} -> json(conn, %{data: serialize_quest(mission)})
       {:error, :not_found} -> error(conn, 404, :not_found)
+    end
+  end
+
+  def update_quest_priority(conn, %{"id" => id, "priority" => priority_str}) do
+    case GiTF.Priority.parse(priority_str) do
+      {:ok, priority} ->
+        case GiTF.Missions.update_priority(id, priority) do
+          {:ok, mission} -> json(conn, %{data: serialize_quest(mission)})
+          {:error, :not_found} -> error(conn, 404, :not_found)
+          {:error, reason} -> error(conn, 422, reason)
+        end
+
+      {:error, _} ->
+        error(conn, 422, "Invalid priority. Use: critical, high, normal, low, background")
     end
   end
 
@@ -633,6 +647,9 @@ defmodule GiTF.Web.ApiController do
       goal: q[:goal],
       sector_id: q[:sector_id],
       current_phase: q[:current_phase],
+      priority: q[:priority] || :normal,
+      priority_source: q[:priority_source],
+      effective_priority: GiTF.Priority.effective_priority(q),
       inserted_at: to_string(q[:inserted_at]),
       ops:
         case q[:ops] do

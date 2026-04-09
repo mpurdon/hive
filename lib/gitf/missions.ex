@@ -31,12 +31,31 @@ defmodule GiTF.Missions do
     else
       name = attrs[:name] || attrs["name"] || generate_name(goal)
 
+      # Priority: use explicit value, infer from goal, or default
+      {priority, priority_source} =
+        case attrs[:priority] || attrs["priority"] do
+          p when is_atom(p) and p != nil ->
+            if GiTF.Priority.valid?(p), do: {p, :manual}, else: GiTF.Priority.infer_from_goal(goal)
+
+          p when is_binary(p) ->
+            case GiTF.Priority.parse(p) do
+              {:ok, parsed} -> {parsed, :manual}
+              _ -> GiTF.Priority.infer_from_goal(goal)
+            end
+
+          _ ->
+            GiTF.Priority.infer_from_goal(goal)
+        end
+
       record = %{
         name: name,
         goal: goal,
         status: attrs[:status] || "pending",
         sector_id: attrs[:sector_id] || attrs["sector_id"],
         current_phase: "pending",
+        priority: priority,
+        priority_source: priority_source,
+        priority_set_at: DateTime.utc_now(),
         review_plan: attrs[:review_plan] || attrs["review_plan"] || false,
         research_summary: nil,
         implementation_plan: nil,
@@ -48,7 +67,9 @@ defmodule GiTF.Missions do
         {:ok, mission} = result ->
           GiTF.Telemetry.emit([:gitf, :mission, :created], %{}, %{
             mission_id: mission.id,
-            name: name
+            name: name,
+            priority: priority,
+            priority_source: priority_source
           })
 
           result
@@ -109,6 +130,42 @@ defmodule GiTF.Missions do
         updated = Map.merge(mission, attrs)
         Archive.put(:missions, updated)
         {:ok, updated}
+    end
+  end
+
+  @doc """
+  Updates a mission's priority and resets the decay clock.
+
+  Returns `{:ok, updated_mission}` or `{:error, reason}`.
+  """
+  @spec update_priority(String.t(), atom()) :: {:ok, map()} | {:error, term()}
+  def update_priority(mission_id, priority) do
+    if not GiTF.Priority.valid?(priority) do
+      {:error, :invalid_priority}
+    else
+      old_priority =
+        case Archive.get(:missions, mission_id) do
+          %{priority: p} -> p
+          _ -> :normal
+        end
+
+      case update(mission_id, %{
+             priority: priority,
+             priority_source: :manual,
+             priority_set_at: DateTime.utc_now()
+           }) do
+        {:ok, updated} ->
+          GiTF.Telemetry.emit([:gitf, :mission, :priority_changed], %{}, %{
+            mission_id: mission_id,
+            old_priority: old_priority,
+            new_priority: priority
+          })
+
+          {:ok, updated}
+
+        error ->
+          error
+      end
     end
   end
 
