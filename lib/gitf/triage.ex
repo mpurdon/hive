@@ -45,7 +45,8 @@ defmodule GiTF.Triage do
   """
   @spec triage(map()) :: {complexity(), pipeline()}
   def triage(op) do
-    complexity = determine_complexity(op)
+    raw_complexity = determine_complexity(op)
+    complexity = maybe_adjust_complexity(raw_complexity, Map.get(op, :sector_id))
     pipeline = pipeline_for(complexity)
 
     GiTF.Telemetry.emit(
@@ -155,5 +156,26 @@ defmodule GiTF.Triage do
     title = Map.get(op, :title, "") || ""
     description = Map.get(op, :description, "") || ""
     String.downcase(title <> " " <> description)
+  end
+
+  # Consults sector intelligence to adjust complexity based on historical accuracy.
+  # Only adjusts at :medium or :high confidence.
+  defp maybe_adjust_complexity(complexity, nil), do: complexity
+
+  defp maybe_adjust_complexity(complexity, sector_id) do
+    profile = GiTF.Intel.SectorProfile.get_or_compute(sector_id)
+
+    case profile do
+      %{confidence: conf, lessons: %{triage_accuracy: %{adjustments: adjustments}}}
+      when conf in [:medium, :high] and adjustments != [] ->
+        Enum.find_value(adjustments, complexity, fn {from, to} ->
+          if from == complexity, do: to
+        end)
+
+      _ ->
+        complexity
+    end
+  rescue
+    _ -> complexity
   end
 end

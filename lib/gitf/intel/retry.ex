@@ -21,8 +21,18 @@ defmodule GiTF.Intel.Retry do
 
   @doc """
   Get recommended retry strategy for a failure type.
+
+  When `sector_id` is provided, consults the sector intelligence profile
+  for historically effective strategies before falling back to the static map.
   """
-  def recommend_strategy(failure_type) do
+  def recommend_strategy(failure_type, sector_id \\ nil) do
+    case sector_id && learned_strategy(failure_type, sector_id) do
+      strategy when is_atom(strategy) and not is_nil(strategy) -> strategy
+      _ -> static_strategy(failure_type)
+    end
+  end
+
+  defp static_strategy(failure_type) do
     case failure_type do
       :timeout -> :simplify_scope
       :compilation_error -> :different_model
@@ -35,6 +45,34 @@ defmodule GiTF.Intel.Retry do
       :unknown -> :different_model
     end
   end
+
+  # Consults sector intelligence for the most effective retry strategy.
+  # Returns nil if no data or low confidence.
+  defp learned_strategy(_failure_type, sector_id) do
+    profile = GiTF.Intel.SectorProfile.get_or_compute(sector_id)
+
+    case profile do
+      %{confidence: conf, lessons: %{retry_effectiveness: eff}}
+      when conf in [:medium, :high] and map_size(eff) > 0 ->
+        # Pick the strategy with the highest success rate (min 3 data points implied by confidence)
+        eff
+        |> Enum.filter(fn {_strategy, rate} -> is_number(rate) and rate > 0.3 end)
+        |> Enum.max_by(fn {_strategy, rate} -> rate end, fn -> nil end)
+        |> case do
+          {strategy, _rate} -> normalize_strategy(strategy)
+          nil -> nil
+        end
+
+      _ ->
+        nil
+    end
+  rescue
+    _ -> nil
+  end
+
+  defp normalize_strategy(s) when is_atom(s), do: s
+  defp normalize_strategy(s) when is_binary(s), do: String.to_existing_atom(s)
+  defp normalize_strategy(_), do: nil
 
   # Private functions
 

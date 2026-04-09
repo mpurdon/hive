@@ -17,7 +17,7 @@ defmodule GiTF.Major.Orchestrator do
   alias GiTF.Major.{FastPath, PhasePrompts, Planner}
 
   @phases ~w(research requirements design review planning implementation validation awaiting_approval sync simplify scoring)
-  @max_redesign_iterations 2
+  @default_max_redesign 2
 
   alias GiTF.Config.Provider, as: Config
 
@@ -174,7 +174,7 @@ defmodule GiTF.Major.Orchestrator do
          :ok <- validate_design_phase(mission) do
       redesign_count = Map.get(mission, :redesign_count, 0)
 
-      if redesign_count < @max_redesign_iterations do
+      if redesign_count < max_redesign_for(mission.sector_id) do
         quest_record = Archive.get(:missions, mission_id)
 
         updated =
@@ -298,7 +298,8 @@ defmodule GiTF.Major.Orchestrator do
     else
       with {:ok, _} <- GiTF.Missions.transition_phase(mission.id, "research", "Quest started") do
         sector = Archive.get(:sectors, sector_id)
-        prompt = PhasePrompts.research_prompt(mission, sector)
+        ctx = GiTF.Intel.get_prompt_context(sector_id, "research")
+        prompt = PhasePrompts.research_prompt(mission, sector, ctx)
         spawn_phase_ghost(mission, "research", prompt, model: "general")
         {:ok, "research"}
       end
@@ -310,7 +311,8 @@ defmodule GiTF.Major.Orchestrator do
 
     with {:ok, _} <-
            GiTF.Missions.transition_phase(mission.id, "requirements", "Research complete") do
-      prompt = PhasePrompts.requirements_prompt(mission, research)
+      ctx = GiTF.Intel.get_prompt_context(mission.sector_id, "requirements")
+      prompt = PhasePrompts.requirements_prompt(mission, research, ctx)
       spawn_phase_ghost(mission, "requirements", prompt, model: "general")
       {:ok, "requirements"}
     end
@@ -322,17 +324,32 @@ defmodule GiTF.Major.Orchestrator do
     %{name: "complex", hint: "Comprehensive implementation with edge cases and extensibility"}
   ]
 
-  defp strategies_for_complexity(research) do
+  defp strategies_for_complexity(research, sector_id) do
     complexity = if research, do: Map.get(research, "complexity"), else: nil
 
-    case complexity do
-      "moderate" ->
-        # Single strategy for moderate complexity to save cost
-        [Enum.find(@design_strategies, &(&1.name == "normal"))]
+    base_count =
+      case complexity do
+        "moderate" -> 1
+        _ -> 3
+      end
 
-      _ ->
-        # Full 3-strategy exploration for complex (or unknown) missions
-        @design_strategies
+    # Consult sector intelligence for strategy count adjustment
+    count =
+      case sector_id && GiTF.Intel.SectorProfile.get_or_compute(sector_id) do
+        %{confidence: conf, recommendations: %{strategy_count: rec_count}}
+        when conf in [:medium, :high] ->
+          GiTF.Intel.SectorProfile.blend(rec_count, base_count, conf)
+
+        _ ->
+          base_count
+      end
+
+    count = max(1, min(count, 3))
+
+    case count do
+      1 -> [Enum.find(@design_strategies, &(&1.name == "normal"))]
+      2 -> Enum.filter(@design_strategies, &(&1.name in ["normal", "complex"]))
+      _ -> @design_strategies
     end
   end
 
@@ -350,7 +367,7 @@ defmodule GiTF.Major.Orchestrator do
           ""
         end
 
-      strategies = strategies_for_complexity(research)
+      strategies = strategies_for_complexity(research, mission.sector_id)
 
       # Store strategy count so advance logic knows how many to wait for
       quest_record = Archive.get(:missions, mission.id)
@@ -361,6 +378,8 @@ defmodule GiTF.Major.Orchestrator do
           Map.put(quest_record, :design_strategy_count, length(strategies))
         )
       end
+
+      ctx = GiTF.Intel.get_prompt_context(mission.sector_id, "design")
 
       # Spawn parallel design ghosts — count scales with complexity
       Enum.each(strategies, fn %{name: strategy_name} ->
@@ -373,10 +392,11 @@ defmodule GiTF.Major.Orchestrator do
               requirements,
               research,
               review,
-              extra_instructions
+              extra_instructions,
+              ctx
             )
           else
-            PhasePrompts.design_prompt(mission, requirements, research, extra_instructions)
+            PhasePrompts.design_prompt(mission, requirements, research, extra_instructions, ctx)
           end
 
         prompt = base_prompt <> "\n" <> strategy_section <> "\n"
@@ -433,7 +453,8 @@ defmodule GiTF.Major.Orchestrator do
     review = GiTF.Missions.get_artifact(mission.id, "review")
 
     with {:ok, _} <- GiTF.Missions.transition_phase(mission.id, "planning", "Review approved") do
-      prompt = PhasePrompts.planning_prompt(mission, design, requirements, review)
+      ctx = GiTF.Intel.get_prompt_context(mission.sector_id, "planning")
+      prompt = PhasePrompts.planning_prompt(mission, design, requirements, review, ctx)
       spawn_phase_ghost(mission, "planning", prompt, model: "thinking")
       {:ok, "planning"}
     end
@@ -470,7 +491,8 @@ defmodule GiTF.Major.Orchestrator do
 
     with {:ok, _} <-
            GiTF.Missions.transition_phase(mission.id, "validation", "Implementation complete") do
-      prompt = PhasePrompts.validation_prompt(mission, requirements, planning)
+      ctx = GiTF.Intel.get_prompt_context(mission.sector_id, "validation")
+      prompt = PhasePrompts.validation_prompt(mission, requirements, planning, ctx)
       spawn_phase_ghost(mission, "validation", prompt, model: "general")
       {:ok, "validation"}
     end
@@ -794,7 +816,7 @@ defmodule GiTF.Major.Orchestrator do
 
   # -- Phase Transition Logic --------------------------------------------------
 
-  @phase_timeout_seconds 900
+  @default_phase_timeout_seconds 900
 
   defp check_and_advance(mission, phase, next_fn) do
     artifact = GiTF.Missions.get_artifact(mission.id, phase)
@@ -815,8 +837,9 @@ defmodule GiTF.Major.Orchestrator do
 
       if phase_start do
         age = DateTime.diff(DateTime.utc_now(), phase_start.inserted_at, :second)
+        timeout = phase_timeout_for(mission.sector_id, phase)
 
-        if age > @phase_timeout_seconds do
+        if age > timeout do
           # Check if there's already a running phase ghost to avoid duplicate spawning
           running_phase_job =
             Archive.find_one(:ops, fn j ->
@@ -899,19 +922,20 @@ defmodule GiTF.Major.Orchestrator do
   # Rebuild the real prompt for a phase re-spawn using available artifacts
   defp rebuild_phase_prompt(mission, phase) do
     sector = if mission.sector_id, do: Archive.get(:sectors, mission.sector_id)
+    ctx = GiTF.Intel.get_prompt_context(mission.sector_id, phase)
 
     case phase do
       "research" ->
-        {PhasePrompts.research_prompt(mission, sector), "general"}
+        {PhasePrompts.research_prompt(mission, sector, ctx), "general"}
 
       "requirements" ->
         research = GiTF.Missions.get_artifact(mission.id, "research") || %{}
-        {PhasePrompts.requirements_prompt(mission, research), "general"}
+        {PhasePrompts.requirements_prompt(mission, research, ctx), "general"}
 
       "design" ->
         requirements = GiTF.Missions.get_artifact(mission.id, "requirements") || %{}
         research = GiTF.Missions.get_artifact(mission.id, "research") || %{}
-        {PhasePrompts.design_prompt(mission, requirements, research), "thinking"}
+        {PhasePrompts.design_prompt(mission, requirements, research, "", ctx), "thinking"}
 
       "review" ->
         design = GiTF.Missions.get_artifact(mission.id, "design") || %{}
@@ -923,12 +947,12 @@ defmodule GiTF.Major.Orchestrator do
         design = GiTF.Missions.get_artifact(mission.id, "design") || %{}
         requirements = GiTF.Missions.get_artifact(mission.id, "requirements") || %{}
         review = GiTF.Missions.get_artifact(mission.id, "review") || %{}
-        {PhasePrompts.planning_prompt(mission, design, requirements, review), "thinking"}
+        {PhasePrompts.planning_prompt(mission, design, requirements, review, ctx), "thinking"}
 
       "validation" ->
         requirements = GiTF.Missions.get_artifact(mission.id, "requirements") || %{}
         planning = GiTF.Missions.get_artifact(mission.id, "planning") || %{}
-        {PhasePrompts.validation_prompt(mission, requirements, planning), "general"}
+        {PhasePrompts.validation_prompt(mission, requirements, planning, ctx), "general"}
 
       phase when phase in ["implementation", "sync", "awaiting_approval"] ->
         # These phases don't use phase ghosts — handled by op spawning,
@@ -960,7 +984,7 @@ defmodule GiTF.Major.Orchestrator do
       true ->
         redesign_count = Map.get(mission, :redesign_count, 0)
 
-        if redesign_count < @max_redesign_iterations do
+        if redesign_count < max_redesign_for(mission.sector_id) do
           quest_record = Archive.get(:missions, mission.id)
           updated = Map.put(quest_record, :redesign_count, redesign_count + 1)
           Archive.put(:missions, updated)
@@ -1162,7 +1186,7 @@ defmodule GiTF.Major.Orchestrator do
     end
   end
 
-  @max_validation_fix_attempts 2
+  @default_max_fix_attempts 2
 
   defp handle_validation_result(mission) do
     validation = GiTF.Missions.get_artifact(mission.id, "validation")
@@ -1183,9 +1207,11 @@ defmodule GiTF.Major.Orchestrator do
         # Validation failed — attempt targeted fixes before giving up
         fix_attempt = Map.get(mission, :validation_fix_count, 0)
 
-        if fix_attempt < @max_validation_fix_attempts do
+        max_fixes = max_fix_attempts_for(mission.sector_id)
+
+        if fix_attempt < max_fixes do
           Logger.info(
-            "Quest #{mission.id} validation failed (attempt #{fix_attempt + 1}/#{@max_validation_fix_attempts}), creating fix ops"
+            "Quest #{mission.id} validation failed (attempt #{fix_attempt + 1}/#{max_fixes}), creating fix ops"
           )
 
           attempt_validation_fixes(mission, validation, fix_attempt)
@@ -1366,7 +1392,8 @@ defmodule GiTF.Major.Orchestrator do
            GiTF.Missions.transition_phase(mission.id, "scoring", "Simplify complete, scoring") do
       requirements = GiTF.Missions.get_artifact(mission.id, "requirements")
       validation = GiTF.Missions.get_artifact(mission.id, "validation")
-      prompt = PhasePrompts.scoring_prompt(mission, requirements, validation)
+      ctx = GiTF.Intel.get_prompt_context(mission.sector_id, "scoring")
+      prompt = PhasePrompts.scoring_prompt(mission, requirements, validation, ctx)
       spawn_phase_ghost(mission, "scoring", prompt, model: "general")
       {:ok, "scoring"}
     end
@@ -1380,6 +1407,9 @@ defmodule GiTF.Major.Orchestrator do
       Logger.info("Quest #{mission.id} scored #{score}/100")
       record_triage_feedback(mission, score)
     end
+
+    # Feed the learning loop — analyze each op's outcome
+    ingest_mission_outcome(mission)
 
     complete_quest(mission.id)
   end
@@ -1402,6 +1432,53 @@ defmodule GiTF.Major.Orchestrator do
     })
   rescue
     e -> Logger.debug("Triage feedback recording failed: #{Exception.message(e)}")
+  end
+
+  # Analyze each non-phase op outcome and invalidate the sector profile.
+  defp ingest_mission_outcome(mission) do
+    Task.Supervisor.start_child(GiTF.TaskSupervisor, fn ->
+      mission.ops
+      |> Enum.reject(& &1[:phase_job])
+      |> Enum.each(fn op ->
+        try do
+          case op.status do
+            "done" -> GiTF.Intel.analyze_success(op.id)
+            "failed" -> GiTF.Intel.FailureAnalysis.analyze_failure(op.id)
+            _ -> :ok
+          end
+        rescue
+          _ -> :ok
+        end
+      end)
+
+      GiTF.Intel.SectorProfile.invalidate(mission.sector_id)
+    end)
+  rescue
+    _ -> :ok
+  end
+
+  defp ingest_failure_outcome(mission_id) do
+    Task.Supervisor.start_child(GiTF.TaskSupervisor, fn ->
+      case GiTF.Missions.get(mission_id) do
+        {:ok, mission} ->
+          mission.ops
+          |> Enum.filter(&(&1.status == "failed"))
+          |> Enum.each(fn op ->
+            try do
+              GiTF.Intel.FailureAnalysis.analyze_failure(op.id)
+            rescue
+              _ -> :ok
+            end
+          end)
+
+          GiTF.Intel.SectorProfile.invalidate(mission.sector_id)
+
+        _ ->
+          :ok
+      end
+    end)
+  rescue
+    _ -> :ok
   end
 
   defp fail_quest(mission_id, reason) do
@@ -1433,6 +1510,9 @@ defmodule GiTF.Major.Orchestrator do
       _ ->
         :ok
     end
+
+    # Feed the learning loop — analyze failed ops
+    ingest_failure_outcome(mission_id)
 
     GiTF.Missions.transition_phase(mission_id, "completed", reason)
     GiTF.Missions.update_status!(mission_id)
@@ -1579,7 +1659,8 @@ defmodule GiTF.Major.Orchestrator do
   end
 
   defp spawn_phase_ghost_inner(mission, phase, prompt, opts) do
-    model = Keyword.get(opts, :model, "general")
+    default_model = Keyword.get(opts, :model, "general")
+    model = pick_model_for_phase(mission.sector_id, phase, default_model)
 
     GiTF.Telemetry.start_phase_span(phase, mission.id)
 
@@ -1662,6 +1743,109 @@ defmodule GiTF.Major.Orchestrator do
         {:error, reason}
     end
   end
+
+  # Returns the max redesign iterations, consulting sector intelligence at :high confidence.
+  defp max_redesign_for(nil), do: @default_max_redesign
+
+  defp max_redesign_for(sector_id) do
+    profile = GiTF.Intel.SectorProfile.get_or_compute(sector_id)
+
+    case profile do
+      %{confidence: :high, recommendations: %{max_redesign_iterations: n}} -> n
+      _ -> @default_max_redesign
+    end
+  rescue
+    _ -> @default_max_redesign
+  end
+
+  # Returns the max validation fix attempts, consulting sector intelligence at :high confidence.
+  defp max_fix_attempts_for(nil), do: @default_max_fix_attempts
+
+  defp max_fix_attempts_for(sector_id) do
+    profile = GiTF.Intel.SectorProfile.get_or_compute(sector_id)
+
+    case profile do
+      %{confidence: :high, recommendations: %{max_validation_fix_attempts: n}} -> n
+      _ -> @default_max_fix_attempts
+    end
+  rescue
+    _ -> @default_max_fix_attempts
+  end
+
+  # Returns the phase timeout in seconds, consulting sector intelligence.
+  defp phase_timeout_for(nil, _phase), do: @default_phase_timeout_seconds
+
+  defp phase_timeout_for(sector_id, phase) do
+    profile = GiTF.Intel.SectorProfile.get_or_compute(sector_id)
+
+    case profile do
+      %{confidence: conf, lessons: %{avg_phase_durations: durations}}
+      when conf in [:medium, :high] and map_size(durations) > 0 ->
+        avg = Map.get(durations, phase, 600)
+        computed = round(avg * 1.5) |> max(300) |> min(1800)
+        GiTF.Intel.SectorProfile.blend(computed, @default_phase_timeout_seconds, conf)
+
+      _ ->
+        @default_phase_timeout_seconds
+    end
+  rescue
+    _ -> @default_phase_timeout_seconds
+  end
+
+  # Consults sector intelligence to pick the best model for a phase.
+  # At low confidence, returns the default. At medium, only overrides if the
+  # default model is declining. At high, uses the best available model.
+  defp pick_model_for_phase(nil, _phase, default_model), do: default_model
+
+  defp pick_model_for_phase(sector_id, _phase, default_model) do
+    profile = GiTF.Intel.SectorProfile.get_or_compute(sector_id)
+
+    case profile do
+      %{confidence: :high, recommendations: %{default_model: rec_model}}
+      when is_binary(rec_model) and rec_model != "" ->
+        rec_model
+
+      %{confidence: :medium, model_data: model_data} ->
+        # At medium confidence, only swap away from a declining model
+        default_key = normalize_model_key(default_model)
+
+        case Map.get(model_data, default_key) do
+          %{trend: :declining} ->
+            # Find a non-declining alternative
+            find_non_declining_model(model_data, default_model)
+
+          _ ->
+            default_model
+        end
+
+      _ ->
+        default_model
+    end
+  rescue
+    _ -> default_model
+  end
+
+  defp find_non_declining_model(model_data, fallback) do
+    model_data
+    |> Enum.reject(fn {_model, data} -> data.trend == :declining end)
+    |> Enum.filter(fn {_model, data} -> data.total_jobs >= 3 end)
+    |> Enum.max_by(fn {_model, data} -> data.success_rate end, fn -> nil end)
+    |> case do
+      {model, _} -> model
+      nil -> fallback
+    end
+  end
+
+  defp normalize_model_key(model) when is_binary(model) do
+    model
+    |> String.split(":")
+    |> List.last()
+    |> String.replace("claude-", "")
+    |> String.split("-")
+    |> hd()
+  end
+
+  defp normalize_model_key(_), do: nil
 
   defp spawn_implementation_jobs(mission) do
     case GiTF.gitf_dir() do

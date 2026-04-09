@@ -139,6 +139,12 @@ defmodule GiTF.Tachikoma do
       cleanup_if_low_disk()
     end
 
+    # Recompute sector intelligence profiles every 20 patrols (~10 min)
+    if rem(count, 20) == 0 do
+      recompute_sector_profiles()
+      check_model_decay()
+    end
+
     # Prune old completed data every 100 patrols (~50 min)
     if rem(count, 100) == 0 do
       prune_old_store_data()
@@ -721,6 +727,40 @@ defmodule GiTF.Tachikoma do
     e ->
       Logger.warning("Tachikoma: cleanup_orphan_cells failed: #{Exception.message(e)}")
       :ok
+  end
+
+  defp recompute_sector_profiles do
+    sectors = GiTF.Archive.all(:sectors)
+
+    Enum.each(sectors, fn sector ->
+      try do
+        GiTF.Intel.SectorProfile.compute(sector.id)
+      rescue
+        e ->
+          Logger.debug("Profile recompute failed for #{sector.id}: #{Exception.message(e)}")
+      end
+    end)
+  rescue
+    _ -> :ok
+  end
+
+  defp check_model_decay do
+    health = GiTF.Intel.DecayDetector.global_health()
+
+    Enum.each(health, fn {model, status} ->
+      if status in [:degraded, :failing] do
+        Logger.warning("Model decay detected: #{model} is #{status}")
+
+        GiTF.Telemetry.emit([:gitf, :alert, :raised], %{}, %{
+          type: :model_decay_detected,
+          model: model,
+          status: status,
+          message: "Model #{model} performance is #{status}"
+        })
+      end
+    end)
+  rescue
+    _ -> :ok
   end
 
   defp prune_old_store_data do

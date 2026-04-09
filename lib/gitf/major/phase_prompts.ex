@@ -12,8 +12,8 @@ defmodule GiTF.Major.PhasePrompts do
 
   Instructs the ghost to analyze the codebase and output structured findings.
   """
-  @spec research_prompt(map(), map() | nil) :: String.t()
-  def research_prompt(mission, sector) do
+  @spec research_prompt(map(), map() | nil, String.t()) :: String.t()
+  def research_prompt(mission, sector, historical_context \\ "") do
     sector_path = if sector, do: sector.path, else: "."
     external_resources = extract_external_resources(mission.goal)
 
@@ -38,7 +38,7 @@ defmodule GiTF.Major.PhasePrompts do
     7. **Assess complexity**: Based on your research, determine if this goal can be
        completed by a single ghost agent in a single session (low) or if it requires
        coordinated steps across multiple components (high).
-
+    #{if historical_context != "", do: "\n" <> historical_context <> "\n", else: ""}
     ## Output Format
 
     Output ONLY a JSON object in a ```json fence with this structure:
@@ -94,8 +94,8 @@ defmodule GiTF.Major.PhasePrompts do
   Produces structured requirements with testable acceptance criteria from
   the goal and research findings.
   """
-  @spec requirements_prompt(map(), map()) :: String.t()
-  def requirements_prompt(mission, research_artifact) do
+  @spec requirements_prompt(map(), map(), String.t()) :: String.t()
+  def requirements_prompt(mission, research_artifact, historical_context \\ "") do
     research_json = Jason.encode!(research_artifact)
 
     """
@@ -119,7 +119,7 @@ defmodule GiTF.Major.PhasePrompts do
     3. Identify non-functional requirements (performance, security, etc.)
     4. Note constraints from the existing codebase
     5. Explicitly list what is OUT of scope
-
+    #{if historical_context != "", do: "\n" <> historical_context <> "\n", else: ""}
     ## Output Format
 
     Output ONLY a JSON object in a ```json fence:
@@ -155,8 +155,8 @@ defmodule GiTF.Major.PhasePrompts do
 
   Maps requirements to implementation approach with specific file changes.
   """
-  @spec design_prompt(map(), map(), map(), String.t()) :: String.t()
-  def design_prompt(mission, requirements, research, extra_instructions \\ "") do
+  @spec design_prompt(map(), map(), map(), String.t(), String.t()) :: String.t()
+  def design_prompt(mission, requirements, research, extra_instructions \\ "", historical_context \\ "") do
     requirements_json = Jason.encode!(requirements)
     research_json = Jason.encode!(research)
 
@@ -196,7 +196,7 @@ defmodule GiTF.Major.PhasePrompts do
     ## Instructions
 
     #{final_instructions}
-    ## Output Format
+    #{if historical_context != "", do: historical_context <> "\n\n", else: ""}## Output Format
 
     Output ONLY a JSON object in a ```json fence:
 
@@ -232,15 +232,16 @@ defmodule GiTF.Major.PhasePrompts do
   @doc """
   Builds the design prompt with review feedback for redesign iterations.
   """
-  @spec design_prompt_with_feedback(map(), map(), map(), map(), String.t()) :: String.t()
+  @spec design_prompt_with_feedback(map(), map(), map(), map(), String.t(), String.t()) :: String.t()
   def design_prompt_with_feedback(
         mission,
         requirements,
         research,
         review,
-        extra_instructions \\ ""
+        extra_instructions \\ "",
+        historical_context \\ ""
       ) do
-    base = design_prompt(mission, requirements, research, extra_instructions)
+    base = design_prompt(mission, requirements, research, extra_instructions, historical_context)
     review_json = Jason.encode!(review)
 
     base <>
@@ -388,8 +389,8 @@ defmodule GiTF.Major.PhasePrompts do
 
   Generates ordered ops with dependencies from the validated design.
   """
-  @spec planning_prompt(map(), map(), map(), map()) :: String.t()
-  def planning_prompt(mission, design, requirements, review) do
+  @spec planning_prompt(map(), map(), map(), map(), String.t()) :: String.t()
+  def planning_prompt(mission, design, requirements, review, historical_context \\ "") do
     design_json = Jason.encode!(design)
     requirements_json = Jason.encode!(requirements)
 
@@ -449,7 +450,7 @@ defmodule GiTF.Major.PhasePrompts do
     4. Specify target files from the design — these must be real files in the project
     5. Set up dependencies (op indices, 0-based)
     6. Recommend model complexity: "general" for straightforward changes, "thinking" for complex logic
-
+    #{if historical_context != "", do: "\n" <> historical_context <> "\n", else: ""}
     ## Output Format
 
     Output ONLY a JSON array in a ```json fence:
@@ -476,8 +477,8 @@ defmodule GiTF.Major.PhasePrompts do
 
   Reviews all implementation against original requirements.
   """
-  @spec validation_prompt(map(), map() | nil, map() | nil) :: String.t()
-  def validation_prompt(mission, requirements, planning) do
+  @spec validation_prompt(map(), map() | nil, map() | nil, String.t()) :: String.t()
+  def validation_prompt(mission, requirements, planning, historical_context \\ "") do
     requirements_json = encode_or(requirements, "{}")
     planning_json = encode_or(planning, "[]")
 
@@ -508,7 +509,7 @@ defmodule GiTF.Major.PhasePrompts do
     3. Verify acceptance criteria are met
     4. Run tests if available
     5. Identify any gaps between requirements and implementation
-
+    #{if historical_context != "", do: "\n" <> historical_context <> "\n", else: ""}
     ## Output Format
 
     Output ONLY a JSON object in a ```json fence:
@@ -673,7 +674,7 @@ defmodule GiTF.Major.PhasePrompts do
   end
 
   @doc "Scoring prompt: assess final result across 4 eval dimensions."
-  def scoring_prompt(mission, requirements, validation) do
+  def scoring_prompt(mission, requirements, validation, historical_context \\ "") do
     requirements_json = encode_or(requirements, "{}")
 
     validation_json =
@@ -766,7 +767,7 @@ defmodule GiTF.Major.PhasePrompts do
     Overall score = weighted average:
     final_output * 0.40 + trajectory * 0.25 + tool_usage * 0.20 + safety_alignment * 0.15
 
-    Grade: A (90+), B (80+), C (70+), D (60+), F (<60).
+    #{if historical_context != "", do: historical_context <> "\n\n", else: ""}Grade: A (90+), B (80+), C (70+), D (60+), F (<60).
     """
   end
 

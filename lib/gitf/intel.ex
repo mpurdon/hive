@@ -3,9 +3,7 @@ defmodule GiTF.Intel do
   Adaptive intel system for learning from failures and successes.
   """
 
-  alias GiTF.Intel.FailureAnalysis
-  alias GiTF.Intel.Retry
-  alias GiTF.Intel.SuccessPatterns
+  alias GiTF.Intel.{DecayDetector, FailureAnalysis, PromptContext, Retry, SectorProfile, SuccessPatterns}
   alias GiTF.Archive
 
   @doc """
@@ -78,6 +76,38 @@ defmodule GiTF.Intel do
   """
   def learn(sector_id) do
     FailureAnalysis.learn_from_failures(sector_id)
+  end
+
+  # -- Sector Intelligence API -------------------------------------------------
+
+  @doc """
+  Returns the intelligence profile for a sector (cached, lazy-computed).
+  """
+  def get_sector_profile(sector_id) do
+    SectorProfile.get_or_compute(sector_id)
+  end
+
+  @doc """
+  Returns compact historical context for a sector+phase prompt injection.
+  """
+  def get_prompt_context(sector_id, phase) do
+    PromptContext.for_phase(sector_id, phase)
+  end
+
+  @doc """
+  Returns model health status for a sector.
+
+  Returns a list of declining models with severity and metric info.
+  """
+  def check_model_health(sector_id) do
+    DecayDetector.declining_models(sector_id)
+  end
+
+  @doc """
+  Returns global model health across all sectors.
+  """
+  def global_model_health do
+    DecayDetector.global_health()
   end
 
   defp get_top_failure_type(patterns) when length(patterns) > 0 do

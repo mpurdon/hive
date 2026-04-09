@@ -104,8 +104,9 @@ defmodule GiTF.Debrief do
           sector_id: mission.sector_id
         })
 
-      # Apply trust penalty
+      # Apply trust penalty and invalidate sector intelligence profile
       GiTF.Trust.apply_regression_penalty(mission_id)
+      GiTF.Intel.SectorProfile.invalidate(mission.sector_id)
 
       # Update review record
       update_review(mission_id, %{

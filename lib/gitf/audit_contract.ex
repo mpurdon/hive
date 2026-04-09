@@ -50,9 +50,12 @@ defmodule GiTF.AuditContract do
         base
       end
 
+    # Layer 2.5: intelligence-based adjustment
+    with_intel = apply_intel_adjustment(with_sector, op[:sector_id])
+
     # Layer 3: op-level contract overrides
     job_contract = Map.get(op, :verification_contract) || %{}
-    merged = sync(with_sector, normalize_contract(job_contract))
+    merged = sync(with_intel, normalize_contract(job_contract))
 
     # Layer 4: risk-based adjustments
     risk = Map.get(op, :risk_level, :low)
@@ -136,6 +139,30 @@ defmodule GiTF.AuditContract do
       Map.has_key?(map, str_key) -> Map.put(Map.delete(map, str_key), key, map[str_key])
       true -> map
     end
+  end
+
+  # Adjusts thresholds based on sector intelligence profile.
+  # If the sector's median quality is high, slightly relax; if low, tighten.
+  defp apply_intel_adjustment(contract, nil), do: contract
+
+  defp apply_intel_adjustment(contract, sector_id) do
+    profile = GiTF.Intel.SectorProfile.get_or_compute(sector_id)
+
+    case profile do
+      %{confidence: conf, recommendations: %{threshold_adjustment: adj}}
+      when conf in [:medium, :high] and adj != 1.0 ->
+        adjusted_thresholds =
+          Map.new(contract.thresholds, fn {k, v} ->
+            if is_number(v), do: {k, round(v * adj)}, else: {k, v}
+          end)
+
+        %{contract | thresholds: adjusted_thresholds}
+
+      _ ->
+        contract
+    end
+  rescue
+    _ -> contract
   end
 
   defp apply_risk_adjustments(contract, risk) when risk in [:high, :critical] do
