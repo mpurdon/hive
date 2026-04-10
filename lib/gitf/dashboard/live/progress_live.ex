@@ -115,7 +115,10 @@ defmodule GiTF.Dashboard.ProgressLive do
         </div>
 
         <%= if @ghost_activities == [] do %>
-          <div class="empty">No ghosts are working right now.</div>
+          <div class="empty">
+            No ghosts are working right now.
+            <div style="margin-top:0.5rem"><a href="/dashboard/missions" style="color:#58a6ff; font-size:0.85rem">Start a mission</a> to see ghost activity here.</div>
+          </div>
         <% else %>
           <div style="display:flex; flex-direction:column; gap:0.75rem">
             <%= for activity <- @ghost_activities do %>

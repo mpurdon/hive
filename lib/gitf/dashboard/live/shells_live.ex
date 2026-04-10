@@ -171,7 +171,7 @@ defmodule GiTF.Dashboard.ShellsLive do
       </div>
 
       <%= if @shells == [] do %>
-        <div class="panel"><div class="empty">No shells found.</div></div>
+        <div class="panel"><div class="empty">No shells found. Shells (git worktrees) are created when ghosts start working. <a href="/dashboard/missions" style="color:#58a6ff">Start a mission</a> to see shells appear here.</div></div>
       <% else %>
         <div class="panel">
           <table class="table" style="width:100%">

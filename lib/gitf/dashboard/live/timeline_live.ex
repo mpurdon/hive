@@ -287,7 +287,7 @@ defmodule GiTF.Dashboard.TimelineLive do
       <%!-- Timeline --%>
       <div class="panel">
         <%= if @events == [] do %>
-          <div class="empty">No events to display.</div>
+          <div class="empty">No events to display. Events appear as missions run through phases, ops complete, and the factory operates. <a href="/dashboard/missions/new" style="color:#58a6ff">Create a mission</a> to get started.</div>
         <% else %>
           <div style="position:relative; padding-left:2rem">
             <%!-- Vertical line --%>
