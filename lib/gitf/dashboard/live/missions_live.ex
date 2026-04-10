@@ -77,10 +77,35 @@ defmodule GiTF.Dashboard.MissionsLive do
   defp load_quests do
     GiTF.Missions.list()
     |> Enum.map(fn mission ->
-      case GiTF.Missions.get(mission.id) do
-        {:ok, q} -> q
-        _ -> mission
-      end
+      m =
+        case GiTF.Missions.get(mission.id) do
+          {:ok, q} -> q
+          _ -> mission
+        end
+
+      # Enrich with priority + budget
+      priority =
+        try do
+          GiTF.Priority.effective_priority(m)
+        rescue
+          _ -> Map.get(m, :priority, :normal)
+        end
+
+      budget_pct =
+        try do
+          budget = GiTF.Budget.budget_for(m.id)
+          spent = GiTF.Budget.spent_for(m.id)
+          if budget > 0, do: Float.round(spent / budget * 100, 1), else: 0.0
+        rescue
+          _ -> 0.0
+        end
+
+      Map.merge(m, %{effective_priority: priority, budget_pct: budget_pct})
+    end)
+    |> Enum.sort_by(fn m ->
+      # Active missions first, then by priority weight, then by insert time
+      active = if Map.get(m, :status) in GiTF.Missions.active_statuses(), do: 0, else: 1
+      {active, GiTF.Priority.weight(m.effective_priority)}
     end)
   end
 
@@ -109,8 +134,10 @@ defmodule GiTF.Dashboard.MissionsLive do
                 <th></th>
                 <th>ID</th>
                 <th>Name</th>
+                <th>Priority</th>
                 <th>Status</th>
                 <th>Phase</th>
+                <th>Budget</th>
                 <th>Jobs</th>
                 <th></th>
               </tr>
@@ -125,10 +152,31 @@ defmodule GiTF.Dashboard.MissionsLive do
                       {Map.get(mission, :name, mission.goal)}
                     </a>
                   </td>
+                  <td>
+                    <span class={"badge #{case mission.effective_priority do
+                      :critical -> "badge-red"
+                      :high -> "badge-orange"
+                      :normal -> "badge-blue"
+                      :low -> "badge-grey"
+                      _ -> "badge-grey"
+                    end}"} style="font-size:0.65rem">{mission.effective_priority}</span>
+                  </td>
                   <td><span class={"badge #{status_badge(Map.get(mission, :status, "unknown"))}"}>{Map.get(mission, :status, "unknown")}</span></td>
                   <td><span class={"badge #{phase_badge(Map.get(mission, :current_phase, "pending"))}"}>
                     {Map.get(mission, :current_phase, "pending")}
                   </span></td>
+                  <td>
+                    <div style="display:flex; align-items:center; gap:0.3rem; min-width:60px">
+                      <div style="flex:1; height:4px; background:#21262d; border-radius:2px; overflow:hidden">
+                        <div style={"height:100%; border-radius:2px; background:#{cond do
+                          mission.budget_pct >= 90 -> "#f85149"
+                          mission.budget_pct >= 70 -> "#d29922"
+                          true -> "#238636"
+                        end}; width:#{min(mission.budget_pct, 100)}%"}></div>
+                      </div>
+                      <span style="font-size:0.65rem; color:#6b7280">{mission.budget_pct}%</span>
+                    </div>
+                  </td>
                   <td>{job_count(mission)}</td>
                   <td>
                     <%= if Map.get(mission, :status) == "pending" do %>
@@ -140,7 +188,7 @@ defmodule GiTF.Dashboard.MissionsLive do
                 </tr>
                 <%= if MapSet.member?(@expanded, mission.id) do %>
                   <tr>
-                    <td colspan="6" style="padding:0">
+                    <td colspan="9" style="padding:0">
                       <div class="detail-content">
                         <%= if has_jobs?(mission) do %>
                           <table>

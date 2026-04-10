@@ -192,13 +192,44 @@ defmodule GiTF.Dashboard.OverviewLive do
       |> Enum.take(5)
 
     # Recent missions for the overview card (active first, then recent completed)
+    # Enrich with budget + ghost count for the cards
+    ghost_by_mission =
+      ghosts
+      |> Enum.filter(&GhostStatus.active?(Map.get(&1, :status)))
+      |> Enum.reduce(%{}, fn ghost, acc ->
+        case ghost[:op_id] do
+          nil -> acc
+          op_id ->
+            case GiTF.Archive.get(:ops, op_id) do
+              %{mission_id: mid} when not is_nil(mid) ->
+                Map.update(acc, mid, 1, &(&1 + 1))
+              _ -> acc
+            end
+        end
+      end)
+
     recent_missions =
       missions
       |> Enum.sort_by(fn m ->
-        active = if Map.get(m, :status) == "active", do: 0, else: 1
+        active = if Map.get(m, :status) in ["active", "implementation", "research", "design", "planning", "review"], do: 0, else: 1
         {active, -safe_unix_ts(m)}
       end)
-      |> Enum.take(5)
+      |> Enum.take(8)
+      |> Enum.map(fn m ->
+        budget_pct =
+          try do
+            budget = GiTF.Budget.budget_for(m.id)
+            spent = GiTF.Budget.spent_for(m.id)
+            if budget > 0, do: Float.round(spent / budget * 100, 1), else: 0.0
+          rescue
+            _ -> 0.0
+          end
+
+        Map.merge(m, %{
+          ghost_count: Map.get(ghost_by_mission, m.id, 0),
+          budget_pct: budget_pct
+        })
+      end)
 
     # Dark Factory status
     dark_factory = GiTF.Config.dark_factory?()
@@ -399,22 +430,29 @@ defmodule GiTF.Dashboard.OverviewLive do
               <%= for mission <- @recent_missions do %>
                 <a href={"/dashboard/missions/#{mission.id}"} style="text-decoration:none; display:block; padding:0.4rem 0; border-bottom:1px solid #21262d">
                   <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:0.3rem">
-                    <span style="color:#f0f6fc; font-weight:500; font-size:0.8rem; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; max-width:70%">
+                    <span style="color:#f0f6fc; font-weight:500; font-size:0.8rem; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; max-width:60%">
                       {Map.get(mission, :name) || String.slice(Map.get(mission, :goal, ""), 0, 30)}
                     </span>
                     <div style="display:flex; gap:0.25rem; align-items:center">
-                      <%= if Map.get(mission, :pipeline_mode) do %>
-                        <span class={"badge #{if Map.get(mission, :pipeline_mode) == "fast", do: "badge-yellow", else: "badge-purple"}"} style="font-size:0.5rem">
-                          {Map.get(mission, :pipeline_mode) |> to_string() |> String.upcase()}
-                        </span>
+                      <%= if mission.ghost_count > 0 do %>
+                        <span style="font-size:0.6rem; color:#58a6ff">{mission.ghost_count} <span style="opacity:0.6">ghost{if mission.ghost_count > 1, do: "s"}</span></span>
                       <% end %>
                       <span class={"badge #{mission_status_badge(Map.get(mission, :status))}"} style="font-size:0.6rem">
                         {Map.get(mission, :status, "?")}
                       </span>
                     </div>
                   </div>
-                  <div style="display:flex; align-items:center; gap:2px">
+                  <div style="display:flex; align-items:center; gap:6px">
                     <.mini_phase_pipeline phase={Map.get(mission, :current_phase, "pending")} />
+                    <%!-- Budget micro-bar --%>
+                    <div style="flex:1; height:3px; background:#21262d; border-radius:2px; overflow:hidden; min-width:30px" title={"Budget: #{mission.budget_pct}%"}>
+                      <div style={"height:100%; border-radius:2px; background:#{cond do
+                        mission.budget_pct >= 90 -> "#f85149"
+                        mission.budget_pct >= 70 -> "#d29922"
+                        true -> "#238636"
+                      end}; width:#{min(mission.budget_pct, 100)}%"}></div>
+                    </div>
+                    <span style="font-size:0.6rem; color:#6b7280; white-space:nowrap">{mission.budget_pct}%</span>
                   </div>
                 </a>
               <% end %>
@@ -554,8 +592,11 @@ defmodule GiTF.Dashboard.OverviewLive do
         </form>
       </div>
 
-      <div style="display:flex; gap:0.5rem; margin-bottom:1.5rem">
-        <a href="/dashboard/missions/new" class="btn btn-blue">New Mission (Full Pipeline)</a>
+      <div style="display:flex; gap:0.5rem; margin-bottom:1.5rem; flex-wrap:wrap">
+        <a href="/dashboard/missions/new" class="btn btn-blue">New Mission</a>
+        <a href="/dashboard/timeline" class="btn btn-grey">Timeline</a>
+        <a href="/dashboard/health" class="btn btn-grey">Health</a>
+        <a href="/dashboard/shells" class="btn btn-grey">Shells</a>
         <a href="/dashboard/autonomy" class="btn btn-grey">Self-Heal</a>
       </div>
 

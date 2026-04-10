@@ -20,7 +20,8 @@ defmodule GiTF.Dashboard.OpDetailLive do
          socket
          |> assign(:page_title, Map.get(op, :title, "Op"))
          |> assign(:current_path, "/dashboard/missions")
-         |> assign(:op, op)}
+         |> assign(:op, op)
+         |> assign_extras(op)}
 
       {:error, _} ->
         {:ok,
@@ -59,9 +60,85 @@ defmodule GiTF.Dashboard.OpDetailLive do
 
   defp reload(socket) do
     case GiTF.Ops.get(socket.assigns.op.id) do
-      {:ok, op} -> assign(socket, :op, op)
+      {:ok, op} -> socket |> assign(:op, op) |> assign_extras(op)
       {:error, _} -> socket
     end
+  end
+
+  defp assign_extras(socket, op) do
+    # Retry chain: walk retry_of → parent, retried_as → children
+    retry_chain = build_retry_chain(op)
+
+    # Ghost info
+    ghost =
+      case op[:ghost_id] do
+        nil -> nil
+        gid -> GiTF.Archive.get(:ghosts, gid)
+      end
+
+    # Shell info
+    shell =
+      case ghost do
+        nil ->
+          nil
+
+        g ->
+          GiTF.Archive.find_one(:shells, fn s ->
+            s[:ghost_id] == g.id and s.status == "active"
+          end)
+      end
+
+    socket
+    |> assign(:retry_chain, retry_chain)
+    |> assign(:ghost, ghost)
+    |> assign(:shell, shell)
+  end
+
+  defp build_retry_chain(op) do
+    # Walk backwards to find root
+    root = find_retry_root(op)
+    # Walk forwards to build chain
+    build_chain_forward(root, [])
+  end
+
+  defp find_retry_root(op) do
+    case op[:retry_of] do
+      nil ->
+        op
+
+      parent_id ->
+        case GiTF.Archive.get(:ops, parent_id) do
+          nil -> op
+          parent -> find_retry_root(parent)
+        end
+    end
+  rescue
+    _ -> op
+  end
+
+  defp build_chain_forward(op, acc) do
+    entry = %{
+      id: op.id,
+      status: op.status,
+      title: op[:title],
+      retry_strategy: op[:retry_strategy],
+      retry_count: op[:retry_count] || 0
+    }
+
+    acc = [entry | acc]
+
+    case op[:retried_as] do
+      nil ->
+        Enum.reverse(acc)
+
+      next_id ->
+        case GiTF.Archive.get(:ops, next_id) do
+          nil -> Enum.reverse(acc)
+          next -> build_chain_forward(next, acc)
+        end
+    end
+  rescue
+    _ -> Enum.reverse(acc)
   end
 
   @impl true
@@ -127,6 +204,62 @@ defmodule GiTF.Dashboard.OpDetailLive do
           </dl>
         </div>
       </div>
+
+      <%!-- Ghost & Shell --%>
+      <%= if @ghost do %>
+        <div class="panel">
+          <div class="panel-title">Ghost</div>
+          <div class="grid-2">
+            <dl class="metadata-grid">
+              <dt>Ghost ID</dt><dd style="font-family:monospace">{short_id(@ghost.id)}</dd>
+              <dt>Model</dt><dd>{Map.get(@ghost, :assigned_model, "-")}</dd>
+              <dt>Status</dt><dd><span class={"badge #{status_badge(Map.get(@ghost, :status, "unknown"))}"}>{Map.get(@ghost, :status, "?")}</span></dd>
+            </dl>
+            <dl class="metadata-grid">
+              <dt>Context</dt><dd>{Float.round((Map.get(@ghost, :context_percentage, 0.0) || 0.0) * 100, 1)}%</dd>
+              <%= if @shell do %>
+                <dt>Worktree</dt><dd style="font-size:0.75rem; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; max-width:200px" title={@shell[:worktree_path]}>{@shell[:worktree_path] && Path.basename(@shell.worktree_path)}</dd>
+                <dt>Drift</dt><dd><span class={"badge #{case @shell[:drift_state] do
+                  d when d in [:clean, "clean"] -> "badge-green"
+                  d when d in [:behind, "behind"] -> "badge-yellow"
+                  d when d in [:risky, "risky"] -> "badge-orange"
+                  d when d in [:conflicted, "conflicted"] -> "badge-red"
+                  _ -> "badge-grey"
+                end}"}>{@shell[:drift_state] || "unknown"}</span></dd>
+              <% end %>
+            </dl>
+          </div>
+        </div>
+      <% end %>
+
+      <%!-- Retry Chain --%>
+      <%= if length(@retry_chain) > 1 do %>
+        <div class="panel">
+          <div class="panel-title">Retry Chain</div>
+          <div style="display:flex; align-items:center; gap:0.25rem; flex-wrap:wrap">
+            <%= for {entry, idx} <- Enum.with_index(@retry_chain) do %>
+              <%= if idx > 0 do %>
+                <span style="color:#6b7280; font-size:0.8rem">&rarr;</span>
+              <% end %>
+              <a
+                href={"/dashboard/ops/#{entry.id}"}
+                style={"padding:0.25rem 0.5rem; border-radius:4px; font-size:0.8rem; text-decoration:none; border:1px solid #{if entry.id == @op.id, do: "#58a6ff", else: "#30363d"}; background:#{if entry.id == @op.id, do: "#1c2128", else: "transparent"}; color:#{case entry.status do
+                  "done" -> "#3fb950"
+                  "failed" -> "#f85149"
+                  "running" -> "#58a6ff"
+                  _ -> "#8b949e"
+                end}"}
+              >
+                #{entry.retry_count}
+                <span class={"badge #{status_badge(entry.status)}"} style="font-size:0.55rem; margin-left:0.25rem">{entry.status}</span>
+                <%= if entry.retry_strategy do %>
+                  <span style="font-size:0.6rem; color:#6b7280; margin-left:0.25rem">({entry.retry_strategy})</span>
+                <% end %>
+              </a>
+            <% end %>
+          </div>
+        </div>
+      <% end %>
 
       <%!-- Description --%>
       <%= if Map.get(@op, :description) do %>
