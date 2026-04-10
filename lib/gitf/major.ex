@@ -142,7 +142,9 @@ defmodule GiTF.Major do
     schedule_janitor()
 
     # On startup, resume active missions that may have stalled during crash
-    Process.send_after(self(), :resume_active_quests, 10_000)
+    # 1s gives supervision tree time to settle; Registry and Archive are
+    # started before Major in the supervision tree.
+    Process.send_after(self(), :resume_active_quests, 1_000)
 
     {:ok, state}
   end

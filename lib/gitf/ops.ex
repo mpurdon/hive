@@ -573,11 +573,23 @@ defmodule GiTF.Ops do
   """
   @spec unblock_dependents(String.t()) :: :ok
   def unblock_dependents(op_id) do
+    # Serialize concurrent calls for the same op so multiple code paths
+    # (waggle handler, retry, phase advance) don't duplicate work.
+    # On contention, skip — the other caller will do it.
+    GiTF.MissionLock.with_lock(
+      {:unblock_dependents, op_id},
+      [on_contention: :skip],
+      fn -> do_unblock_dependents(op_id) end
+    )
+
+    :ok
+  end
+
+  defp do_unblock_dependents(op_id) do
     dependent_ids =
       Archive.filter(:op_dependencies, fn d -> d.depends_on_id == op_id end)
       |> Enum.map(& &1.op_id)
 
-    # Check if this dependency failed (so we can warn dependents)
     dep_failed? =
       case get(op_id) do
         {:ok, %{status: s}} when s in ["failed", "rejected"] -> true
@@ -588,7 +600,6 @@ defmodule GiTF.Ops do
       if ready?(dep_op_id) do
         case get(dep_op_id) do
           {:ok, %{status: "blocked"} = dep_job} ->
-            # Inject failure context if a dependency failed
             if dep_failed? do
               warning =
                 "\n\n## Warning: Dependency failed\n\nDependency op #{op_id} failed. " <>

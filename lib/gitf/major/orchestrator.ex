@@ -200,8 +200,20 @@ defmodule GiTF.Major.Orchestrator do
   """
   @spec advance_quest(String.t()) :: {:ok, String.t()} | {:error, term()}
   def advance_quest(mission_id) do
+    # Serialize concurrent advances for the same mission (waggle handler,
+    # resume_active_quests, advance_stuck_mission_phases can all race).
+    # :skip on contention because the other caller is already doing the work.
+    case GiTF.MissionLock.with_lock({:advance, mission_id},
+           [on_contention: :skip],
+           fn -> do_advance_quest(mission_id) end
+         ) do
+      :ok -> {:ok, :already_advancing}
+      other -> other
+    end
+  end
+
+  defp do_advance_quest(mission_id) do
     with {:ok, mission} <- GiTF.Missions.get(mission_id) do
-      # Circuit breaker: fail missions that have been running too long
       if quest_timed_out?(mission) do
         timeout_h = max_quest_age_hours()
         Logger.warning("Quest #{mission_id} exceeded #{timeout_h}h max age, force-completing")

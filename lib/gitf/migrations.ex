@@ -8,7 +8,7 @@ defmodule GiTF.Migrations do
 
   alias GiTF.Archive
 
-  @current_version 7
+  @current_version 8
 
   @doc """
   Run all pending migrations.
@@ -165,6 +165,18 @@ defmodule GiTF.Migrations do
         |> Map.put_new(:drift_meta, nil)
 
       Archive.put(:shells, updated)
+    end)
+
+    :ok
+  end
+
+  defp run_migration(8) do
+    # Migration 8: Add phase_advance_seq to missions for idempotency guards
+    missions = Archive.all(:missions)
+
+    Enum.each(missions, fn mission ->
+      updated = Map.put_new(mission, :phase_advance_seq, 0)
+      Archive.put(:missions, updated)
     end)
 
     :ok

@@ -53,6 +53,7 @@ defmodule GiTF.Missions do
         status: attrs[:status] || "pending",
         sector_id: attrs[:sector_id] || attrs["sector_id"],
         current_phase: "pending",
+        phase_advance_seq: 0,
         priority: priority,
         priority_source: priority_source,
         priority_set_at: DateTime.utc_now(),
@@ -532,18 +533,18 @@ defmodule GiTF.Missions do
       mission ->
         from_phase = Map.get(mission, :current_phase, "pending")
 
-        # Record transition with monotonic sequence for ordering
-        transition = %{
-          mission_id: mission_id,
-          from_phase: from_phase,
-          to_phase: to_phase,
-          reason: reason,
-          seq: System.monotonic_time(:microsecond)
-        }
+        unless recent_duplicate_transition?(mission_id, from_phase, to_phase) do
+          Archive.insert(:mission_phase_transitions, %{
+            mission_id: mission_id,
+            from_phase: from_phase,
+            to_phase: to_phase,
+            reason: reason,
+            seq: System.monotonic_time(:microsecond)
+          })
+        end
 
-        Archive.insert(:mission_phase_transitions, transition)
-
-        # Update mission phase and derive status from the phase
+        # Update mission phase and derive status from the phase.
+        # The put is always idempotent — same value is harmless.
         status =
           case to_phase do
             "completed" -> mission.status
@@ -559,6 +560,26 @@ defmodule GiTF.Missions do
         Archive.put(:missions, updated)
     end
   end
+
+  # Returns true if an identical transition was recorded in the last 30 seconds.
+  # Prevents the append-only log from accumulating duplicates when the same
+  # phase advance is triggered multiple times (waggle retry, recovery cycles).
+  defp recent_duplicate_transition?(mission_id, from_phase, to_phase) do
+    cutoff = DateTime.add(DateTime.utc_now(), -30, :second)
+
+    Archive.filter(:mission_phase_transitions, fn t ->
+      t.mission_id == mission_id and
+        t.from_phase == from_phase and
+        t.to_phase == to_phase and
+        compare_at(t, cutoff) == :gt
+    end)
+    |> Enum.any?()
+  rescue
+    _ -> false
+  end
+
+  defp compare_at(%{inserted_at: %DateTime{} = dt}, cutoff), do: DateTime.compare(dt, cutoff)
+  defp compare_at(_, _), do: :lt
 
   @doc """
   Gets phase transition history for a mission.

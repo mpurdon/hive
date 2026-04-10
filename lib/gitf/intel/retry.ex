@@ -159,12 +159,17 @@ defmodule GiTF.Intel.Retry do
     # Create a new op based on the failed one, carrying forward all required fields
     new_model = if is_map(metadata), do: metadata[:model], else: nil
 
+    # If the failed ghost left a backup checkpoint, include it in the new op's
+    # description so the retry ghost can pick up where the crashed attempt
+    # left off instead of starting from scratch.
+    enriched_description = enrich_description_with_backup(op)
+
     new_job = %{
       id: generate_id("op"),
       mission_id: op.mission_id,
       sector_id: op.sector_id,
       title: op.title,
-      description: op.description,
+      description: enriched_description,
       status: "pending",
       ghost_id: nil,
       retry_of: op.id,
@@ -198,5 +203,55 @@ defmodule GiTF.Intel.Retry do
 
   defp generate_id(prefix) do
     "#{prefix}-#{:crypto.strong_rand_bytes(8) |> Base.encode16(case: :lower)}"
+  end
+
+  # Loads the failed op's ghost backup and appends its progress summary to
+  # the description. This lets the retry continue from the crash point.
+  defp enrich_description_with_backup(op) do
+    base_description = op.description || ""
+
+    case op[:ghost_id] do
+      nil ->
+        base_description
+
+      ghost_id ->
+        case GiTF.Backup.load(ghost_id) do
+          {:ok, backup} -> base_description <> "\n\n" <> format_backup_context(backup)
+          {:error, _} -> base_description
+        end
+    end
+  rescue
+    _ -> op.description || ""
+  end
+
+  defp format_backup_context(backup) do
+    summary = Map.get(backup, :progress_summary) || ""
+    pending = Map.get(backup, :pending_work) || ""
+    files = Map.get(backup, :files_modified) || []
+    iteration = Map.get(backup, :iteration) || 0
+
+    files_section =
+      if files == [] do
+        ""
+      else
+        "\n**Files modified so far:**\n" <> Enum.map_join(files, "\n", &"- #{&1}")
+      end
+
+    """
+    ## Previous Attempt Notes
+
+    The prior attempt on this op crashed mid-work. Use this context to
+    resume from where it left off rather than starting from scratch.
+
+    **Iteration reached:** #{iteration}
+
+    **Progress summary:**
+    #{summary}
+
+    **Pending work at time of crash:**
+    #{pending}
+    #{files_section}
+    """
+    |> String.trim()
   end
 end
