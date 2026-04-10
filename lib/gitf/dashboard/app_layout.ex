@@ -23,9 +23,12 @@ defmodule GiTF.Dashboard.AppLayout do
       Phoenix.PubSub.subscribe(GiTF.PubSub, "section:alerts")
     end
 
+    # Drop :flash before assigning — it's reserved by LiveView in components
+    safe_assigns = Map.drop(assigns, [:flash])
+
     {:ok,
      socket
-     |> assign(assigns)
+     |> assign(safe_assigns)
      |> assign_new(:subscribed, fn -> true end)
      |> assign_new(:toasts, fn -> Map.get(assigns, :toasts, []) end)}
   end

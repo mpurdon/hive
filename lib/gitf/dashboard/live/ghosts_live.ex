@@ -102,8 +102,8 @@ defmodule GiTF.Dashboard.GhostsLive do
     |> assign(:page_title, "Ghosts")
     |> assign(:current_path, "/ghosts")
     |> assign(:ghosts, enriched)
-    |> Map.put_new(:expanded, MapSet.new())
-    |> Map.put_new(:toasts, [])
+    |> assign_new(:expanded, fn -> MapSet.new() end)
+    |> assign_new(:toasts, fn -> [] end)
   end
 
   @impl true
