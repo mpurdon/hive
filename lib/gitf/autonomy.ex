@@ -64,6 +64,103 @@ defmodule GiTF.Autonomy do
   end
 
   @doc """
+  Compute the effective ghost cap based on current budget pressure.
+
+  The hard ceiling `max_ghosts` (from config) is scaled down as the hottest
+  active mission approaches its budget. This smooths operations: instead of
+  running at full steam until the Watchdog pauses a mission, the factory
+  slows its burn rate as budget is consumed so remaining ops can complete
+  gracefully within the envelope.
+
+  Returns `{target, meta}` where `target` is the new effective cap and
+  `meta` includes `:reason` and `:max_util` for logging/telemetry.
+
+  ## Scaling curve
+
+      max_util >= 0.95  → 1              (crawl)
+      max_util >= 0.85  → max * 0.5      (aggressive)
+      max_util >= 0.70  → max * 0.75     (gentle)
+      otherwise         → max_ghosts     (full)
+
+  `target` is always clamped to `[1, max_ghosts]`.
+  """
+  @spec compute_scaling_decision(pos_integer()) :: {pos_integer(), map()}
+  def compute_scaling_decision(max_ghosts) when is_integer(max_ghosts) and max_ghosts >= 1 do
+    max_util = max_budget_utilization()
+
+    {ratio, reason} =
+      cond do
+        max_util >= 0.95 -> {0.0, :budget_critical}
+        max_util >= 0.85 -> {0.5, :budget_high}
+        max_util >= 0.70 -> {0.75, :budget_moderate}
+        true -> {1.0, :headroom}
+      end
+
+    target =
+      case reason do
+        :budget_critical -> 1
+        _ -> max(1, min(max_ghosts, ceil(max_ghosts * ratio)))
+      end
+
+    {target, %{reason: reason, max_util: max_util}}
+  end
+
+  @doc """
+  Returns the highest budget utilization (spent / budget) across currently
+  active missions, or 0.0 if there are no active missions.
+
+  Single-pass: scans missions and costs once, groups costs by mission_id,
+  and avoids re-fetching each mission record via `Budget.budget_for/1`.
+  """
+  @spec max_budget_utilization() :: float()
+  def max_budget_utilization do
+    active_statuses = GiTF.Missions.active_statuses()
+
+    active_missions =
+      Archive.filter(:missions, fn m -> Map.get(m, :status) in active_statuses end)
+
+    case active_missions do
+      [] ->
+        0.0
+
+      missions ->
+        config_budget = GiTF.Budget.config_budget()
+        spent_by_mission = spent_by_mission(missions)
+
+        missions
+        |> Enum.map(&mission_utilization(&1, spent_by_mission, config_budget))
+        |> Enum.max()
+    end
+  rescue
+    _ -> 0.0
+  end
+
+  # Group cost totals by mission_id in a single scan of :costs.
+  # Cost records carry mission_id directly (see `GiTF.Costs.record/2`).
+  defp spent_by_mission(missions) do
+    mission_ids = missions |> Enum.map(& &1.id) |> MapSet.new()
+
+    Archive.filter(:costs, fn c ->
+      MapSet.member?(mission_ids, Map.get(c, :mission_id))
+    end)
+    |> Enum.reduce(%{}, fn cost, acc ->
+      Map.update(acc, cost.mission_id, cost.cost_usd, &(&1 + cost.cost_usd))
+    end)
+  end
+
+  defp mission_utilization(mission, spent_by_mission, config_budget) do
+    budget =
+      case Map.get(mission, :budget_override) do
+        n when is_number(n) and n > 0 -> n * 1.0
+        _ -> config_budget
+      end
+
+    spent = Map.get(spent_by_mission, mission.id, 0.0)
+
+    if budget > 0, do: spent / budget, else: 0.0
+  end
+
+  @doc """
   Predict likely issues before they occur.
 
   Combines per-op failure patterns with cross-mission sector trends

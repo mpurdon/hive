@@ -135,7 +135,7 @@ defmodule GiTF.Override do
     }
 
     with {:ok, _} <- GiTF.Missions.store_artifact(mission_id, "approval", artifact) do
-      update_request_status(mission_id, "approved")
+      update_request_status(mission_id, "approved", approved_by)
       Logger.info("Quest #{mission_id} approved by #{approved_by}")
       {:ok, artifact}
     end
@@ -146,17 +146,20 @@ defmodule GiTF.Override do
 
   Stores a rejection artifact and updates the approval request status.
   """
-  @spec reject(String.t(), String.t()) :: {:ok, map()} | {:error, term()}
-  def reject(mission_id, reason) do
+  @spec reject(String.t(), String.t(), map()) :: {:ok, map()} | {:error, term()}
+  def reject(mission_id, reason, opts \\ %{}) do
+    rejected_by = Map.get(opts, :rejected_by, "unknown")
+
     artifact = %{
       "approved" => false,
+      "rejected_by" => rejected_by,
       "rejected_at" => DateTime.utc_now() |> DateTime.to_iso8601(),
       "reason" => reason
     }
 
     with {:ok, _} <- GiTF.Missions.store_artifact(mission_id, "approval", artifact) do
-      update_request_status(mission_id, "rejected")
-      Logger.info("Quest #{mission_id} rejected: #{reason}")
+      update_request_status(mission_id, "rejected", rejected_by)
+      Logger.info("Quest #{mission_id} rejected by #{rejected_by}: #{reason}")
       {:ok, artifact}
     end
   end
@@ -203,13 +206,18 @@ defmodule GiTF.Override do
     Archive.find_one(:approval_requests, fn r -> r.mission_id == mission_id end)
   end
 
-  defp update_request_status(mission_id, status) do
+  defp update_request_status(mission_id, status, decided_by) do
     case find_request(mission_id) do
       nil ->
         :ok
 
       request ->
-        updated = Map.put(request, :status, status)
+        updated =
+          request
+          |> Map.put(:status, status)
+          |> Map.put(:decided_by, decided_by)
+          |> Map.put(:decided_at, DateTime.utc_now())
+
         Archive.put(:approval_requests, updated)
     end
   end

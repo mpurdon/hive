@@ -2,10 +2,25 @@ defmodule GiTF.Observability.Alerts do
   @moduledoc """
   Alert system for production monitoring.
   Checks conditions and sends notifications.
+
+  ## Deduplication
+
+  Identical alerts (same type + message) are suppressed for a configurable
+  window (default 5 minutes) via an ETS-backed cache. This prevents
+  100 simultaneous failures from producing 100 identical webhook calls.
+
+  ## Severity Routing
+
+  Each alert type has an assigned severity (`:critical`, `:high`, `:medium`,
+  `:low`). Only alerts at or above the configured minimum severity are
+  dispatched to the webhook; all alerts are logged regardless.
   """
 
   require Logger
   alias GiTF.Archive
+
+  @dedup_table :gitf_alert_dedup
+  @dedup_window_seconds 300
 
   @alert_rules [
     # 30 minutes
@@ -19,6 +34,23 @@ defmodule GiTF.Observability.Alerts do
     # Failed in last 5 mins
     {:validation_failed, 5 * 60}
   ]
+
+  @severity_map %{
+    budget_paused: :critical,
+    budget_auto_failed: :critical,
+    failure_rate_high: :high,
+    validation_failed: :high,
+    cost_spike: :high,
+    quest_stuck: :medium,
+    quality_drop: :medium,
+    budget_escalated: :low
+  }
+
+  @severity_order %{critical: 0, high: 1, medium: 2, low: 3}
+
+  @doc "Returns the severity for a given alert type."
+  @spec severity(atom()) :: :critical | :high | :medium | :low
+  def severity(type), do: Map.get(@severity_map, type, :low)
 
   @doc "Check all alert rules and return triggered alerts"
   def check_alerts(opts \\ []) do
@@ -36,42 +68,65 @@ defmodule GiTF.Observability.Alerts do
     end)
   end
 
-  @doc "Send alert notification. Dispatches to both log and webhook when a webhook_url is configured."
+  @doc """
+  Send alert notifications with dedup and severity routing.
+
+  Duplicate alerts (same type + message) within the dedup window are
+  suppressed. Alerts below the configured minimum webhook severity
+  are logged but not sent to the webhook.
+  """
   def notify(alerts, channel \\ :auto) do
     Enum.each(alerts, fn {type, message} ->
-      GiTF.Telemetry.emit([:gitf, :alert, :raised], %{}, %{type: type, message: message})
+      if duplicate?(type, message) do
+        Logger.debug("Alert suppressed (dedup): #{type}")
+      else
+        record_alert(type, message)
 
-      case channel do
-        :auto ->
-          # Log directly; webhook is handled by the telemetry handler
-          # attached in attach_webhook_handler/0 (fired by the emit above)
-          send_notification(:log, type, message)
+        GiTF.Telemetry.emit([:gitf, :alert, :raised], %{}, %{
+          type: type,
+          message: message,
+          severity: severity(type)
+        })
 
-        other ->
-          send_notification(other, type, message)
+        send_notification(:log, type, message)
+
+        case channel do
+          :auto ->
+            if webhook_url() && meets_severity_threshold?(type) do
+              Task.start(fn -> send_notification(:webhook, type, message) end)
+            end
+
+          other ->
+            send_notification(other, type, message)
+        end
       end
     end)
   end
 
-  @doc "Dispatch a single alert directly to the configured webhook (and log)."
+  @doc "Dispatch a single alert directly to the configured webhook (and log), with dedup."
   @spec dispatch_webhook(atom(), String.t()) :: :ok
   def dispatch_webhook(type, message) do
-    Logger.warning("[ALERT] #{type}: #{message}")
+    if duplicate?(type, message) do
+      Logger.debug("Alert suppressed (dedup): #{type}")
+    else
+      record_alert(type, message)
+      Logger.warning("[ALERT] #{type}: #{message}")
 
-    case webhook_url() do
-      nil ->
-        :ok
-
-      _url ->
-        # Fire-and-forget: avoid blocking the caller during retries
+      if webhook_url() && meets_severity_threshold?(type) do
         Task.start(fn -> send_notification(:webhook, type, message) end)
+      end
     end
 
     :ok
   end
 
-  @doc "Attach a telemetry handler that forwards [:gitf, :alert, :raised] events to the webhook."
+  @doc """
+  Attach a telemetry handler that forwards [:gitf, :alert, :raised] events
+  to the webhook. Also initializes the dedup ETS table.
+  """
   def attach_webhook_handler do
+    init_dedup_table()
+
     :telemetry.attach(
       "gitf-alert-webhook",
       [:gitf, :alert, :raised],
@@ -85,13 +140,11 @@ defmodule GiTF.Observability.Alerts do
 
   @doc false
   def handle_alert_event(_event, _measurements, metadata, _config) do
-    type = Map.get(metadata, :type, :unknown)
-    message = Map.get(metadata, :message, "")
-
-    if webhook_url() do
-      # Fire-and-forget: telemetry handlers run in the caller's process
-      Task.start(fn -> send_notification(:webhook, type, message) end)
-    end
+    # Webhook delivery is handled by notify/2 and dispatch_webhook/2 directly.
+    # This handler only fires for external telemetry consumers (dashboards, metrics).
+    # No webhook dispatch here to avoid double sends.
+    _ = metadata
+    :ok
   rescue
     _ -> :ok
   end
@@ -237,6 +290,89 @@ defmodule GiTF.Observability.Alerts do
   rescue
     _ ->
       Logger.warning("Webhook crashed for alert #{type} (attempt #{attempt + 1})")
+  end
+
+  # -- Dedup ----------------------------------------------------------------
+
+  # GC runs at most once per this interval (seconds)
+  @dedup_gc_interval 60
+
+  @doc false
+  def init_dedup_table do
+    :ets.new(@dedup_table, [:set, :public, :named_table])
+  rescue
+    ArgumentError -> @dedup_table
+  end
+
+  defp dedup_table_exists? do
+    :ets.whereis(@dedup_table) != :undefined
+  end
+
+  defp duplicate?(type, message) do
+    if dedup_table_exists?() do
+      key = {type, :erlang.phash2(message)}
+      now = System.monotonic_time(:second)
+
+      case :ets.lookup(@dedup_table, key) do
+        [{^key, ts}] when now - ts < @dedup_window_seconds -> true
+        _ -> false
+      end
+    else
+      false
+    end
+  rescue
+    _ -> false
+  end
+
+  defp record_alert(type, message) do
+    if dedup_table_exists?() do
+      key = {type, :erlang.phash2(message)}
+      now = System.monotonic_time(:second)
+      :ets.insert(@dedup_table, {key, now})
+      maybe_gc_dedup(now)
+    end
+  rescue
+    _ -> :ok
+  end
+
+  # Rate-limited GC: only prune stale entries every @dedup_gc_interval seconds
+  defp maybe_gc_dedup(now) do
+    last_gc_key = :__dedup_last_gc
+
+    run_gc? =
+      case :ets.lookup(@dedup_table, last_gc_key) do
+        [{^last_gc_key, last}] -> now - last >= @dedup_gc_interval
+        _ -> true
+      end
+
+    if run_gc? do
+      :ets.insert(@dedup_table, {last_gc_key, now})
+      cutoff = now - @dedup_window_seconds * 2
+
+      :ets.select_delete(@dedup_table, [
+        {{:_, :"$1"}, [{:is_integer, :"$1"}, {:<, :"$1", cutoff}], [true]}
+      ])
+    end
+  rescue
+    _ -> :ok
+  end
+
+  # -- Severity routing ----------------------------------------------------
+
+  defp meets_severity_threshold?(type) do
+    alert_sev = @severity_order[severity(type)] || 3
+    min_sev = @severity_order[min_webhook_severity()] || 2
+    alert_sev <= min_sev
+  end
+
+  defp min_webhook_severity do
+    case GiTF.Config.Provider.get([:observability, :min_webhook_severity]) do
+      s when s in [:critical, :high, :medium, :low] -> s
+      s when is_binary(s) -> String.to_existing_atom(s)
+      _ -> :medium
+    end
+  rescue
+    _ -> :medium
   end
 
   defp webhook_url do

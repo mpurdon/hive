@@ -99,6 +99,7 @@ defmodule GiTF.Major do
       gitf_root: gitf_root,
       port: nil,
       max_ghosts: max_ghosts,
+      effective_max_ghosts: max_ghosts,
       max_retries: 3,
       last_checkpoint: %{},
       stall_timeout: :timer.minutes(10),
@@ -113,6 +114,10 @@ defmodule GiTF.Major do
       {:ok, _pid} -> Logger.debug("Tachikoma is running")
       :error -> Logger.warning("Tachikoma is not running")
     end
+
+    # Subscribe to config reload events so max_ghosts/budget/model changes
+    # take effect without restarting Major.
+    GiTF.Config.Provider.subscribe()
 
     Logger.info("Major initialized at #{gitf_root}")
 
@@ -140,6 +145,9 @@ defmodule GiTF.Major do
 
     # Periodically run janitor maintenance when idle
     schedule_janitor()
+
+    # Periodically re-evaluate ghost capacity against budget pressure
+    schedule_autoscale()
 
     # On startup, resume active missions that may have stalled during crash
     # 1s gives supervision tree time to settle; Registry and Archive are
@@ -171,7 +179,14 @@ defmodule GiTF.Major do
   end
 
   def handle_call(:status, _from, state) do
-    {:reply, Map.take(state, [:status, :active_ghosts, :gitf_root, :max_ghosts]), state}
+    {:reply,
+     Map.take(state, [
+       :status,
+       :active_ghosts,
+       :gitf_root,
+       :max_ghosts,
+       :effective_max_ghosts
+     ]), state}
   end
 
   def handle_call(:await_session_end, from, state) do
@@ -185,6 +200,10 @@ defmodule GiTF.Major do
     notify_run_job_completed(op_id)
     state = advance_quest(ghost_id, state)
     {:noreply, state}
+  end
+
+  def handle_cast({:apply_autoscale, target, meta}, state) do
+    {:noreply, apply_autoscale(state, target, meta)}
   end
 
   def handle_cast(_msg, state), do: {:noreply, state}
@@ -348,6 +367,32 @@ defmodule GiTF.Major do
   def handle_info(:janitor_run, state) do
     GiTF.Major.Janitor.run_if_idle()
     schedule_janitor()
+    {:noreply, state}
+  end
+
+  def handle_info(:autoscale_check, state) do
+    dispatch_autoscale(state.max_ghosts)
+    schedule_autoscale()
+    {:noreply, state}
+  end
+
+  def handle_info({:config_reloaded, changed_keys}, state) do
+    state =
+      if :major in changed_keys or :queen in changed_keys do
+        new_max = read_max_ghosts(state.gitf_root)
+
+        if new_max != state.max_ghosts do
+          Logger.info("Config reload: max_ghosts #{state.max_ghosts} → #{new_max}")
+          # Trigger an immediate autoscale cycle with the new ceiling
+          dispatch_autoscale(new_max)
+          %{state | max_ghosts: new_max}
+        else
+          state
+        end
+      else
+        state
+      end
+
     {:noreply, state}
   end
 
@@ -832,7 +877,8 @@ defmodule GiTF.Major do
 
       {:ok, %{"action" => "reject", "mission_id" => mission_id} = data} ->
         reason = Map.get(data, "reason", "Rejected via link_msg")
-        GiTF.Override.reject(mission_id, reason)
+        rejected_by = Map.get(data, "rejected_by", link_msg.from)
+        GiTF.Override.reject(mission_id, reason, %{rejected_by: rejected_by})
         GiTF.Major.Orchestrator.advance_quest(mission_id)
 
       _ ->
@@ -1112,7 +1158,7 @@ defmodule GiTF.Major do
           |> Enum.filter(&GiTF.Ops.ready?(&1.id))
 
         active_count = GiTF.Ghosts.list(status: GhostStatus.working()) |> length()
-        available_slots = max(state.max_ghosts - active_count, 0)
+        available_slots = max(state.effective_max_ghosts - active_count, 0)
         stagger_delay = GiTF.Config.Provider.get([:major, :stagger_delay_ms], 2000)
 
         jobs_to_spawn =
@@ -1419,6 +1465,7 @@ defmodule GiTF.Major do
   @stuck_recovery_interval :timer.minutes(5)
   @phase_advancement_interval :timer.minutes(3)
   @janitor_interval :timer.minutes(15)
+  @autoscale_interval :timer.seconds(60)
 
   defp schedule_stall_check do
     Process.send_after(self(), :check_stalls, @stall_check_interval)
@@ -1434,6 +1481,44 @@ defmodule GiTF.Major do
 
   defp schedule_janitor do
     Process.send_after(self(), :janitor_run, @janitor_interval)
+  end
+
+  defp schedule_autoscale do
+    Process.send_after(self(), :autoscale_check, @autoscale_interval)
+  end
+
+  # Computes the scaling decision off-GenServer so the Archive + costs scan
+  # doesn't block the Major mailbox, then casts the result back.
+  defp dispatch_autoscale(max_ghosts) do
+    major = self()
+
+    Task.Supervisor.start_child(GiTF.TaskSupervisor, fn ->
+      try do
+        {target, meta} = GiTF.Autonomy.compute_scaling_decision(max_ghosts)
+        GenServer.cast(major, {:apply_autoscale, target, meta})
+      rescue
+        e -> Logger.warning("Autoscale check failed: #{Exception.message(e)}")
+      end
+    end)
+  end
+
+  defp apply_autoscale(state, target, meta) do
+    if target == state.effective_max_ghosts do
+      state
+    else
+      Logger.info(
+        "Autoscale: effective ghost cap #{state.effective_max_ghosts} → #{target} " <>
+          "(#{meta.reason}, max_util=#{Float.round(meta.max_util, 2)})"
+      )
+
+      GiTF.Telemetry.emit(
+        [:gitf, :major, :autoscaled],
+        %{old: state.effective_max_ghosts, new: target, max_util: meta.max_util},
+        %{reason: meta.reason}
+      )
+
+      %{state | effective_max_ghosts: target}
+    end
   end
 
   defp resume_active_quests(_state) do
@@ -1668,7 +1753,7 @@ defmodule GiTF.Major do
 
       # Compute available slots
       active_count = GiTF.Ghosts.list(status: GhostStatus.working()) |> length()
-      available_slots = max(state.max_ghosts - active_count, 0)
+      available_slots = max(state.effective_max_ghosts - active_count, 0)
       stagger_delay = GiTF.Config.Provider.get([:major, :stagger_delay_ms], 2000)
 
       # Pre-compute running files per mission (avoids re-scanning all_ops per candidate)

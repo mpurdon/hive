@@ -55,6 +55,11 @@ defmodule GiTF.Web.Router do
     live("/sectors", SectorsLive)
     live("/autonomy", AutonomyLive)
     live("/providers", ProvidersLive)
+    live("/health", HealthLive)
+    live("/shells", ShellsLive)
+    live("/timeline", TimelineLive)
+    live("/timeline/:mission_id", TimelineLive)
+    live("/rollback", RollbackLive)
   end
 
   # Health + metrics endpoints — no auth required (monitoring/Prometheus scraping)

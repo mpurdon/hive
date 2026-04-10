@@ -12,6 +12,17 @@ defmodule GiTF.Missions do
 
   alias GiTF.Archive
 
+  # Mission statuses considered "in flight" — mission is still actively being
+  # worked on. Used by budget/scaling/watchdog to identify live missions.
+  @active_statuses ~w(
+    active implementation research design review
+    planning validation requirements
+  )
+
+  @doc "Returns the list of mission statuses considered active (in flight)."
+  @spec active_statuses() :: [String.t()]
+  def active_statuses, do: @active_statuses
+
   # -- Public API --------------------------------------------------------------
 
   @doc """

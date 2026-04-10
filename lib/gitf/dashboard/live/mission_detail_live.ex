@@ -38,7 +38,11 @@ defmodule GiTF.Dashboard.MissionDetailLive do
          |> assign(:report, nil)
          |> assign(:report_loading, false)
          |> assign(:sectors, load_sectors())
-         |> compute_op_stats()}
+         |> assign(:budget_info, %{budget: 0, spent: 0, remaining: 0, pct: 0.0})
+         |> assign(:rollback_status, :unknown)
+         |> assign(:priority, :normal)
+         |> compute_op_stats()
+         |> reload()}
 
       {:error, _} ->
         {:ok,
@@ -180,8 +184,43 @@ defmodule GiTF.Dashboard.MissionDetailLive do
 
     case GiTF.Missions.get(id) do
       {:ok, mission} ->
+        # Budget utilization
+        budget_info =
+          try do
+            budget = GiTF.Budget.budget_for(id)
+            spent = GiTF.Budget.spent_for(id)
+            remaining = GiTF.Budget.remaining(id)
+            pct = if budget > 0, do: Float.round(spent / budget * 100, 1), else: 0.0
+            %{budget: budget, spent: spent, remaining: remaining, pct: pct}
+          rescue
+            _ -> %{budget: 0, spent: 0, remaining: 0, pct: 0.0}
+          end
+
+        # Rollback status
+        rollback_status =
+          try do
+            GiTF.Rollback.revert_status(id)
+          rescue
+            _ -> :unknown
+          end
+
+        # Priority
+        priority =
+          try do
+            GiTF.Priority.effective_priority(mission)
+          rescue
+            _ -> :normal
+          end
+
         socket
-        |> assign(mission: mission, ops: GiTF.Ops.list(mission_id: id), sectors: load_sectors())
+        |> assign(
+          mission: mission,
+          ops: GiTF.Ops.list(mission_id: id),
+          sectors: load_sectors(),
+          budget_info: budget_info,
+          rollback_status: rollback_status,
+          priority: priority
+        )
         |> compute_op_stats()
 
       {:error, _} ->
@@ -504,6 +543,49 @@ defmodule GiTF.Dashboard.MissionDetailLive do
           <div class="sidebar-stat-row" style="border-top:1px solid #30363d; margin-top:0.25rem; padding-top:0.5rem; cursor:pointer" phx-click="filter_ops" phx-value-filter="all">
             <span class="sidebar-stat-label" style="font-weight:600; color:#f0f6fc">Total</span>
             <span class="sidebar-stat-value">{@total_ops}</span>
+          </div>
+        </div>
+
+        <%!-- Budget & Status --%>
+        <div class="panel" style="padding:0.85rem 1rem">
+          <div class="panel-title" style="font-size:0.85rem; margin-bottom:0.5rem; padding-bottom:0.4rem">Budget</div>
+          <div style="display:flex; justify-content:space-between; font-size:0.8rem; margin-bottom:0.25rem">
+            <span style="color:#8b949e">Spent</span>
+            <span style="color:#3fb950">{format_cost(@budget_info.spent)} / {format_cost(@budget_info.budget)}</span>
+          </div>
+          <div style="height:6px; background:#21262d; border-radius:3px; overflow:hidden">
+            <div style={"height:100%; border-radius:3px; background:#{cond do
+              @budget_info.pct >= 90 -> "#f85149"
+              @budget_info.pct >= 70 -> "#d29922"
+              true -> "#3fb950"
+            end}; width:#{min(@budget_info.pct, 100)}%"}></div>
+          </div>
+          <div style="display:flex; justify-content:space-between; margin-top:0.4rem; font-size:0.7rem; color:#6b7280">
+            <span>{@budget_info.pct}% used</span>
+            <span>{format_cost(@budget_info.remaining)} remaining</span>
+          </div>
+          <div style="display:flex; gap:0.4rem; margin-top:0.5rem; align-items:center">
+            <span class={"badge #{case @priority do
+              :critical -> "badge-red"
+              :high -> "badge-orange"
+              :normal -> "badge-blue"
+              :low -> "badge-grey"
+              :background -> "badge-grey"
+              _ -> "badge-grey"
+            end}"} style="font-size:0.6rem">Priority: {@priority}</span>
+            <%= if @rollback_status == :reverted do %>
+              <span class="badge badge-red" style="font-size:0.6rem">Reverted</span>
+            <% end %>
+          </div>
+        </div>
+
+        <%!-- Quick Links --%>
+        <div class="panel" style="padding:0.85rem 1rem">
+          <div class="panel-title" style="font-size:0.85rem; margin-bottom:0.5rem; padding-bottom:0.4rem">Navigate</div>
+          <div style="display:flex; flex-direction:column; gap:0.35rem">
+            <a href={"/dashboard/timeline/#{@mission.id}"} style="color:#58a6ff; font-size:0.8rem">Event Timeline &rarr;</a>
+            <a href={"/dashboard/progress"} style="color:#58a6ff; font-size:0.8rem">Ghost Progress &rarr;</a>
+            <a href={"/dashboard/costs"} style="color:#58a6ff; font-size:0.8rem">Cost Details &rarr;</a>
           </div>
         </div>
 

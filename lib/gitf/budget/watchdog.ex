@@ -46,19 +46,10 @@ defmodule GiTF.Budget.Watchdog do
   end
 
   defp check_active_quests(state) do
+    active_statuses = GiTF.Missions.active_statuses()
+
     active_quests =
-      Archive.filter(:missions, fn q ->
-        q[:status] in [
-          "active",
-          "implementation",
-          "research",
-          "design",
-          "review",
-          "planning",
-          "validation",
-          "requirements"
-        ]
-      end)
+      Archive.filter(:missions, fn q -> q[:status] in active_statuses end)
 
     Enum.reduce(active_quests, state, fn mission, acc ->
       case Budget.check(mission.id) do

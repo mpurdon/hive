@@ -776,7 +776,10 @@ defmodule GiTF.Major.Orchestrator do
               start_merge(mission)
             else
               Logger.warning("Quest #{mission.id} re-validation failed, rejecting auto-approve")
-              GiTF.Override.reject(mission.id, "Re-validation failed during auto-approve")
+
+              GiTF.Override.reject(mission.id, "Re-validation failed during auto-approve", %{
+                rejected_by: "auto_timeout"
+              })
               fail_quest(mission.id, "Auto-approve failed re-validation")
             end
           end

@@ -6,6 +6,8 @@ defmodule GiTF.Dashboard.ApprovalsLive do
   import GiTF.Dashboard.Helpers
 
   @refresh_interval :timer.seconds(5)
+  # Placeholder until dashboard auth provides real user identity
+  @default_user "dashboard_user"
 
   @impl true
   def mount(_params, _session, socket) do
@@ -55,7 +57,10 @@ defmodule GiTF.Dashboard.ApprovalsLive do
   end
 
   def handle_event("confirm_approve", _params, socket) do
-    case GiTF.Override.approve(socket.assigns.action_id, %{notes: socket.assigns.notes}) do
+    case GiTF.Override.approve(socket.assigns.action_id, %{
+           approved_by: @default_user,
+           notes: socket.assigns.notes
+         }) do
       {:ok, _} ->
         {:noreply,
          socket
@@ -74,7 +79,9 @@ defmodule GiTF.Dashboard.ApprovalsLive do
     if reason == "" do
       {:noreply, put_flash(socket, :error, "Rejection reason is required.")}
     else
-      case GiTF.Override.reject(socket.assigns.action_id, reason) do
+      case GiTF.Override.reject(socket.assigns.action_id, reason, %{
+             rejected_by: @default_user
+           }) do
         {:ok, _} ->
           {:noreply,
            socket

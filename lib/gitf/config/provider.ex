@@ -37,10 +37,27 @@ defmodule GiTF.Config.Provider do
     get(path) || default
   end
 
-  @doc "Reloads config from all sources."
+  @doc """
+  Reloads config from all sources and broadcasts `{:config_reloaded, changed_keys}`
+  on the `"config:reloaded"` PubSub topic so running services can react.
+
+  Processes that need to pick up config changes should subscribe:
+
+      Phoenix.PubSub.subscribe(GiTF.PubSub, "config:reloaded")
+
+  and handle:
+
+      def handle_info({:config_reloaded, changed_keys}, state)
+  """
   @spec reload() :: :ok
   def reload do
     GenServer.call(__MODULE__, :reload)
+  end
+
+  @doc "Subscribe the calling process to config reload notifications."
+  @spec subscribe() :: :ok | {:error, term()}
+  def subscribe do
+    Phoenix.PubSub.subscribe(GiTF.PubSub, "config:reloaded")
   end
 
   # -- GenServer callbacks ---------------------------------------------------
@@ -56,8 +73,25 @@ defmodule GiTF.Config.Provider do
 
   @impl true
   def handle_call(:reload, _from, state) do
-    config = load_config(state.gitf_root)
-    :ets.insert(@table, {:config, config})
+    old_config =
+      case :ets.lookup(@table, :config) do
+        [{:config, c}] -> c
+        [] -> %{}
+      end
+
+    new_config = load_config(state.gitf_root)
+    :ets.insert(@table, {:config, new_config})
+
+    changed_keys = diff_top_keys(old_config, new_config)
+
+    if changed_keys != [] do
+      Phoenix.PubSub.broadcast(
+        GiTF.PubSub,
+        "config:reloaded",
+        {:config_reloaded, changed_keys}
+      )
+    end
+
     {:reply, :ok, state}
   end
 
@@ -185,4 +219,13 @@ defmodule GiTF.Config.Provider do
   end
 
   defp deep_merge_non_empty(_left, right), do: right
+
+  # Returns the list of top-level keys whose values changed between two configs.
+  defp diff_top_keys(old, new) when is_map(old) and is_map(new) do
+    all_keys = MapSet.union(MapSet.new(Map.keys(old)), MapSet.new(Map.keys(new)))
+
+    Enum.filter(all_keys, fn k -> Map.get(old, k) != Map.get(new, k) end)
+  end
+
+  defp diff_top_keys(_, _), do: []
 end
