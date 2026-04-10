@@ -31,8 +31,18 @@ defmodule GiTF.Dashboard.GhostsLive do
     {:noreply, assign_data(socket)}
   end
 
-  def handle_info({:waggle_received, _waggle}, socket) do
+  def handle_info({:waggle_received, waggle}, socket) do
+    socket =
+      case maybe_toast_waggle(socket, waggle) do
+        {:toast, s} -> s
+        :skip -> socket
+      end
+
     {:noreply, assign_data(socket)}
+  end
+
+  def handle_info({:dismiss_toast, toast_id}, socket) do
+    {:noreply, handle_dismiss_toast(socket, toast_id)}
   end
 
   @impl true
@@ -93,12 +103,13 @@ defmodule GiTF.Dashboard.GhostsLive do
     |> assign(:current_path, "/ghosts")
     |> assign(:ghosts, enriched)
     |> Map.put_new(:expanded, MapSet.new())
+    |> Map.put_new(:toasts, [])
   end
 
   @impl true
   def render(assigns) do
     ~H"""
-    <.live_component module={GiTF.Dashboard.AppLayout} id="layout" current_path={@current_path} flash={@flash}>
+    <.live_component module={GiTF.Dashboard.AppLayout} id="layout" current_path={@current_path} flash={@flash} toasts={@toasts}>
       <h1 class="page-title">Ghost Agents</h1>
 
       <div class="panel">

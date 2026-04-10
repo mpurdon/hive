@@ -28,6 +28,7 @@ defmodule GiTF.Dashboard.TimelineLive do
      socket
      |> assign(:mission_id, mission_id)
      |> assign(:filter_type, "all")
+     |> assign(:toasts, [])
      |> assign_data()}
   end
 
@@ -35,6 +36,20 @@ defmodule GiTF.Dashboard.TimelineLive do
   def handle_info(:refresh, socket) do
     Process.send_after(self(), :refresh, @refresh_interval)
     {:noreply, assign_data(socket)}
+  end
+
+  def handle_info({:waggle_received, waggle}, socket) do
+    socket =
+      case maybe_toast_waggle(socket, waggle) do
+        {:toast, s} -> s
+        :skip -> socket
+      end
+
+    {:noreply, assign_data(socket)}
+  end
+
+  def handle_info({:dismiss_toast, toast_id}, socket) do
+    {:noreply, handle_dismiss_toast(socket, toast_id)}
   end
 
   def handle_info(_, socket), do: {:noreply, socket}
@@ -243,7 +258,7 @@ defmodule GiTF.Dashboard.TimelineLive do
   @impl true
   def render(assigns) do
     ~H"""
-    <.live_component module={GiTF.Dashboard.AppLayout} id="layout" current_path={@current_path} flash={@flash}>
+    <.live_component module={GiTF.Dashboard.AppLayout} id="layout" current_path={@current_path} flash={@flash} toasts={@toasts}>
       <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:1rem">
         <h1 class="page-title" style="margin-bottom:0">
           Factory Timeline
@@ -331,7 +346,7 @@ defmodule GiTF.Dashboard.TimelineLive do
                     </div>
                   </div>
                   <span style="color:#6b7280; font-size:0.75rem; white-space:nowrap; margin-left:1rem">
-                    {format_timestamp(event.timestamp)}
+                    <span title={format_timestamp(event.timestamp)}>{relative_time(event.timestamp)}</span>
                   </span>
                 </div>
               </div>
