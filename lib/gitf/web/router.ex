@@ -60,6 +60,7 @@ defmodule GiTF.Web.Router do
     live("/timeline", TimelineLive)
     live("/timeline/:mission_id", TimelineLive)
     live("/rollback", RollbackLive)
+    live("/merges", MergeQueueLive)
   end
 
   # Health + metrics endpoints — no auth required (monitoring/Prometheus scraping)

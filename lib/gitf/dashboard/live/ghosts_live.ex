@@ -60,10 +60,38 @@ defmodule GiTF.Dashboard.GhostsLive do
   defp assign_data(socket) do
     ghosts = GiTF.Ghosts.list()
 
+    # Enrich each ghost with op + mission links
+    enriched =
+      Enum.map(ghosts, fn ghost ->
+        op =
+          case ghost[:op_id] do
+            nil -> nil
+            oid -> GiTF.Archive.get(:ops, oid)
+          end
+
+        mission =
+          case op do
+            %{mission_id: mid} -> GiTF.Archive.get(:missions, mid)
+            _ -> nil
+          end
+
+        shell =
+          GiTF.Archive.find_one(:shells, fn s ->
+            s[:ghost_id] == ghost.id and s.status == "active"
+          end)
+
+        Map.merge(ghost, %{
+          op: op,
+          mission: mission,
+          shell: shell,
+          drift: shell && (shell[:drift_state] || :unknown)
+        })
+      end)
+
     socket
     |> assign(:page_title, "Ghosts")
     |> assign(:current_path, "/ghosts")
-    |> assign(:ghosts, ghosts)
+    |> assign(:ghosts, enriched)
     |> Map.put_new(:expanded, MapSet.new())
   end
 
@@ -85,8 +113,10 @@ defmodule GiTF.Dashboard.GhostsLive do
                 <th>ID</th>
                 <th>Ghost</th>
                 <th>Status</th>
-                <th>Job ID</th>
+                <th>Op</th>
+                <th>Mission</th>
                 <th>Context</th>
+                <th>Drift</th>
                 <th></th>
               </tr>
             </thead>
@@ -103,11 +133,22 @@ defmodule GiTF.Dashboard.GhostsLive do
                     <span class={"model-badge #{provider_class(provider)}"}>{ghost_badge_label(Map.get(ghost, :name, "-"), ghost[:assigned_model])}</span>
                   </td>
                   <td><span class={"badge #{status_badge(Map.get(ghost, :status, "unknown"))}"}>{Map.get(ghost, :status, "unknown")}</span></td>
-                  <td style="font-family:monospace; font-size:0.8rem">
-                    <%= if Map.get(ghost, :op_id) do %>
-                      <a href={"/dashboard/ops/#{ghost.op_id}"}>{short_id(ghost.op_id)}</a>
+                  <td style="font-size:0.8rem">
+                    <%= if ghost.op do %>
+                      <a href={"/dashboard/ops/#{ghost.op.id}"} style="color:#58a6ff" title={ghost.op[:title]}>
+                        {String.slice(ghost.op[:title] || short_id(ghost.op.id), 0, 25)}
+                      </a>
                     <% else %>
-                      -
+                      <span style="color:#6b7280">-</span>
+                    <% end %>
+                  </td>
+                  <td style="font-size:0.8rem">
+                    <%= if ghost.mission do %>
+                      <a href={"/dashboard/missions/#{ghost.mission.id}"} style="color:#8b949e">
+                        {Map.get(ghost.mission, :name) || short_id(ghost.mission.id)}
+                      </a>
+                    <% else %>
+                      <span style="color:#6b7280">-</span>
                     <% end %>
                   </td>
                   <td>
@@ -120,6 +161,19 @@ defmodule GiTF.Dashboard.GhostsLive do
                     <% end %>
                   </td>
                   <td>
+                    <%= if ghost.drift do %>
+                      <span class={"badge #{case ghost.drift do
+                        d when d in [:clean, "clean"] -> "badge-green"
+                        d when d in [:behind, "behind"] -> "badge-yellow"
+                        d when d in [:risky, "risky"] -> "badge-orange"
+                        d when d in [:conflicted, "conflicted"] -> "badge-red"
+                        _ -> "badge-grey"
+                      end}"} style="font-size:0.65rem">{ghost.drift}</span>
+                    <% else %>
+                      <span style="color:#6b7280; font-size:0.75rem">-</span>
+                    <% end %>
+                  </td>
+                  <td>
                     <%= if Map.get(ghost, :status) == GhostStatus.working() do %>
                       <button phx-click="stop" phx-value-id={ghost.id} class="btn btn-red" style="padding:0.2rem 0.6rem; font-size:0.75rem">
                         Stop
@@ -129,7 +183,7 @@ defmodule GiTF.Dashboard.GhostsLive do
                 </tr>
                 <%= if MapSet.member?(Map.get(assigns, :expanded, MapSet.new()), ghost.id) do %>
                   <tr>
-                    <td colspan="9" style="padding:0">
+                    <td colspan="10" style="padding:0">
                       <div class="detail-content">
                         <dl class="metadata-grid">
                           <dt>Full ID</dt><dd style="font-family:monospace; font-size:0.8rem">{ghost.id}</dd>

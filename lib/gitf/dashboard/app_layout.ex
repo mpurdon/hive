@@ -44,6 +44,7 @@ defmodule GiTF.Dashboard.AppLayout do
           <a href={"#{@prefix}/sectors"} class={if @current_path == "/sectors", do: "active"}>Sectors</a>
           <a href={"#{@prefix}/shells"} class={if @current_path == "/shells", do: "active"}>Shells</a>
           <a href={"#{@prefix}/timeline"} class={if active?(@current_path, "/timeline"), do: "active"}>Timeline</a>
+          <a href={"#{@prefix}/merges"} class={if @current_path == "/merges", do: "active"}>Merges</a>
           <a href={"#{@prefix}/rollback"} class={if @current_path == "/rollback", do: "active"}>Rollback</a>
           <a href={"#{@prefix}/health"} class={if @current_path == "/health", do: "active"}>Health</a>
           <a href={"#{@prefix}/autonomy"} class={if @current_path == "/autonomy", do: "active"}>Autonomy</a>
