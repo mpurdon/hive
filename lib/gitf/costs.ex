@@ -146,6 +146,8 @@ defmodule GiTF.Costs do
       total_cost: total(costs),
       total_input_tokens: costs |> Enum.map(&Map.get(&1, :input_tokens, 0)) |> Enum.sum(),
       total_output_tokens: costs |> Enum.map(&Map.get(&1, :output_tokens, 0)) |> Enum.sum(),
+      total_cache_read_tokens: costs |> Enum.map(&Map.get(&1, :cache_read_tokens, 0)) |> Enum.sum(),
+      total_cache_write_tokens: costs |> Enum.map(&Map.get(&1, :cache_write_tokens, 0)) |> Enum.sum(),
       by_model: group_costs_by(costs, fn c -> Map.get(c, :model) end),
       by_bee: group_costs_by(costs, &Map.get(&1, :ghost_id)),
       by_category: group_costs_by(costs, &Map.get(&1, :category, "unknown")),

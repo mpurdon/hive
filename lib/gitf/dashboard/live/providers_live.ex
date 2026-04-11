@@ -137,6 +137,15 @@ defmodule GiTF.Dashboard.ProvidersLive do
      socket |> assign(:priority, priority) |> assign(:dirty, true) |> reload_providers()}
   end
 
+  def handle_event("reset_circuit", %{"provider" => name}, socket) do
+    ProviderCircuit.reset_provider(name)
+
+    {:noreply,
+     socket
+     |> push_toast(:success, "Circuit reset for #{name}")
+     |> assign(:circuit_states, load_circuit_states())}
+  end
+
   def handle_event("start_ollama", _, socket) do
     # Spawn a task to start Ollama and notify us when done
     Task.async(fn ->
@@ -520,7 +529,12 @@ defmodule GiTF.Dashboard.ProvidersLive do
           <tr :for={{name, stats} <- @stats}>
             <% cs = Map.get(@circuit_states, name, %{state: :closed}) %>
             <td style="font-weight:600">{String.capitalize(name)}</td>
-            <td>{circuit_state_badge(cs.state)}</td>
+            <td>
+              {circuit_state_badge(cs.state)}
+              <%= if cs.state in [:open, :half_open] do %>
+                <button phx-click="reset_circuit" phx-value-provider={name} class="btn btn-blue" style="font-size:0.6rem; padding:0.1rem 0.3rem; margin-left:0.3rem">Reset</button>
+              <% end %>
+            </td>
             <td>{stats.total_calls}</td>
             <td>{format_cost(stats.total_cost)}</td>
           </tr>

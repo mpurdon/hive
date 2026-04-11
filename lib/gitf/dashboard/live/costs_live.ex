@@ -154,6 +154,14 @@ defmodule GiTF.Dashboard.CostsLive do
           <div class="card-label">Output Tokens</div>
           <div class="card-value">{format_tokens(@summary.total_output_tokens)}</div>
         </div>
+        <div class="card">
+          <div class="card-label">Cache Read</div>
+          <div class="card-value" style="color:#a78bfa">{format_tokens(@summary[:total_cache_read_tokens] || 0)}</div>
+        </div>
+        <div class="card">
+          <div class="card-label">Cache Write</div>
+          <div class="card-value" style="color:#8b5cf6">{format_tokens(@summary[:total_cache_write_tokens] || 0)}</div>
+        </div>
       </div>
 
       <!-- Hourly trend -->

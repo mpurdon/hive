@@ -164,6 +164,23 @@ defmodule GiTF.Dashboard.MissionDetailLive do
     end
   end
 
+  def handle_event("retry_all_failed", _params, socket) do
+    failed_ops = Enum.filter(socket.assigns.ops, &(&1.status == "failed" && !&1[:phase_job]))
+
+    retried =
+      Enum.count(failed_ops, fn op ->
+        case GiTF.Ops.reset(op.id, "batch retry from dashboard") do
+          {:ok, _} -> true
+          _ -> false
+        end
+      end)
+
+    {:noreply,
+     socket
+     |> push_toast(:info, "Reset #{retried} failed op(s)")
+     |> reload()}
+  end
+
   def handle_event("filter_ops", %{"filter" => filter}, socket) do
     {:noreply, socket |> assign(:op_filter, filter) |> compute_op_stats()}
   end
@@ -462,6 +479,11 @@ defmodule GiTF.Dashboard.MissionDetailLive do
             <button phx-click="filter_ops" phx-value-filter="all" class={"op-filter-chip #{if @op_filter == "all", do: "op-filter-active"}"}>
               All <span class="op-filter-count">{@total_ops}</span>
             </button>
+            <%= if @counts.failed > 0 do %>
+              <button phx-click="retry_all_failed" class="btn btn-orange" style="font-size:0.7rem; padding:0.2rem 0.5rem; margin-left:0.5rem" data-confirm={"Reset #{@counts.failed} failed op(s)?"}>
+                Retry All Failed
+              </button>
+            <% end %>
           </div>
           <%= if @visible_ops == [] do %>
             <div class="empty">No ops created yet.</div>
