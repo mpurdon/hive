@@ -11,7 +11,7 @@ defmodule GiTF.Dashboard.TimelineLive do
 
   import GiTF.Dashboard.Helpers
 
-  @refresh_interval :timer.seconds(5)
+  @heartbeat_interval :timer.seconds(15)
   @max_events 200
 
   @impl true
@@ -20,7 +20,7 @@ defmodule GiTF.Dashboard.TimelineLive do
       Phoenix.PubSub.subscribe(GiTF.PubSub, "link:major")
       Phoenix.PubSub.subscribe(GiTF.PubSub, "ops")
       Phoenix.PubSub.subscribe(GiTF.PubSub, "costs")
-      Process.send_after(self(), :refresh, @refresh_interval)
+      Process.send_after(self(), :heartbeat, @heartbeat_interval)
     end
 
     mission_id = params["mission_id"]
@@ -30,17 +30,17 @@ defmodule GiTF.Dashboard.TimelineLive do
      |> assign(:mission_id, mission_id)
      |> assign(:filter_type, "all")
      |> init_toasts()
-     |> assign_data()}
+     |> stream_events()}
   end
 
   @impl true
-  def handle_info(:refresh, socket) do
-    Process.send_after(self(), :refresh, @refresh_interval)
-    {:noreply, assign_data(socket)}
+  def handle_info(:heartbeat, socket) do
+    Process.send_after(self(), :heartbeat, @heartbeat_interval)
+    {:noreply, stream_events(socket)}
   end
 
   def handle_info({:waggle_received, waggle}, socket) do
-    {:noreply, socket |> maybe_apply_toast(waggle) |> assign_data()}
+    {:noreply, socket |> maybe_apply_toast(waggle) |> stream_events()}
   end
 
   def handle_info(_, socket), do: {:noreply, socket}
@@ -50,24 +50,24 @@ defmodule GiTF.Dashboard.TimelineLive do
     {:noreply,
      socket
      |> assign(:filter_type, type)
-     |> assign_data()}
+     |> stream_events()}
   end
 
   def handle_event("filter_mission", %{"mission_id" => ""}, socket) do
     {:noreply,
      socket
      |> assign(:mission_id, nil)
-     |> assign_data()}
+     |> stream_events()}
   end
 
   def handle_event("filter_mission", %{"mission_id" => id}, socket) do
     {:noreply,
      socket
      |> assign(:mission_id, id)
-     |> assign_data()}
+     |> stream_events()}
   end
 
-  defp assign_data(socket) do
+  defp stream_events(socket) do
     mission_id = socket.assigns.mission_id
     filter_type = socket.assigns.filter_type
 
@@ -86,10 +86,11 @@ defmodule GiTF.Dashboard.TimelineLive do
           end
       end
 
+    # Use stream for the events list — efficient DOM updates for large lists
     socket
     |> assign(:page_title, "Timeline")
     |> assign(:current_path, "/timeline")
-    |> assign(:events, events)
+    |> stream(:events, events, reset: true)
     |> assign(:missions, missions)
     |> assign(:mission_name, mission_name)
     |> assign(:event_count, length(events))
@@ -108,6 +109,8 @@ defmodule GiTF.Dashboard.TimelineLive do
     |> List.flatten()
     |> Enum.sort_by(& &1.timestamp, {:desc, DateTime})
     |> Enum.take(@max_events)
+    |> Enum.with_index()
+    |> Enum.map(fn {event, idx} -> Map.put_new(event, :id, "evt-#{idx}") end)
   end
 
   defp maybe_add(acc, current, match_all, type, fun) do
@@ -292,15 +295,15 @@ defmodule GiTF.Dashboard.TimelineLive do
 
       <%!-- Timeline --%>
       <div class="panel">
-        <%= if @events == [] do %>
+        <%= if @event_count == 0 do %>
           <div class="empty">No events to display. Events appear as missions run through phases, ops complete, and the factory operates. <a href="/dashboard/missions/new" style="color:#58a6ff">Create a mission</a> to get started.</div>
         <% else %>
-          <div style="position:relative; padding-left:2rem">
+          <div style="position:relative; padding-left:2rem" id="timeline-stream" phx-update="stream">
             <%!-- Vertical line --%>
-            <div style="position:absolute; left:0.75rem; top:0; bottom:0; width:2px; background:#21262d"></div>
+            <div style="position:absolute; left:0.75rem; top:0; bottom:0; width:2px; background:#21262d; z-index:0"></div>
 
-            <%= for event <- @events do %>
-              <div style="position:relative; padding-bottom:1rem; padding-left:1.5rem">
+            <%= for {dom_id, event} <- @streams.events do %>
+              <div id={dom_id} style="position:relative; padding-bottom:1rem; padding-left:1.5rem">
                 <%!-- Dot on the timeline --%>
                 <div style={"position:absolute; left:-0.55rem; top:0.3rem; width:10px; height:10px; border-radius:50%; background:#{event.color}; border:2px solid #0d1117"}></div>
 

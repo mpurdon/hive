@@ -8,20 +8,23 @@ defmodule GiTF.Dashboard.ProgressLive do
 
   require GiTF.Ghost.Status, as: GhostStatus
 
-  @refresh_interval :timer.seconds(2)
+  # PubSub-driven — progress events arrive in real-time.
+  # Light heartbeat for stale ghost cleanup only.
+  @heartbeat_interval :timer.seconds(10)
 
   @impl true
   def mount(_params, _session, socket) do
     if connected?(socket) do
       Phoenix.PubSub.subscribe(GiTF.PubSub, GiTF.Progress.topic())
       Phoenix.PubSub.subscribe(GiTF.PubSub, "link:major")
-      Process.send_after(self(), :refresh, @refresh_interval)
+      Process.send_after(self(), :heartbeat, @heartbeat_interval)
     end
 
     {:ok, socket |> init_toasts() |> assign_data()}
   end
 
   @impl true
+  # Real-time: progress events drive updates immediately
   def handle_info({:bee_progress, _ghost_id, _data}, socket) do
     {:noreply, assign_data(socket)}
   end
@@ -30,8 +33,8 @@ defmodule GiTF.Dashboard.ProgressLive do
     {:noreply, socket |> maybe_apply_toast(waggle) |> assign_data()}
   end
 
-  def handle_info(:refresh, socket) do
-    Process.send_after(self(), :refresh, @refresh_interval)
+  def handle_info(:heartbeat, socket) do
+    Process.send_after(self(), :heartbeat, @heartbeat_interval)
     {:noreply, assign_data(socket)}
   end
 

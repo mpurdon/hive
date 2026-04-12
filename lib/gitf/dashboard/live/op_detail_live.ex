@@ -6,13 +6,13 @@ defmodule GiTF.Dashboard.OpDetailLive do
 
   import GiTF.Dashboard.Helpers
 
-  @refresh_interval :timer.seconds(5)
+  @heartbeat_interval :timer.seconds(15)
 
   @impl true
   def mount(%{"id" => id}, _session, socket) do
     if connected?(socket) do
       Phoenix.PubSub.subscribe(GiTF.PubSub, "link:major")
-      Process.send_after(self(), :refresh, @refresh_interval)
+      Process.send_after(self(), :heartbeat, @heartbeat_interval)
     end
 
     case GiTF.Ops.get(id) do
@@ -34,8 +34,8 @@ defmodule GiTF.Dashboard.OpDetailLive do
   end
 
   @impl true
-  def handle_info(:refresh, socket) do
-    Process.send_after(self(), :refresh, @refresh_interval)
+  def handle_info(:heartbeat, socket) do
+    Process.send_after(self(), :heartbeat, @heartbeat_interval)
     {:noreply, reload(socket)}
   end
 

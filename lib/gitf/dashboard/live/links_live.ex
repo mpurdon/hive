@@ -10,6 +10,8 @@ defmodule GiTF.Dashboard.LinksLive do
   use Phoenix.LiveView
   use GiTF.Dashboard.Toastable
 
+  alias Phoenix.LiveView.JS
+
   @impl true
   def mount(_params, _session, socket) do
     if connected?(socket) do
@@ -23,7 +25,6 @@ defmodule GiTF.Dashboard.LinksLive do
      |> assign(:page_title, "Links")
      |> assign(:current_path, "/links")
      |> assign(:links, links)
-     |> assign(:expanded, MapSet.new())
      |> assign(:filter_subject, "all")
      |> init_toasts()}
   end
@@ -37,15 +38,6 @@ defmodule GiTF.Dashboard.LinksLive do
   @impl true
   def handle_event("refresh", _params, socket) do
     {:noreply, reload_links(socket)}
-  end
-
-  def handle_event("toggle", %{"id" => id}, socket) do
-    expanded =
-      if MapSet.member?(socket.assigns.expanded, id),
-        do: MapSet.delete(socket.assigns.expanded, id),
-        else: MapSet.put(socket.assigns.expanded, id)
-
-    {:noreply, assign(socket, :expanded, expanded)}
   end
 
   def handle_event("filter_subject", %{"subject" => subject}, socket) do
@@ -107,10 +99,12 @@ defmodule GiTF.Dashboard.LinksLive do
             </thead>
             <tbody>
               <%= for link_msg <- @links do %>
-                <tr class={"detail-toggle #{unless link_msg.read, do: "link_msg-unread"}"} phx-click="toggle" phx-value-id={link_msg.id}>
-                  <td style="width:1rem; cursor:pointer">
-                    {if MapSet.member?(@expanded, link_msg.id), do: "v", else: ">"}
-                  </td>
+                <tr
+                  class={"detail-toggle #{unless link_msg.read, do: "link_msg-unread"}"}
+                  style="cursor:pointer"
+                  phx-click={JS.toggle(to: "#link-body-#{link_msg.id}")}
+                >
+                  <td style="width:1rem">&rsaquo;</td>
                   <td style="width:1rem">
                     <span class={"badge #{if link_msg.read, do: "badge-grey", else: "badge-blue"}"} style="font-size:0.65rem">
                       {if link_msg.read, do: "R", else: "N"}
@@ -121,15 +115,13 @@ defmodule GiTF.Dashboard.LinksLive do
                   <td class={unless link_msg.read, do: "link_msg-subject"}>{link_msg.subject || "(no subject)"}</td>
                   <td style="font-size:0.8rem; color:#8b949e">{format_timestamp(link_msg.inserted_at)}</td>
                 </tr>
-                <%= if MapSet.member?(@expanded, link_msg.id) do %>
-                  <tr>
-                    <td colspan="6" style="padding:0.5rem 1rem; background:#0d1117; border-top:none">
-                      <div style="font-size:0.8rem; color:#c9d1d9; white-space:pre-wrap; font-family:monospace; max-height:200px; overflow-y:auto">
-                        {link_msg.body || "(empty)"}
-                      </div>
-                    </td>
-                  </tr>
-                <% end %>
+                <tr id={"link-body-#{link_msg.id}"} style="display:none">
+                  <td colspan="6" style="padding:0.5rem 1rem; background:#0d1117; border-top:none">
+                    <div style="font-size:0.8rem; color:#c9d1d9; white-space:pre-wrap; font-family:monospace; max-height:200px; overflow-y:auto">
+                      {link_msg.body || "(empty)"}
+                    </div>
+                  </td>
+                </tr>
               <% end %>
             </tbody>
           </table>

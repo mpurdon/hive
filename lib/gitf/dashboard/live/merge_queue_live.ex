@@ -8,22 +8,22 @@ defmodule GiTF.Dashboard.MergeQueueLive do
 
   import GiTF.Dashboard.Helpers
 
-  @refresh_interval :timer.seconds(5)
+  @heartbeat_interval :timer.seconds(15)
 
   @impl true
   def mount(_params, _session, socket) do
     if connected?(socket) do
       Phoenix.PubSub.subscribe(GiTF.PubSub, "link:major")
       Phoenix.PubSub.subscribe(GiTF.PubSub, "sync:queue")
-      Process.send_after(self(), :refresh, @refresh_interval)
+      Process.send_after(self(), :heartbeat, @heartbeat_interval)
     end
 
     {:ok, socket |> init_toasts() |> assign_data()}
   end
 
   @impl true
-  def handle_info(:refresh, socket) do
-    Process.send_after(self(), :refresh, @refresh_interval)
+  def handle_info(:heartbeat, socket) do
+    Process.send_after(self(), :heartbeat, @heartbeat_interval)
     {:noreply, assign_data(socket)}
   end
 

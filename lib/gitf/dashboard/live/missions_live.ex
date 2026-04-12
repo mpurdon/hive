@@ -13,13 +13,14 @@ defmodule GiTF.Dashboard.MissionsLive do
 
   import GiTF.Dashboard.Helpers
 
-  @refresh_interval :timer.seconds(5)
+  # Longer heartbeat — PubSub handles real-time updates
+  @heartbeat_interval :timer.seconds(15)
 
   @impl true
   def mount(_params, _session, socket) do
     if connected?(socket) do
       Phoenix.PubSub.subscribe(GiTF.PubSub, "link:major")
-      Process.send_after(self(), :refresh, @refresh_interval)
+      Process.send_after(self(), :heartbeat, @heartbeat_interval)
     end
 
     missions = load_quests()
@@ -39,8 +40,8 @@ defmodule GiTF.Dashboard.MissionsLive do
   end
 
   @impl true
-  def handle_info(:refresh, socket) do
-    Process.send_after(self(), :refresh, @refresh_interval)
+  def handle_info(:heartbeat, socket) do
+    Process.send_after(self(), :heartbeat, @heartbeat_interval)
     missions = load_quests()
     {:noreply, socket |> assign(:all_missions, missions) |> apply_filters()}
   end

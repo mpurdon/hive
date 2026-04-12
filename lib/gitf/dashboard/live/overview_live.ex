@@ -14,46 +14,68 @@ defmodule GiTF.Dashboard.OverviewLive do
 
   require GiTF.Ghost.Status, as: GhostStatus
 
-  @refresh_interval :timer.seconds(5)
+  # Heartbeat for staleness — not a full reload trigger.
+  # Real updates come from PubSub handlers below.
+  @heartbeat_interval :timer.seconds(30)
 
   @impl true
   def mount(_params, _session, socket) do
     if connected?(socket) do
-      # Subscribe to all link_msg traffic for live updates
       Phoenix.PubSub.subscribe(GiTF.PubSub, "link:major")
       Phoenix.PubSub.subscribe(GiTF.PubSub, "ops")
       Phoenix.PubSub.subscribe(GiTF.PubSub, "ghosts")
       Phoenix.PubSub.subscribe(GiTF.PubSub, "costs")
 
-      Process.send_after(self(), :refresh, @refresh_interval)
+      Process.send_after(self(), :heartbeat, @heartbeat_interval)
     end
 
-    {:ok,
-     socket
-     |> init_toasts()
-     |> assign_data()}
+    # Fast mount: set defaults synchronously, load expensive data async
+    socket =
+      socket
+      |> init_toasts()
+      |> assign(:page_title, "Overview")
+      |> assign(:current_path, "/")
+      |> assign(:last_updated, DateTime.utc_now())
+      |> assign(:dark_factory, GiTF.Config.dark_factory?())
+      |> assign_core_data()
+      |> assign_async(:health_status, fn -> {:ok, %{health_status: safe_health_check()}} end)
+      |> assign_async(:cost_summary, fn -> {:ok, %{cost_summary: GiTF.Costs.summary()}} end)
+
+    {:ok, socket}
   end
 
   @impl true
-  def handle_info(:refresh, socket) do
-    Process.send_after(self(), :refresh, @refresh_interval)
-    {:noreply, assign_data(socket)}
+  def handle_info(:heartbeat, socket) do
+    Process.send_after(self(), :heartbeat, @heartbeat_interval)
+    # Light refresh — only update counters and timestamps
+    {:noreply, assign_core_data(socket)}
   end
 
+  # PubSub: targeted updates instead of full reload
   def handle_info({:waggle_received, waggle}, socket) do
-    {:noreply, socket |> maybe_apply_toast(waggle) |> assign_data()}
+    {:noreply,
+     socket
+     |> maybe_apply_toast(waggle)
+     |> assign_core_data()
+     |> assign(:recent_waggles, GiTF.Link.list(limit: 5))}
   end
 
   def handle_info({:op_updated, _op}, socket) do
-    {:noreply, assign_data(socket)}
+    {:noreply, assign_core_data(socket)}
   end
 
   def handle_info({:ghost_updated, _ghost}, socket) do
-    {:noreply, assign_data(socket)}
+    {:noreply, assign_core_data(socket)}
   end
 
   def handle_info({:cost_recorded, _cost}, socket) do
-    {:noreply, assign_data(socket)}
+    # Cost changed — refresh cost summary async, update counters sync
+    {:noreply,
+     socket
+     |> assign_core_data()
+     |> assign_async(:cost_summary, fn -> {:ok, %{cost_summary: GiTF.Costs.summary()}} end,
+       reset: true
+     )}
   end
 
   @impl true
@@ -78,7 +100,7 @@ defmodule GiTF.Dashboard.OverviewLive do
         {:noreply,
          socket
          |> put_flash(:info, "Switched to sector: #{sector.name || sector.id}")
-         |> assign_data()}
+         |> assign_core_data()}
 
       {:error, reason} ->
         {:noreply, put_flash(socket, :error, "Failed: #{inspect(reason)}")}
@@ -122,167 +144,59 @@ defmodule GiTF.Dashboard.OverviewLive do
     end
   end
 
-  defp assign_data(socket) do
+  # Core data: lightweight, called from mount and PubSub handlers.
+  # Excludes slow operations (health check, cost summary) which use assign_async.
+  defp assign_core_data(socket) do
     ghosts = GiTF.Ghosts.list()
     missions = GiTF.Missions.list()
-    cost_summary = GiTF.Costs.summary()
-    recent_waggles = GiTF.Link.list(limit: 5)
+    ops = GiTF.Ops.list()
 
     active_ghost_list = Enum.filter(ghosts, &GhostStatus.active?(Map.get(&1, :status)))
     active_ghosts = length(active_ghost_list)
-    active_quests = Enum.count(missions, &(Map.get(&1, :status) == "active"))
+    active_statuses = GiTF.Missions.active_statuses()
+    active_quests = Enum.count(missions, &(Map.get(&1, :status) in active_statuses))
 
-    {avg_context, peak_context, high_context_bees} =
-      case active_ghost_list do
-        [] ->
-          {0.0, 0.0, 0}
-
-        active ->
-          pcts = Enum.map(active, &(Map.get(&1, :context_percentage, 0.0) * 100))
-          peaks = Enum.map(active, &(Map.get(&1, :context_peak_percentage, 0.0) * 100))
-          avg = Enum.sum(pcts) / length(pcts)
-          peak = Enum.max(peaks, fn -> 0.0 end)
-          high = Enum.count(pcts, &(&1 > 40))
-          {avg, peak, high}
-      end
-
-    # "Fuel remaining" = inverse of average usage (100% = full tank, 0% = empty)
+    # Context fuel gauge
+    {avg_context, peak_context, high_context_bees} = compute_context_stats(active_ghost_list)
     fuel_remaining = max(0.0, 100.0 - avg_context)
 
     # Audit stats
-    ops = GiTF.Ops.list()
     verified_jobs = Enum.count(ops, &(Map.get(&1, :verification_status) == "passed"))
     failed_verification = Enum.count(ops, &(Map.get(&1, :verification_status) == "failed"))
+    pending_verification = Enum.count(ops, &(&1[:verification_status] == "pending" and &1.status == "done"))
 
-    pending_verification =
-      Enum.count(
-        ops,
-        &(Map.get(&1, :verification_status) == "pending" and Map.get(&1, :status) == "done")
-      )
-
-    # Quest phases
-    research_quests = Enum.count(missions, &(Map.get(&1, :current_phase) == "research"))
-    planning_quests = Enum.count(missions, &(Map.get(&1, :current_phase) == "planning"))
-
-    implementation_quests =
-      Enum.count(missions, &(Map.get(&1, :current_phase) == "implementation"))
+    # Phase counts
+    research_quests = Enum.count(missions, &(&1[:current_phase] == "research"))
+    planning_quests = Enum.count(missions, &(&1[:current_phase] == "planning"))
+    implementation_quests = Enum.count(missions, &(&1[:current_phase] == "implementation"))
 
     # Daily stats
     today_start = DateTime.utc_now() |> DateTime.to_date() |> DateTime.new!(~T[00:00:00])
+    completed_today = count_since(missions, "completed", today_start)
+    failed_today = count_since(missions, "failed", today_start)
+    ops_completed_today = count_since(ops, "done", today_start)
 
-    completed_today =
-      Enum.count(missions, fn m ->
-        m.status == "completed" and
-          m[:updated_at] != nil and
-          DateTime.compare(m.updated_at, today_start) != :lt
-      end)
+    # Approvals
+    pending_approvals = safe_count(fn -> GiTF.Override.pending_approvals() end)
 
-    failed_today =
-      Enum.count(missions, fn m ->
-        m.status == "failed" and
-          m[:updated_at] != nil and
-          DateTime.compare(m.updated_at, today_start) != :lt
-      end)
+    # Sectors
+    sectors = safe_list(fn -> GiTF.Sector.list() end)
+    current_sector_id = case GiTF.Sector.current() do
+      {:ok, s} -> s.id
+      _ -> nil
+    end
 
-    ops_completed_today =
-      Enum.count(ops, fn op ->
-        op.status == "done" and
-          op[:updated_at] != nil and
-          DateTime.compare(op.updated_at, today_start) != :lt
-      end)
-
-    # Approvals & sectors
-    pending_approvals =
-      try do
-        length(GiTF.Override.pending_approvals())
-      rescue
-        _ -> 0
-      end
-
-    sectors =
-      try do
-        GiTF.Sector.list()
-      rescue
-        _ -> []
-      end
-
-    sector_count = length(sectors)
-
-    current_sector_id =
-      case GiTF.Sector.current() do
-        {:ok, s} -> s.id
-        _ -> nil
-      end
-
-    recent_sectors =
-      sectors
-      |> Enum.sort_by(&(-safe_unix_ts(&1)))
-      |> Enum.take(5)
-
-    # Recent missions for the overview card (active first, then recent completed)
-    # Enrich with budget + ghost count for the cards
-    ghost_by_mission =
-      ghosts
-      |> Enum.filter(&GhostStatus.active?(Map.get(&1, :status)))
-      |> Enum.reduce(%{}, fn ghost, acc ->
-        case ghost[:op_id] do
-          nil -> acc
-          op_id ->
-            case GiTF.Archive.get(:ops, op_id) do
-              %{mission_id: mid} when not is_nil(mid) ->
-                Map.update(acc, mid, 1, &(&1 + 1))
-              _ -> acc
-            end
-        end
-      end)
-
-    recent_missions =
-      missions
-      |> Enum.sort_by(fn m ->
-        active = if Map.get(m, :status) in ["active", "implementation", "research", "design", "planning", "review"], do: 0, else: 1
-        {active, -safe_unix_ts(m)}
-      end)
-      |> Enum.take(8)
-      |> Enum.map(fn m ->
-        budget_pct =
-          try do
-            budget = GiTF.Budget.budget_for(m.id)
-            spent = GiTF.Budget.spent_for(m.id)
-            if budget > 0, do: Float.round(spent / budget * 100, 1), else: 0.0
-          rescue
-            _ -> 0.0
-          end
-
-        Map.merge(m, %{
-          ghost_count: Map.get(ghost_by_mission, m.id, 0),
-          budget_pct: budget_pct
-        })
-      end)
-
-    # Dark Factory status
-    dark_factory = GiTF.Config.dark_factory?()
-
-    health_status =
-      try do
-        GiTF.Observability.Health.check().status
-      rescue
-        _ -> :unknown
-      end
+    # Mission cards (enriched)
+    ghost_by_mission = count_ghosts_by_mission(active_ghost_list)
+    recent_missions = build_recent_missions(missions, ghost_by_mission)
 
     socket
-    |> assign(:page_title, "Overview")
-    |> assign(:current_path, "/")
     |> assign(:last_updated, DateTime.utc_now())
-    |> assign(:dark_factory, dark_factory)
     |> assign(:ghost_count, length(ghosts))
     |> assign(:active_ghosts, active_ghosts)
     |> assign(:quest_count, length(missions))
     |> assign(:active_quests, active_quests)
-    |> assign(:total_cost, cost_summary.total_cost)
-    |> assign(:total_input_tokens, cost_summary.total_input_tokens)
-    |> assign(:total_output_tokens, cost_summary.total_output_tokens)
-    |> assign(:cost_by_model, cost_summary.by_model)
-    |> assign(:recent_waggles, recent_waggles)
+    |> assign(:recent_waggles, GiTF.Link.list(limit: 5))
     |> assign(:active_processes, safe_active_count())
     |> assign(:avg_context, avg_context)
     |> assign(:peak_context, peak_context)
@@ -296,15 +210,85 @@ defmodule GiTF.Dashboard.OverviewLive do
     |> assign(:planning_quests, planning_quests)
     |> assign(:implementation_quests, implementation_quests)
     |> assign(:pending_approvals, pending_approvals)
-    |> assign(:sector_count, sector_count)
-    |> assign(:recent_sectors, recent_sectors)
+    |> assign(:sector_count, length(sectors))
+    |> assign(:recent_sectors, sectors |> Enum.sort_by(&(-safe_unix_ts(&1))) |> Enum.take(5))
     |> assign(:current_sector_id, current_sector_id)
     |> assign(:recent_missions, recent_missions)
-    |> assign(:health_status, health_status)
     |> assign(:all_missions, missions)
     |> assign(:completed_today, completed_today)
     |> assign(:failed_today, failed_today)
     |> assign(:ops_completed_today, ops_completed_today)
+  end
+
+  defp compute_context_stats([]), do: {0.0, 0.0, 0}
+
+  defp compute_context_stats(active) do
+    pcts = Enum.map(active, &(Map.get(&1, :context_percentage, 0.0) * 100))
+    peaks = Enum.map(active, &(Map.get(&1, :context_peak_percentage, 0.0) * 100))
+    {Enum.sum(pcts) / length(pcts), Enum.max(peaks, fn -> 0.0 end), Enum.count(pcts, &(&1 > 40))}
+  end
+
+  defp count_since(records, status, since) do
+    Enum.count(records, fn r ->
+      r.status == status and r[:updated_at] != nil and DateTime.compare(r.updated_at, since) != :lt
+    end)
+  end
+
+  defp count_ghosts_by_mission(active_ghosts) do
+    Enum.reduce(active_ghosts, %{}, fn ghost, acc ->
+      case ghost[:op_id] do
+        nil -> acc
+        op_id ->
+          case GiTF.Archive.get(:ops, op_id) do
+            %{mission_id: mid} when not is_nil(mid) -> Map.update(acc, mid, 1, &(&1 + 1))
+            _ -> acc
+          end
+      end
+    end)
+  end
+
+  defp build_recent_missions(missions, ghost_by_mission) do
+    active_statuses = GiTF.Missions.active_statuses()
+
+    missions
+    |> Enum.sort_by(fn m ->
+      active = if m.status in active_statuses, do: 0, else: 1
+      {active, -safe_unix_ts(m)}
+    end)
+    |> Enum.take(8)
+    |> Enum.map(fn m ->
+      budget_pct =
+        try do
+          budget = GiTF.Budget.budget_for(m.id)
+          spent = GiTF.Budget.spent_for(m.id)
+          if budget > 0, do: Float.round(spent / budget * 100, 1), else: 0.0
+        rescue
+          _ -> 0.0
+        end
+
+      Map.merge(m, %{
+        ghost_count: Map.get(ghost_by_mission, m.id, 0),
+        budget_pct: budget_pct
+      })
+    end)
+  end
+
+  defp safe_health_check do
+    GiTF.Observability.Health.check().status
+  rescue
+    _ -> :unknown
+  end
+
+  defp safe_count(fun) do
+    fun.() |> length()
+  rescue
+    _ -> 0
+  end
+
+  defp safe_list(fun) do
+    fun.()
+  rescue
+    _ -> []
   end
 
   @mini_phases (GiTF.Major.Orchestrator.phases() -- ["awaiting_approval"]) ++ ["completed"]
@@ -415,9 +399,25 @@ defmodule GiTF.Dashboard.OverviewLive do
       <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:1.5rem">
         <div style="display:flex; align-items:baseline; gap:0.75rem">
           <h1 class="page-title" style="margin-bottom:0">Dashboard Overview</h1>
-          <a href="/dashboard/health" style={"display:inline-flex; align-items:center; gap:0.3rem; font-size:0.7rem; color:#{if @health_status == :healthy, do: "#3fb950", else: "#f85149"}; text-decoration:none"} title="System health">
-            <span style={"width:6px; height:6px; border-radius:50%; background:#{if @health_status == :healthy, do: "#3fb950", else: "#f85149"}"}></span>
-            {if @health_status == :healthy, do: "healthy", else: "degraded"}
+          <% health = case @health_status do
+            %{ok?: true, result: r} -> r
+            _ -> :loading
+          end %>
+          <a href="/dashboard/health" style={"display:inline-flex; align-items:center; gap:0.3rem; font-size:0.7rem; color:#{case health do
+            :healthy -> "#3fb950"
+            :loading -> "#6b7280"
+            _ -> "#f85149"
+          end}; text-decoration:none"} title="System health">
+            <span style={"width:6px; height:6px; border-radius:50%; background:#{case health do
+              :healthy -> "#3fb950"
+              :loading -> "#6b7280"
+              _ -> "#f85149"
+            end}"}></span>
+            {case health do
+              :healthy -> "healthy"
+              :loading -> "checking..."
+              _ -> "degraded"
+            end}
           </a>
           <span style="font-size:0.7rem; color:#484f58" title="Auto-refreshes every 5s">
             &middot; updated {format_timestamp(@last_updated)}
@@ -517,14 +517,22 @@ defmodule GiTF.Dashboard.OverviewLive do
         <%!-- Total Cost: col 3, spans 2 rows --%>
         <div class="card" style="grid-row:1 / 3">
           <div class="card-label">Total Cost</div>
-          <div class="card-value green">{format_cost(@total_cost)}</div>
-          <div class="card-label" style="margin-top:0.25rem">{format_tokens(@total_input_tokens + @total_output_tokens)} tokens</div>
+          <% costs = case @cost_summary do
+            %{ok?: true, result: r} -> r
+            _ -> nil
+          end %>
+          <%= if costs do %>
+            <div class="card-value green">{format_cost(costs.total_cost)}</div>
+            <div class="card-label" style="margin-top:0.25rem">{format_tokens(costs.total_input_tokens + costs.total_output_tokens)} tokens</div>
+          <% else %>
+            <div class="card-value" style="color:#6b7280">loading...</div>
+          <% end %>
           <%!-- Per-model cost bar chart --%>
-          <%= if @cost_by_model != %{} do %>
+          <%= if costs && costs.by_model != %{} do %>
             <div style="margin-top:0.75rem; border-top:1px solid #21262d; padding-top:0.75rem">
               <div style="font-size:0.7rem; color:#6b7280; margin-bottom:0.5rem">Cost by Model</div>
-              <% max_cost = @cost_by_model |> Map.values() |> Enum.map(& &1.cost) |> Enum.max(fn -> 0.001 end) %>
-              <%= for {model, data} <- Enum.sort_by(@cost_by_model, fn {_, d} -> -d.cost end) do %>
+              <% max_cost = costs.by_model |> Map.values() |> Enum.map(& &1.cost) |> Enum.max(fn -> 0.001 end) %>
+              <%= for {model, data} <- Enum.sort_by(costs.by_model, fn {_, d} -> -d.cost end) do %>
                 <div style="margin-bottom:0.5rem">
                   <div style="display:flex; justify-content:space-between; font-size:0.7rem; margin-bottom:2px">
                     <span style="color:#c9d1d9; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; max-width:65%">{short_model_name(model)}</span>

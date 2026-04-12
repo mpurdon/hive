@@ -11,6 +11,7 @@ defmodule GiTF.Dashboard.AppLayout do
 
   use Phoenix.LiveComponent
 
+  alias Phoenix.LiveView.JS
   require GiTF.Ghost.Status, as: GhostStatus
 
   @prefix "/dashboard"
@@ -31,12 +32,6 @@ defmodule GiTF.Dashboard.AppLayout do
      |> assign(safe_assigns)
      |> assign_new(:subscribed, fn -> true end)
      |> assign_new(:toasts, fn -> Map.get(assigns, :toasts, []) end)}
-  end
-
-  @impl true
-  def handle_event("dismiss_toast", %{"id" => id}, socket) do
-    toasts = Enum.reject(socket.assigns.toasts, &(&1.id == id))
-    {:noreply, assign(socket, :toasts, toasts)}
   end
 
   @impl true
@@ -125,12 +120,10 @@ defmodule GiTF.Dashboard.AppLayout do
       <%= if @toasts != [] do %>
         <div class="toast-container">
           <%= for toast <- Enum.take(@toasts, 5) do %>
-            <div class={"toast toast-#{toast.level}"}>
+            <div id={"toast-#{toast.id}"} class={"toast toast-#{toast.level}"}>
               <span style="flex:1">{toast.message}</span>
               <button
-                phx-click="dismiss_toast"
-                phx-value-id={toast.id}
-                phx-target={@myself}
+                phx-click={JS.hide(to: "#toast-#{toast.id}", transition: {"transition-opacity duration-200", "opacity-100", "opacity-0"})}
                 style="background:none; border:none; color:#6b7280; cursor:pointer; font-size:1rem; padding:0; line-height:1"
               >&times;</button>
             </div>

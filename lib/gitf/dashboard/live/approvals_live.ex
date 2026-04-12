@@ -6,7 +6,7 @@ defmodule GiTF.Dashboard.ApprovalsLive do
 
   import GiTF.Dashboard.Helpers
 
-  @refresh_interval :timer.seconds(5)
+  @heartbeat_interval :timer.seconds(15)
   # Placeholder until dashboard auth provides real user identity
   @default_user "dashboard_user"
 
@@ -15,7 +15,7 @@ defmodule GiTF.Dashboard.ApprovalsLive do
     if connected?(socket) do
       Phoenix.PubSub.subscribe(GiTF.PubSub, "section:alerts")
       Phoenix.PubSub.subscribe(GiTF.PubSub, "link:major")
-      Process.send_after(self(), :refresh, @refresh_interval)
+      Process.send_after(self(), :heartbeat, @heartbeat_interval)
     end
 
     {:ok,
@@ -30,8 +30,8 @@ defmodule GiTF.Dashboard.ApprovalsLive do
   end
 
   @impl true
-  def handle_info(:refresh, socket) do
-    Process.send_after(self(), :refresh, @refresh_interval)
+  def handle_info(:heartbeat, socket) do
+    Process.send_after(self(), :heartbeat, @heartbeat_interval)
     {:noreply, assign(socket, :approvals, load_approvals())}
   end
 
