@@ -97,7 +97,10 @@ defmodule GiTF.E2E.SyncStrategyTest do
       fn ->
         status = GiTF.Sync.Queue.status()
         status.active == nil
-      end, timeout: timeout, message: "SyncQueue did not become idle")
+      end,
+      timeout: timeout,
+      message: "SyncQueue did not become idle"
+    )
   end
 
   defp spawn_ghost_with_file(env, op_id, sector_id, filename, content) do
@@ -303,7 +306,10 @@ defmodule GiTF.E2E.SyncStrategyTest do
         {:ok, j1} = GiTF.Ops.get(op1.id)
         {:ok, j2} = GiTF.Ops.get(op2.id)
         Map.get(j1, :merged_at) != nil and Map.get(j2, :merged_at) != nil
-      end, timeout: 30_000, message: "Both ops should be merged")
+      end,
+      timeout: 30_000,
+      message: "Both ops should be merged"
+    )
 
     # Both files should be on main
     repo_path = sector.path

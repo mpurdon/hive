@@ -298,9 +298,10 @@ defmodule GiTF.Tachikoma do
         # Job stuck in verification queue too long — retry once with timeout, fail if still stuck
         Logger.warning("Tachikoma: op #{op.id} stuck in verification for #{age}s, retrying")
 
-        task = Task.Supervisor.async_nolink(GiTF.TaskSupervisor, fn ->
-          GiTF.Audit.verify_job(op.id)
-        end)
+        task =
+          Task.Supervisor.async_nolink(GiTF.TaskSupervisor, fn ->
+            GiTF.Audit.verify_job(op.id)
+          end)
 
         case Task.yield(task, 60_000) || Task.shutdown(task) do
           {:ok, {:ok, :pass, _result}} ->
@@ -855,6 +856,7 @@ defmodule GiTF.Tachikoma do
 
     # Cap pattern collections at max records
     max_patterns = GiTF.Config.get(:pattern_retention_max) || 200
+
     pruned_patterns =
       cap_collection(:failure_analyses, max_patterns) +
         cap_collection(:failure_learnings, max_patterns) +
@@ -992,7 +994,7 @@ defmodule GiTF.Tachikoma do
             end
         end
 
-      unless worker_alive? do
+      if !worker_alive? do
         Logger.warning("Tachikoma: recovering stuck op #{op.id} (worker dead)")
         GiTF.Ops.fail(op.id)
       end
@@ -1274,7 +1276,7 @@ defmodule GiTF.Tachikoma do
     case FailureModes.learn_from_failure(failure_analysis, existing_modes) do
       {:ok, mode} ->
         section_header =
-          unless String.contains?(content, "## Lessons Learned") do
+          if !String.contains?(content, "## Lessons Learned") do
             "\n\n## Lessons Learned\n\n"
           else
             "\n"

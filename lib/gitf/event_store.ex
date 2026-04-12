@@ -166,7 +166,8 @@ defmodule GiTF.EventStore do
 
     phases =
       Enum.map(phases, fn p ->
-        cost_data = Map.get(phase_costs.by_phase, p.phase, %{cost: 0, input_tokens: 0, output_tokens: 0})
+        cost_data =
+          Map.get(phase_costs.by_phase, p.phase, %{cost: 0, input_tokens: 0, output_tokens: 0})
 
         Map.merge(p, %{
           cost_usd: cost_data.cost,

@@ -131,7 +131,7 @@ defmodule GiTF.Plugin.Builtin.Channels.Telegram do
   def handle_info(:flush_batch, %{enabled: false} = state), do: {:noreply, state}
 
   def handle_info(:flush_batch, state) do
-    unless state.batch == [] do
+    if state.batch != [] do
       flush_batch(state.token, state.chat_id, state.batch)
     end
 
@@ -265,7 +265,7 @@ defmodule GiTF.Plugin.Builtin.Channels.Telegram do
       end)
       |> Enum.reject(&is_nil/1)
 
-    unless telemetry_events == [] do
+    if telemetry_events != [] do
       :telemetry.attach_many(
         "section-telegram-channel",
         telemetry_events,

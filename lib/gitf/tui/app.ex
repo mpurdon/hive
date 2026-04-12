@@ -435,7 +435,7 @@ defmodule GiTF.TUI.App do
 
             {:error, reason} ->
               # Fallback to local if not remote
-              unless GiTF.Client.remote?() do
+              if !GiTF.Client.remote?() do
                 {:ok, ops} = GiTF.Major.Planner.create_jobs_from_specs(mission_id, specs)
                 GiTF.Missions.store_artifact(mission_id, "planning", specs)
                 {:ok, "Plan confirmed. #{length(ops)} op(s) created.", nil}

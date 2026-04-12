@@ -94,7 +94,11 @@ defmodule GiTF.Intel.PromptContext do
   defp add_quality_line(sections, %{avg: avg, median: median}, sample_count)
        when is_number(avg) do
     median_part = if is_number(median), do: ", median: #{round(median)}", else: ""
-    ["- **Quality baseline**: Avg #{round(avg)}/100 across #{sample_count} missions#{median_part}" | sections]
+
+    [
+      "- **Quality baseline**: Avg #{round(avg)}/100 across #{sample_count} missions#{median_part}"
+      | sections
+    ]
   end
 
   defp add_quality_line(sections, _, _), do: sections
@@ -115,7 +119,7 @@ defmodule GiTF.Intel.PromptContext do
     lines =
       patterns
       |> Enum.take(3)
-      |> Enum.map(&("- **Key lesson**: #{&1}"))
+      |> Enum.map(&"- **Key lesson**: #{&1}")
       |> Enum.join("\n")
 
     [lines | sections]
@@ -148,7 +152,10 @@ defmodule GiTF.Intel.PromptContext do
       |> Enum.map(fn {model, _data} -> model end)
 
     if declining != [] do
-      ["- **Caution**: Model#{if length(declining) > 1, do: "s"} showing quality decline: #{Enum.join(declining, ", ")}" | sections]
+      [
+        "- **Caution**: Model#{if length(declining) > 1, do: "s"} showing quality decline: #{Enum.join(declining, ", ")}"
+        | sections
+      ]
     else
       sections
     end

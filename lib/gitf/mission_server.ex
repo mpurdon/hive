@@ -258,9 +258,7 @@ defmodule GiTF.MissionServer do
 
   @impl true
   def terminate(reason, state) do
-    Logger.info(
-      "MissionServer for mission #{state.mission_id} terminating: #{inspect(reason)}"
-    )
+    Logger.info("MissionServer for mission #{state.mission_id} terminating: #{inspect(reason)}")
 
     GiTF.Telemetry.emit([:gitf, :mission_server, :stopped], %{}, %{
       mission_id: state.mission_id,

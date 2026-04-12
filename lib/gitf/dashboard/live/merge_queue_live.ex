@@ -101,7 +101,15 @@ defmodule GiTF.Dashboard.MergeQueueLive do
       mission_id: op && op[:mission_id]
     }
   rescue
-    _ -> %{op_id: op_id, shell_id: shell_id, status: status, op_title: nil, mission_name: nil, mission_id: nil}
+    _ ->
+      %{
+        op_id: op_id,
+        shell_id: shell_id,
+        status: status,
+        op_title: nil,
+        mission_name: nil,
+        mission_id: nil
+      }
   end
 
   @impl true

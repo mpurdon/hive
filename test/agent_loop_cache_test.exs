@@ -3,7 +3,6 @@ defmodule AgentLoopCacheTest do
   import Mox
 
   alias GiTF.Runtime.AgentLoop
-  
 
   # Mock the LLM Client
   setup :verify_on_exit!

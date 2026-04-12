@@ -467,7 +467,7 @@ defmodule GiTF.CLI.Chat do
       :final_answer ->
         text = classified.text || ""
 
-        unless text == "" do
+        if text != "" do
           IO.puts("")
           IO.puts(text)
           IO.puts("")
@@ -479,7 +479,7 @@ defmodule GiTF.CLI.Chat do
         # Display any text that came with the tool calls
         text = classified.text || ""
 
-        unless text == "" do
+        if text != "" do
           IO.puts("")
           IO.puts(text)
           IO.puts("")

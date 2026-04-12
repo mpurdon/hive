@@ -3,7 +3,15 @@ defmodule GiTF.Intel do
   Adaptive intel system for learning from failures and successes.
   """
 
-  alias GiTF.Intel.{DecayDetector, FailureAnalysis, PromptContext, Retry, SectorProfile, SuccessPatterns}
+  alias GiTF.Intel.{
+    DecayDetector,
+    FailureAnalysis,
+    PromptContext,
+    Retry,
+    SectorProfile,
+    SuccessPatterns
+  }
+
   alias GiTF.Archive
 
   @doc """

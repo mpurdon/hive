@@ -10,7 +10,7 @@ defmodule GiTF.Major.OrchestratorTest do
 
   setup do
     # Ensure SectorSupervisor is running (needed for ghost spawning)
-    unless Process.whereis(GiTF.SectorSupervisor) do
+    if !Process.whereis(GiTF.SectorSupervisor) do
       DynamicSupervisor.start_link(strategy: :one_for_one, name: GiTF.SectorSupervisor)
     end
 

@@ -36,7 +36,10 @@ defmodule GiTF.Dashboard.RollbackLive do
       {:ok, result} ->
         {:noreply,
          socket
-         |> put_flash(:info, "Reverted merge for #{short_id(mission_id)}: #{result[:revert_sha] || "success"}")
+         |> put_flash(
+           :info,
+           "Reverted merge for #{short_id(mission_id)}: #{result[:revert_sha] || "success"}"
+         )
          |> assign_data()}
 
       {:error, reason} ->

@@ -240,7 +240,10 @@ defmodule GiTF.Telemetry do
   def start_mission_span(mission_id, goal) do
     if otel_available?() do
       :otel_tracer.start_span(get_tracer(), "gitf.mission", %{
-        attributes: [{"mission.id", mission_id}, {"mission.goal", String.slice(goal || "", 0, 200)}]
+        attributes: [
+          {"mission.id", mission_id},
+          {"mission.goal", String.slice(goal || "", 0, 200)}
+        ]
       })
       |> :otel_tracer.set_current_span()
     end

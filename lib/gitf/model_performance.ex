@@ -130,7 +130,10 @@ defmodule GiTF.ModelPerformance do
 
   defp success_rate(ops) do
     terminal = Enum.filter(ops, &(&1.status in ["done", "failed"]))
-    if terminal == [], do: 0.0, else: Float.round(Enum.count(terminal, &(&1.status == "done")) / length(terminal), 3)
+
+    if terminal == [],
+      do: 0.0,
+      else: Float.round(Enum.count(terminal, &(&1.status == "done")) / length(terminal), 3)
   end
 
   defp avg_quality(ops) do
@@ -185,7 +188,12 @@ defmodule GiTF.ModelPerformance do
       model_ops
       |> Enum.group_by(&(&1[:op_type] || "unknown"))
       |> Map.new(fn {op_type, group} ->
-        {op_type, %{total: length(group), passed: Enum.count(group, &(&1.status == "done")), pass_rate: success_rate(group)}}
+        {op_type,
+         %{
+           total: length(group),
+           passed: Enum.count(group, &(&1.status == "done")),
+           pass_rate: success_rate(group)
+         }}
       end)
 
     Map.merge(op_data, score_data)

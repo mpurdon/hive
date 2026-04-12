@@ -24,7 +24,7 @@ defmodule GiTF.Web.DashboardTest do
         ArgumentError -> false
       end
 
-    unless endpoint_alive? and ets_ok? do
+    if !(endpoint_alive? and ets_ok?) do
       GiTF.Test.StoreHelper.safe_stop(GiTF.Web.Endpoint)
       Process.sleep(50)
       current = Application.get_env(:gitf, GiTF.Web.Endpoint, [])

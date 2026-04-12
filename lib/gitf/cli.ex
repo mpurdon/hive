@@ -95,7 +95,7 @@ defmodule GiTF.CLI do
         Optimus.Help.help(optimus, [], 80) |> Enum.each(&IO.puts/1)
 
       {:ok, subcommand_path, result} ->
-        unless GiTF.Client.remote?(), do: maybe_ensure_store(subcommand_path)
+        if !GiTF.Client.remote?(), do: maybe_ensure_store(subcommand_path)
 
         if GiTF.Client.remote?() do
           case GiTF.Client.ping() do
@@ -241,7 +241,7 @@ defmodule GiTF.CLI do
   @no_auto_store [[:version], [:server], [:daemon], [:completions], [:quickref]]
 
   defp maybe_ensure_store(subcommand_path) do
-    unless subcommand_path in @no_auto_store do
+    if subcommand_path not in @no_auto_store do
       ensure_store()
     end
   end
@@ -940,7 +940,7 @@ defmodule GiTF.CLI do
     # Also run autonomy self-heal for higher-level recovery
     auto_results = GiTF.Autonomy.self_heal()
 
-    unless Enum.empty?(auto_results) do
+    if !Enum.empty?(auto_results) do
       Format.success("Auto-repairs:")
 
       Enum.each(auto_results, fn {action, count} ->
@@ -1170,7 +1170,7 @@ defmodule GiTF.CLI do
     path = result_get(result, :args, :path)
 
     if GiTF.Client.remote?() do
-      unless path do
+      if !path do
         Format.error("Remote mode requires an explicit path. Usage: section sector add <path>")
         System.halt(1)
       end
@@ -1305,7 +1305,7 @@ defmodule GiTF.CLI do
 
       sectors ->
         current_id =
-          unless GiTF.Client.remote?() do
+          if !GiTF.Client.remote?() do
             case GiTF.Sector.current() do
               {:ok, c} -> c.id
               _ -> nil
@@ -1348,7 +1348,7 @@ defmodule GiTF.CLI do
     name = result_get(result, :args, :name)
 
     if GiTF.Client.remote?() do
-      unless name do
+      if !name do
         Format.error("Remote mode requires an explicit name/id. Usage: section sector use <name>")
         System.halt(1)
       end
@@ -1502,7 +1502,10 @@ defmodule GiTF.CLI do
             if(m.avg_quality, do: "#{m.avg_quality}", else: "-"),
             "#{Float.round(m.retry_rate * 100, 1)}%",
             "$#{:erlang.float_to_binary(m.total_cost / 1, decimals: 4)}",
-            if(m.cost_per_success, do: "$#{:erlang.float_to_binary(m.cost_per_success / 1, decimals: 4)}", else: "-")
+            if(m.cost_per_success,
+              do: "$#{:erlang.float_to_binary(m.cost_per_success / 1, decimals: 4)}",
+              else: "-"
+            )
           ]
         end)
 
@@ -1521,7 +1524,10 @@ defmodule GiTF.CLI do
           for m <- phase_models do
             cost_str = "$#{:erlang.float_to_binary(m.cost / 1, decimals: 4)}"
             rate_str = "#{Float.round(m.success_rate * 100, 1)}%"
-            IO.puts("    #{String.pad_trailing(m.model || "?", 35)} #{String.pad_leading(rate_str, 7)} success  #{String.pad_leading(cost_str, 10)}")
+
+            IO.puts(
+              "    #{String.pad_trailing(m.model || "?", 35)} #{String.pad_leading(rate_str, 7)} success  #{String.pad_leading(cost_str, 10)}"
+            )
           end
         end
       end
@@ -1890,9 +1896,7 @@ defmodule GiTF.CLI do
         end
 
       {:error, _} ->
-        Format.error(
-          "Invalid priority '#{level}'. Use: critical, high, normal, low, background"
-        )
+        Format.error("Invalid priority '#{level}'. Use: critical, high, normal, low, background")
     end
   end
 
@@ -1987,7 +1991,9 @@ defmodule GiTF.CLI do
 
       priority_opt = result_get(result, :options, :priority)
       base_attrs = %{goal: goal}
-      base_attrs = if priority_opt, do: Map.put(base_attrs, :priority, priority_opt), else: base_attrs
+
+      base_attrs =
+        if priority_opt, do: Map.put(base_attrs, :priority, priority_opt), else: base_attrs
 
       quest_result =
         case resolve_sector_id(result_get(result, :options, :sector)) do
@@ -2101,7 +2107,10 @@ defmodule GiTF.CLI do
 
         priority = Map.get(mission, :priority, :normal)
         eff = GiTF.Priority.effective_priority(mission)
-        priority_str = if eff != priority, do: "#{priority} (effective: #{eff})", else: "#{priority}"
+
+        priority_str =
+          if eff != priority, do: "#{priority} (effective: #{eff})", else: "#{priority}"
+
         IO.puts("Priority: #{priority_str}")
 
         if mission[:sector_id] do
@@ -2119,7 +2128,7 @@ defmodule GiTF.CLI do
 
         IO.puts("")
 
-        unless GiTF.Client.remote?() do
+        if !GiTF.Client.remote?() do
           spec_phases = GiTF.Specs.list_phases(id)
 
           if spec_phases != [] do
@@ -2339,7 +2348,10 @@ defmodule GiTF.CLI do
             cost = (data[:cost] || 0.0) / 1
             total_c = (summary[:total_cost] || 1.0) / 1
             pct = if total_c > 0, do: Float.round(cost / total_c * 100, 1), else: 0.0
-            IO.puts("  #{String.pad_trailing(type, 12)} $#{:erlang.float_to_binary(cost, decimals: 4)}  (#{pct}%)")
+
+            IO.puts(
+              "  #{String.pad_trailing(type, 12)} $#{:erlang.float_to_binary(cost, decimals: 4)}  (#{pct}%)"
+            )
         end
       end
 

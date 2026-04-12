@@ -337,7 +337,11 @@ defmodule GiTF.Drift do
 
       {output, _} ->
         Git.safe_cmd(["rebase", "--abort"], cd: shell.worktree_path, stderr_to_stdout: true)
-        Logger.warning("Auto-rebase failed for shell #{shell.id}: #{String.slice(output, 0, 200)}")
+
+        Logger.warning(
+          "Auto-rebase failed for shell #{shell.id}: #{String.slice(output, 0, 200)}"
+        )
+
         {:error, :rebase_failed}
     end
   end

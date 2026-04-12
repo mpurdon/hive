@@ -108,12 +108,16 @@ defmodule GiTF.Major.Janitor do
   end
 
   defp pick_least_recent_sector(sectors, runs_by_sector) do
-    Enum.min_by(sectors, fn sector ->
-      case Map.get(runs_by_sector, sector.id) do
-        nil -> ~U[2000-01-01 00:00:00Z]
-        run -> run.maintained_at
-      end
-    end, DateTime)
+    Enum.min_by(
+      sectors,
+      fn sector ->
+        case Map.get(runs_by_sector, sector.id) do
+          nil -> ~U[2000-01-01 00:00:00Z]
+          run -> run.maintained_at
+        end
+      end,
+      DateTime
+    )
   end
 
   defp recently_maintained?(nil), do: false

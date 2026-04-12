@@ -46,7 +46,9 @@ defmodule GiTF.Missions do
       {priority, priority_source} =
         case attrs[:priority] || attrs["priority"] do
           p when is_atom(p) and p != nil ->
-            if GiTF.Priority.valid?(p), do: {p, :manual}, else: GiTF.Priority.infer_from_goal(goal)
+            if GiTF.Priority.valid?(p),
+              do: {p, :manual},
+              else: GiTF.Priority.infer_from_goal(goal)
 
           p when is_binary(p) ->
             case GiTF.Priority.parse(p) do
@@ -471,7 +473,12 @@ defmodule GiTF.Missions do
             if phase in @keep_artifacts or is_compacted?(artifact) do
               {phase, artifact}
             else
-              {phase, %{"compacted" => true, "phase" => phase, "compacted_at" => DateTime.utc_now() |> DateTime.to_iso8601()}}
+              {phase,
+               %{
+                 "compacted" => true,
+                 "phase" => phase,
+                 "compacted_at" => DateTime.utc_now() |> DateTime.to_iso8601()
+               }}
             end
           end)
 
@@ -544,7 +551,7 @@ defmodule GiTF.Missions do
       mission ->
         from_phase = Map.get(mission, :current_phase, "pending")
 
-        unless recent_duplicate_transition?(mission_id, from_phase, to_phase) do
+        if !recent_duplicate_transition?(mission_id, from_phase, to_phase) do
           Archive.insert(:mission_phase_transitions, %{
             mission_id: mission_id,
             from_phase: from_phase,

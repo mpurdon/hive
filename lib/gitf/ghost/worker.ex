@@ -575,7 +575,7 @@ defmodule GiTF.Ghost.Worker do
       write_pre_dispatch(shell.worktree_path, state.op_id)
 
       # Build task-specific skill for non-phase ops (works for both API and CLI)
-      unless is_phase_job do
+      if !is_phase_job do
         maybe_build_task_skill(build_prompt(state), shell.worktree_path, state.op_id)
       end
 

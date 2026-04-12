@@ -93,7 +93,7 @@ defmodule GiTF.Rollback do
          :ok <- guard_strategy(sync),
          :ok <- guard_has_merge_commit(sync),
          :ok <- guard_not_reverted(sync),
-         :ok <- (if force, do: :ok, else: guard_within_window(sync)) do
+         :ok <- if(force, do: :ok, else: guard_within_window(sync)) do
       {:ok, build_info(mission_id, mission, sync)}
     else
       {:error, _} = err -> err

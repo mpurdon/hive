@@ -39,7 +39,9 @@ defmodule GiTF.Dashboard.OpDetailLive do
     {:noreply, reload(socket)}
   end
 
-  def handle_info({:waggle_received, waggle}, socket), do: {:noreply, socket |> maybe_apply_toast(waggle) |> reload()}
+  def handle_info({:waggle_received, waggle}, socket),
+    do: {:noreply, socket |> maybe_apply_toast(waggle) |> reload()}
+
   def handle_info(_msg, socket), do: {:noreply, socket}
 
   @impl true

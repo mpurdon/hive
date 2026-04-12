@@ -32,9 +32,7 @@ defmodule GiTF.VerificationPipeline do
       GiTF.Telemetry.span([:gitf, :verification_pipeline, :cycle], %{total: length(ops)}, fn ->
         {verified, failed} = verify_batch(ops)
 
-        Logger.info(
-          "VerificationPipeline: cycle complete — #{verified} passed, #{failed} failed"
-        )
+        Logger.info("VerificationPipeline: cycle complete — #{verified} passed, #{failed} failed")
 
         {{verified, failed}, %{verified: verified, failed: failed, total: length(ops)}}
       end)

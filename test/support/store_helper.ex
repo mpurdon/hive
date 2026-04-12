@@ -68,7 +68,7 @@ defmodule GiTF.Test.StoreHelper do
         pid -> Process.alive?(pid)
       end
 
-    unless pubsub_ok? do
+    if !pubsub_ok? do
       Phoenix.PubSub.Supervisor.start_link(name: GiTF.PubSub)
     end
 
@@ -81,7 +81,7 @@ defmodule GiTF.Test.StoreHelper do
         ArgumentError -> false
       end
 
-    unless registry_ok? do
+    if !registry_ok? do
       # Kill any zombie process
       case Process.whereis(GiTF.Registry) do
         nil ->

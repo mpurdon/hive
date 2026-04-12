@@ -7,7 +7,7 @@ defmodule GiTF.CombTest do
   setup do
     tmp = Path.join(System.tmp_dir!(), "gitf_comb_test_#{:erlang.unique_integer([:positive])}")
     File.mkdir_p!(tmp)
-    
+
     System.cmd("/usr/bin/git", ["init"], cd: tmp)
     System.cmd("/usr/bin/git", ["config", "user.email", "test@example.com"], cd: tmp)
     System.cmd("/usr/bin/git", ["config", "user.name", "Test User"], cd: tmp)

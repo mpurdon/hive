@@ -45,13 +45,13 @@ defmodule GiTF.TestDriver.Scenario do
         GiTF.Test.StoreHelper.ensure_infrastructure()
 
         # Ensure SectorSupervisor is running (needed for ghost spawning)
-        unless Process.whereis(GiTF.SectorSupervisor) do
+        if !Process.whereis(GiTF.SectorSupervisor) do
           DynamicSupervisor.start_link(strategy: :one_for_one, name: GiTF.SectorSupervisor)
         end
 
         # E2E mock scripts emit Claude Code stream-json format.
         # Start Config.Provider if not running, then override to use Claude plugin.
-        unless Process.whereis(GiTF.Config.Provider) do
+        if !Process.whereis(GiTF.Config.Provider) do
           GiTF.Config.Provider.start_link([])
         end
 

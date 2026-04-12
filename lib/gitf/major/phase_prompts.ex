@@ -156,7 +156,13 @@ defmodule GiTF.Major.PhasePrompts do
   Maps requirements to implementation approach with specific file changes.
   """
   @spec design_prompt(map(), map(), map(), String.t(), String.t()) :: String.t()
-  def design_prompt(mission, requirements, research, extra_instructions \\ "", historical_context \\ "") do
+  def design_prompt(
+        mission,
+        requirements,
+        research,
+        extra_instructions \\ "",
+        historical_context \\ ""
+      ) do
     requirements_json = Jason.encode!(requirements)
     research_json = Jason.encode!(research)
 
@@ -232,7 +238,8 @@ defmodule GiTF.Major.PhasePrompts do
   @doc """
   Builds the design prompt with review feedback for redesign iterations.
   """
-  @spec design_prompt_with_feedback(map(), map(), map(), map(), String.t(), String.t()) :: String.t()
+  @spec design_prompt_with_feedback(map(), map(), map(), map(), String.t(), String.t()) ::
+          String.t()
   def design_prompt_with_feedback(
         mission,
         requirements,

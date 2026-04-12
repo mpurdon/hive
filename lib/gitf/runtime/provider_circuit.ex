@@ -130,7 +130,9 @@ defmodule GiTF.Runtime.ProviderCircuit do
               fallback_key,
               fn ->
                 call_fn.(fallback_model)
-              end, max_retries: 2)
+              end,
+              max_retries: 2
+            )
 
           :none ->
             Logger.warning("All provider circuits unavailable, attempting probe on #{provider}")
@@ -343,7 +345,7 @@ defmodule GiTF.Runtime.ProviderCircuit do
   defp maybe_broadcast_open(provider) do
     key = @circuit_prefix <> provider
 
-    unless CircuitBreaker.get_metadata(key, :open_broadcast) do
+    if !CircuitBreaker.get_metadata(key, :open_broadcast) do
       CircuitBreaker.put_metadata(key, :open_broadcast, true)
       failure_mode = classify_failure(provider)
 

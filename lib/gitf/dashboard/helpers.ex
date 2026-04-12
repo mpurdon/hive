@@ -266,7 +266,7 @@ defmodule GiTF.Dashboard.Helpers do
 
   Usage: `<.breadcrumbs crumbs={[{"Missions", "/dashboard/missions"}, {"My Mission", nil}]} />`
   """
-  attr :crumbs, :list, required: true
+  attr(:crumbs, :list, required: true)
 
   def breadcrumbs(assigns) do
     ~H"""
@@ -297,10 +297,10 @@ defmodule GiTF.Dashboard.Helpers do
   - `:height` - SVG height (default 20)
   - `:color` - stroke color (default "#58a6ff")
   """
-  attr :values, :list, required: true
-  attr :width, :integer, default: 80
-  attr :height, :integer, default: 20
-  attr :color, :string, default: "#58a6ff"
+  attr(:values, :list, required: true)
+  attr(:width, :integer, default: 80)
+  attr(:height, :integer, default: 20)
+  attr(:color, :string, default: "#58a6ff")
 
   def sparkline(assigns) do
     values = assigns.values || []
@@ -346,8 +346,8 @@ defmodule GiTF.Dashboard.Helpers do
   @doc """
   Renders a small colored dot indicator.
   """
-  attr :color, :string, required: true
-  attr :size, :integer, default: 8
+  attr(:color, :string, required: true)
+  attr(:size, :integer, default: 8)
 
   def dot(assigns) do
     ~H"""

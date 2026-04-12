@@ -422,7 +422,7 @@ defmodule GiTF.Runtime.Loadout do
       String.starts_with?(abs, wd) or
         (sector_root != nil and String.starts_with?(abs, sector_root))
 
-    unless allowed do
+    if !allowed do
       raise "Path traversal detected: #{rel_path} resolves outside #{working_dir}"
     end
 

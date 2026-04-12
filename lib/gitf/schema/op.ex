@@ -111,14 +111,18 @@ defmodule GiTF.Schema.Op do
          complexity: attrs[:complexity] || attrs["complexity"] || "moderate",
          recommended_model: attrs[:recommended_model] || attrs["recommended_model"],
          assigned_model: attrs[:assigned_model] || attrs["assigned_model"],
-         model_selection_reason: attrs[:model_selection_reason] || attrs["model_selection_reason"],
-         verification_criteria: attrs[:verification_criteria] || attrs["verification_criteria"] || [],
-         estimated_context_tokens: attrs[:estimated_context_tokens] || attrs["estimated_context_tokens"],
+         model_selection_reason:
+           attrs[:model_selection_reason] || attrs["model_selection_reason"],
+         verification_criteria:
+           attrs[:verification_criteria] || attrs["verification_criteria"] || [],
+         estimated_context_tokens:
+           attrs[:estimated_context_tokens] || attrs["estimated_context_tokens"],
          phase_job: attrs[:phase_job] || attrs["phase_job"] || false,
          phase: attrs[:phase] || attrs["phase"],
          acceptance_criteria: attrs[:acceptance_criteria] || attrs["acceptance_criteria"] || [],
          target_files: attrs[:target_files] || attrs["target_files"] || [],
-         verification_status: attrs[:verification_status] || attrs["verification_status"] || "pending",
+         verification_status:
+           attrs[:verification_status] || attrs["verification_status"] || "pending",
          audit_result: attrs[:audit_result] || attrs["audit_result"],
          verified_at: attrs[:verified_at] || attrs["verified_at"],
          risk_level: attrs[:risk_level] || attrs["risk_level"] || :low,

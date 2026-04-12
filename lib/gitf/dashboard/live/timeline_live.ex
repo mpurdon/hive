@@ -72,7 +72,7 @@ defmodule GiTF.Dashboard.TimelineLive do
     filter_type = socket.assigns.filter_type
 
     events = gather_events(mission_id, filter_type)
-    missions = GiTF.Missions.list() |> Enum.sort_by(&(&1[:inserted_at]), {:desc, DateTime})
+    missions = GiTF.Missions.list() |> Enum.sort_by(& &1[:inserted_at], {:desc, DateTime})
 
     mission_name =
       case mission_id do
@@ -184,7 +184,9 @@ defmodule GiTF.Dashboard.TimelineLive do
       end
 
     links
-    |> Enum.filter(&(&1.subject in ~w(job_complete job_failed quest_advance human_approval merge_failed pr_created)))
+    |> Enum.filter(
+      &(&1.subject in ~w(job_complete job_failed quest_advance human_approval merge_failed pr_created))
+    )
     |> Enum.map(fn link ->
       %{
         type: :link,

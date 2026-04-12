@@ -17,7 +17,8 @@ defmodule GiTF.Dashboard.Toastable do
 
   defmacro __using__(_opts) do
     quote do
-      import GiTF.Dashboard.Helpers, only: [push_toast: 3, handle_dismiss_toast: 2, maybe_toast_waggle: 2]
+      import GiTF.Dashboard.Helpers,
+        only: [push_toast: 3, handle_dismiss_toast: 2, maybe_toast_waggle: 2]
 
       defp init_toasts(socket) do
         Phoenix.Component.assign_new(socket, :toasts, fn -> [] end)

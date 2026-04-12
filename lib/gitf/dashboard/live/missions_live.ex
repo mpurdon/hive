@@ -48,7 +48,9 @@ defmodule GiTF.Dashboard.MissionsLive do
 
   def handle_info({:waggle_received, waggle}, socket) do
     missions = load_quests()
-    {:noreply, socket |> maybe_apply_toast(waggle) |> assign(:all_missions, missions) |> apply_filters()}
+
+    {:noreply,
+     socket |> maybe_apply_toast(waggle) |> assign(:all_missions, missions) |> apply_filters()}
   end
 
   @impl true
@@ -146,7 +148,7 @@ defmodule GiTF.Dashboard.MissionsLive do
         :priority -> &GiTF.Priority.weight(&1.effective_priority)
         :status -> &Map.get(&1, :status, "")
         :phase -> &Map.get(&1, :current_phase, "")
-        :budget -> &(&1.budget_pct)
+        :budget -> & &1.budget_pct
         :name -> &(Map.get(&1, :name, "") || "")
         _ -> &GiTF.Priority.weight(&1.effective_priority)
       end
@@ -185,19 +187,24 @@ defmodule GiTF.Dashboard.MissionsLive do
         case {m[:inserted_at], m[:updated_at]} do
           {%DateTime{} = s, %DateTime{} = e} when m.status in ["completed", "failed"] ->
             secs = DateTime.diff(e, s, :second)
+
             cond do
               secs < 60 -> "#{secs}s"
               secs < 3600 -> "#{div(secs, 60)}m"
               true -> "#{div(secs, 3600)}h#{rem(div(secs, 60), 60)}m"
             end
+
           {%DateTime{} = s, _} ->
             secs = DateTime.diff(DateTime.utc_now(), s, :second)
+
             cond do
               secs < 60 -> "#{secs}s"
               secs < 3600 -> "#{div(secs, 60)}m"
               true -> "#{div(secs, 3600)}h#{rem(div(secs, 60), 60)}m"
             end
-          _ -> "-"
+
+          _ ->
+            "-"
         end
 
       Map.merge(m, %{effective_priority: priority, budget_pct: budget_pct, duration: duration})

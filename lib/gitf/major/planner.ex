@@ -480,7 +480,9 @@ defmodule GiTF.Major.Planner do
               :ok
 
             {:error, reason} ->
-              Logger.debug("Could not add file overlap dependency #{op.id} -> #{earlier_op.id}: #{inspect(reason)}")
+              Logger.debug(
+                "Could not add file overlap dependency #{op.id} -> #{earlier_op.id}: #{inspect(reason)}"
+              )
           end
         end
       end)

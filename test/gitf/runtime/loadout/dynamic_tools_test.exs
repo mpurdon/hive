@@ -61,7 +61,7 @@ defmodule GiTF.Runtime.Loadout.DynamicToolsTest do
   defp define_mock_provider do
     module_name = Module.concat(__MODULE__, MockToolProvider)
 
-    unless Code.ensure_loaded?(module_name) do
+    if !Code.ensure_loaded?(module_name) do
       Module.create(
         module_name,
         quote do

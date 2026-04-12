@@ -315,7 +315,7 @@ defmodule GiTF.AgentProfile do
         src = Path.join(src_dir, filename)
         dst = Path.join(dst_dir, filename)
 
-        unless File.exists?(dst) do
+        if !File.exists?(dst) do
           File.cp!(src, dst)
         end
       end)

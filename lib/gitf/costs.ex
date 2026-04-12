@@ -146,8 +146,10 @@ defmodule GiTF.Costs do
       total_cost: total(costs),
       total_input_tokens: costs |> Enum.map(&Map.get(&1, :input_tokens, 0)) |> Enum.sum(),
       total_output_tokens: costs |> Enum.map(&Map.get(&1, :output_tokens, 0)) |> Enum.sum(),
-      total_cache_read_tokens: costs |> Enum.map(&Map.get(&1, :cache_read_tokens, 0)) |> Enum.sum(),
-      total_cache_write_tokens: costs |> Enum.map(&Map.get(&1, :cache_write_tokens, 0)) |> Enum.sum(),
+      total_cache_read_tokens:
+        costs |> Enum.map(&Map.get(&1, :cache_read_tokens, 0)) |> Enum.sum(),
+      total_cache_write_tokens:
+        costs |> Enum.map(&Map.get(&1, :cache_write_tokens, 0)) |> Enum.sum(),
       by_model: group_costs_by(costs, fn c -> Map.get(c, :model) end),
       by_bee: group_costs_by(costs, &Map.get(&1, :ghost_id)),
       by_category: group_costs_by(costs, &Map.get(&1, :category, "unknown")),
@@ -186,10 +188,21 @@ defmodule GiTF.Costs do
   @planning_category_phases ~w(research requirements design planning)
   @verification_category_phases ~w(review validation simplify scoring)
 
-  @default_phase_info %{category: "unknown", phase: "unknown", phase_type: "unknown", op_id: nil, mission_id: nil}
+  @default_phase_info %{
+    category: "unknown",
+    phase: "unknown",
+    phase_type: "unknown",
+    op_id: nil,
+    mission_id: nil
+  }
 
   defp derive_phase_info("major") do
-    %{@default_phase_info | category: "orchestration", phase: "orchestration", phase_type: "overhead"}
+    %{
+      @default_phase_info
+      | category: "orchestration",
+        phase: "orchestration",
+        phase_type: "overhead"
+    }
   end
 
   defp derive_phase_info(ghost_id) when is_binary(ghost_id) do
@@ -213,7 +226,13 @@ defmodule GiTF.Costs do
           true -> "productive"
         end
 
-      %{category: category, phase: phase, phase_type: phase_type, op_id: op_id, mission_id: mission_id}
+      %{
+        category: category,
+        phase: phase,
+        phase_type: phase_type,
+        op_id: op_id,
+        mission_id: mission_id
+      }
     else
       _ -> @default_phase_info
     end

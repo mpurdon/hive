@@ -65,7 +65,8 @@ defmodule GiTF.Schema.Ghost do
          context_percentage: attrs[:context_percentage] || attrs["context_percentage"] || 0.0,
          context_tokens_used: attrs[:context_tokens_used] || attrs["context_tokens_used"] || 0,
          context_tokens_limit: attrs[:context_tokens_limit] || attrs["context_tokens_limit"],
-         context_peak_percentage: attrs[:context_peak_percentage] || attrs["context_peak_percentage"] || 0.0,
+         context_peak_percentage:
+           attrs[:context_peak_percentage] || attrs["context_peak_percentage"] || 0.0,
          shell_path: attrs[:shell_path] || attrs["shell_path"],
          sector_id: attrs[:sector_id] || attrs["sector_id"]
        }}
@@ -86,7 +87,8 @@ defmodule GiTF.Schema.Ghost do
       context_percentage: raw[:context_percentage] || raw["context_percentage"] || 0.0,
       context_tokens_used: raw[:context_tokens_used] || raw["context_tokens_used"] || 0,
       context_tokens_limit: raw[:context_tokens_limit] || raw["context_tokens_limit"],
-      context_peak_percentage: raw[:context_peak_percentage] || raw["context_peak_percentage"] || 0.0,
+      context_peak_percentage:
+        raw[:context_peak_percentage] || raw["context_peak_percentage"] || 0.0,
       shell_path: raw[:shell_path] || raw["shell_path"],
       sector_id: raw[:sector_id] || raw["sector_id"],
       inserted_at: raw[:inserted_at] || raw["inserted_at"],

@@ -45,11 +45,12 @@ defmodule GiTF.Intel.DecayDetector do
   """
   @spec declining_models(String.t()) :: [%{model: String.t(), severity: atom(), metric: atom()}]
   def declining_models(sector_id) do
-    ops = Archive.filter(:ops, fn op ->
-      op.sector_id == sector_id and
-        op[:assigned_model] != nil and
-        op.status in ["done", "failed"]
-    end)
+    ops =
+      Archive.filter(:ops, fn op ->
+        op.sector_id == sector_id and
+          op[:assigned_model] != nil and
+          op.status in ["done", "failed"]
+      end)
 
     ops
     |> Enum.group_by(&normalize_model(&1.assigned_model))
@@ -116,7 +117,11 @@ defmodule GiTF.Intel.DecayDetector do
   end
 
   defp sort_by_time(ops) do
-    Enum.sort_by(ops, &(&1[:created_at] || &1[:inserted_at] || DateTime.utc_now()), {:asc, DateTime})
+    Enum.sort_by(
+      ops,
+      &(&1[:created_at] || &1[:inserted_at] || DateTime.utc_now()),
+      {:asc, DateTime}
+    )
   end
 
   defp compute_trend(ops) do
@@ -153,7 +158,9 @@ defmodule GiTF.Intel.DecayDetector do
       recent_quality = weighted_avg_quality(recent_ops, now)
 
       rate_diff = recent_rate - baseline_rate
-      quality_diff = if baseline_quality && recent_quality, do: recent_quality - baseline_quality, else: nil
+
+      quality_diff =
+        if baseline_quality && recent_quality, do: recent_quality - baseline_quality, else: nil
 
       cond do
         rate_diff < -@severe_rate_threshold ->

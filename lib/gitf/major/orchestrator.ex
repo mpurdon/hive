@@ -203,7 +203,8 @@ defmodule GiTF.Major.Orchestrator do
     # Serialize concurrent advances for the same mission (waggle handler,
     # resume_active_quests, advance_stuck_mission_phases can all race).
     # :skip on contention because the other caller is already doing the work.
-    case GiTF.MissionLock.with_lock({:advance, mission_id},
+    case GiTF.MissionLock.with_lock(
+           {:advance, mission_id},
            [on_contention: :skip],
            fn -> do_advance_quest(mission_id) end
          ) do
@@ -626,7 +627,10 @@ defmodule GiTF.Major.Orchestrator do
                    String.slice(title, 0, 200),
                    "--body",
                    String.slice(body, 0, 4000)
-                 ], cd: repo_path, stderr_to_stdout: true) do
+                 ],
+                 cd: repo_path,
+                 stderr_to_stdout: true
+               ) do
             {output, 0} -> {:ok, String.trim(output)}
             {output, _} -> {:error, String.slice(output, 0, 200)}
           end
@@ -780,6 +784,7 @@ defmodule GiTF.Major.Orchestrator do
               GiTF.Override.reject(mission.id, "Re-validation failed during auto-approve", %{
                 rejected_by: "auto_timeout"
               })
+
               fail_quest(mission.id, "Auto-approve failed re-validation")
             end
           end
@@ -927,7 +932,10 @@ defmodule GiTF.Major.Orchestrator do
         GiTF.Missions.update(mission.id, %{pipeline_mode: "fast"})
         FastPath.execute(mission.id)
       else
-        Logger.info("Quest #{mission.id}: Research identified high complexity, continuing deep plan")
+        Logger.info(
+          "Quest #{mission.id}: Research identified high complexity, continuing deep plan"
+        )
+
         start_requirements(mission)
       end
     else
@@ -1134,7 +1142,9 @@ defmodule GiTF.Major.Orchestrator do
 
           # Bump replan count before attempting
           quest_record = Archive.get(:missions, mission.id)
-          if quest_record, do: Archive.put(:missions, Map.put(quest_record, :replan_count, replan_count + 1))
+
+          if quest_record,
+            do: Archive.put(:missions, Map.put(quest_record, :replan_count, replan_count + 1))
 
           with {:ok, replan} <- Planner.replan_from_failures(mission.id),
                tasks when is_list(tasks) and tasks != [] <- replan.tasks do
@@ -1546,7 +1556,14 @@ defmodule GiTF.Major.Orchestrator do
       classified_at: DateTime.utc_now()
     }
   rescue
-    _ -> %{failure_type: :unknown, failure_phase: "unknown", failure_reason: reason, failed_op_ids: [], classified_at: DateTime.utc_now()}
+    _ ->
+      %{
+        failure_type: :unknown,
+        failure_phase: "unknown",
+        failure_reason: reason,
+        failed_op_ids: [],
+        classified_at: DateTime.utc_now()
+      }
   end
 
   @failure_patterns [
@@ -1692,10 +1709,9 @@ defmodule GiTF.Major.Orchestrator do
     with {:ok, op} <- GiTF.Ops.create(job_attrs),
          _ = GiTF.Missions.record_phase_job(mission.id, phase, op.id),
          {:ok, gitf_root} <- GiTF.gitf_dir(),
-         {:ok, ghost} <- GiTF.Ghosts.spawn_detached(op.id, mission.sector_id, gitf_root, prompt: prompt) do
-      Logger.info(
-        "Phase ghost #{ghost.id} spawned for #{phase} phase of mission #{mission.id}"
-      )
+         {:ok, ghost} <-
+           GiTF.Ghosts.spawn_detached(op.id, mission.sector_id, gitf_root, prompt: prompt) do
+      Logger.info("Phase ghost #{ghost.id} spawned for #{phase} phase of mission #{mission.id}")
 
       {:ok, ghost}
     else

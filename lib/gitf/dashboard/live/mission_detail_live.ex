@@ -218,7 +218,10 @@ defmodule GiTF.Dashboard.MissionDetailLive do
             # Estimate: cost per completed op * remaining ops
             ops = GiTF.Ops.list(mission_id: id)
             done = Enum.count(ops, &(&1.status in ["done", "failed"]))
-            pending = Enum.count(ops, &(&1.status in ["pending", "running", "assigned", "blocked"]))
+
+            pending =
+              Enum.count(ops, &(&1.status in ["pending", "running", "assigned", "blocked"]))
+
             cost_per_op = if done > 0, do: Float.round(spent / done, 4), else: 0.0
             estimated_remaining = Float.round(cost_per_op * pending, 4)
 
@@ -232,7 +235,16 @@ defmodule GiTF.Dashboard.MissionDetailLive do
               done_ops: done
             }
           rescue
-            _ -> %{budget: 0, spent: 0, remaining: 0, pct: 0.0, estimated_remaining: 0, pending_ops: 0, done_ops: 0}
+            _ ->
+              %{
+                budget: 0,
+                spent: 0,
+                remaining: 0,
+                pct: 0.0,
+                estimated_remaining: 0,
+                pending_ops: 0,
+                done_ops: 0
+              }
           end
 
         # Rollback status
@@ -404,7 +416,10 @@ defmodule GiTF.Dashboard.MissionDetailLive do
 
     case started do
       %DateTime{} ->
-        ended = if mission[:status] in ["completed", "failed"], do: mission[:updated_at], else: DateTime.utc_now()
+        ended =
+          if mission[:status] in ["completed", "failed"],
+            do: mission[:updated_at],
+            else: DateTime.utc_now()
 
         case ended do
           %DateTime{} ->

@@ -66,9 +66,11 @@ defmodule GiTF.Budget.WatchdogTest do
     # 4. Quest should be marked as failed_budget or paused_budget
     # (paused_budget when no active ghosts are running worker processes)
     mission = Archive.get(:missions, mission_id)
+
     if mission == nil do
       IO.inspect(Archive.all(:missions), label: "ALL MISSIONS")
     end
+
     assert mission.status in ["failed_budget", "paused_budget"]
   end
 end

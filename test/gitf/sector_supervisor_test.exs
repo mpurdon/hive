@@ -10,7 +10,7 @@ defmodule GiTF.SectorSupervisorTest do
     GiTF.Test.StoreHelper.ensure_infrastructure()
 
     # Ensure SectorSupervisor is running (may have been killed by prior tests)
-    unless Process.whereis(GiTF.SectorSupervisor) do
+    if !Process.whereis(GiTF.SectorSupervisor) do
       DynamicSupervisor.start_link(strategy: :one_for_one, name: GiTF.SectorSupervisor)
     end
 

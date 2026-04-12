@@ -140,7 +140,10 @@ defmodule GiTF.Sync do
              title,
              "--body",
              String.slice(body, 0, 4000)
-           ], cd: repo_path, stderr_to_stdout: true) do
+           ],
+           cd: repo_path,
+           stderr_to_stdout: true
+         ) do
       {output, 0} ->
         url = output |> String.trim()
         Logger.info("PR created via gh CLI: #{url}")

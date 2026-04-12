@@ -14,7 +14,7 @@ defmodule GiTF.Dashboard.SmokeTest do
     GiTF.Test.StoreHelper.ensure_infrastructure()
 
     # Ensure Archive is running
-    unless Process.whereis(GiTF.Archive) do
+    if !Process.whereis(GiTF.Archive) do
       tmp_dir = Path.join(System.tmp_dir!(), "gitf_test_#{:erlang.unique_integer([:positive])}")
       File.mkdir_p!(tmp_dir)
       GiTF.Archive.start_link(data_dir: tmp_dir)
@@ -23,7 +23,7 @@ defmodule GiTF.Dashboard.SmokeTest do
     # Ensure the Dashboard.Endpoint has required config
     current_config = Application.get_env(:gitf, GiTF.Dashboard.Endpoint, [])
 
-    unless Keyword.has_key?(current_config, :secret_key_base) do
+    if !Keyword.has_key?(current_config, :secret_key_base) do
       config =
         Keyword.merge(current_config,
           secret_key_base:

@@ -352,7 +352,11 @@ defmodule GiTF.Medic do
         result(:collection_sizes, :warn, "Large collections: #{names}. Total: #{total} records")
 
       true ->
-        result(:collection_sizes, :ok, "#{total} records across #{length(counts)} collections (#{summary})")
+        result(
+          :collection_sizes,
+          :ok,
+          "#{total} records across #{length(counts)} collections (#{summary})"
+        )
     end
   rescue
     _ -> result(:collection_sizes, :warn, "Could not check collection sizes")

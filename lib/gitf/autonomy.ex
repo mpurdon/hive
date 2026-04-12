@@ -282,9 +282,7 @@ defmodule GiTF.Autonomy do
               true
 
             {:error, reason} ->
-              Logger.warning(
-                "Failed to clean up stale worktree #{shell.id}: #{inspect(reason)}"
-              )
+              Logger.warning("Failed to clean up stale worktree #{shell.id}: #{inspect(reason)}")
 
               false
           end
@@ -371,7 +369,10 @@ defmodule GiTF.Autonomy do
     end
   rescue
     e ->
-      Logger.debug("Cross-mission prediction failed for sector #{sector_id}: #{Exception.message(e)}")
+      Logger.debug(
+        "Cross-mission prediction failed for sector #{sector_id}: #{Exception.message(e)}"
+      )
+
       []
   end
 

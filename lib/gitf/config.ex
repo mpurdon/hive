@@ -87,10 +87,12 @@ defmodule GiTF.Config do
   @spec update_major_config(map()) :: :ok | {:error, term()}
   def update_major_config(new_major_config) do
     global_path = GiTF.global_config_path()
-    existing = case read_config(global_path) do
-      {:ok, cfg} -> cfg
-      _ -> %{}
-    end
+
+    existing =
+      case read_config(global_path) do
+        {:ok, cfg} -> cfg
+        _ -> %{}
+      end
 
     current_major = Map.get(existing, "major", %{})
     updated_major = Map.merge(current_major, new_major_config)
@@ -100,7 +102,9 @@ defmodule GiTF.Config do
       :ok ->
         GiTF.Config.Provider.reload()
         :ok
-      error -> error
+
+      error ->
+        error
     end
   end
 

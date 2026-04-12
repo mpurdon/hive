@@ -233,7 +233,7 @@ defmodule GiTF.CLI.PlanHandler do
   defp create_jobs_from_plan(mission, plan) do
     sector_id = mission.sector_id || first_sector_id()
 
-    unless sector_id do
+    if !sector_id do
       Format.error("No sector available. Add a sector first with `gitf sector add <repo>`.")
       return_early()
     end

@@ -76,6 +76,7 @@ defmodule GiTF.Dashboard.OverviewLive do
   @impl true
   def handle_event("toggle_dark_factory", _params, socket) do
     new_val = !socket.assigns.dark_factory
+
     case GiTF.Config.update_major_config(%{"dark_factory" => new_val}) do
       :ok ->
         {:noreply,
@@ -158,7 +159,9 @@ defmodule GiTF.Dashboard.OverviewLive do
     # Audit stats
     verified_jobs = Enum.count(ops, &(Map.get(&1, :verification_status) == "passed"))
     failed_verification = Enum.count(ops, &(Map.get(&1, :verification_status) == "failed"))
-    pending_verification = Enum.count(ops, &(&1[:verification_status] == "pending" and &1[:status] == "done"))
+
+    pending_verification =
+      Enum.count(ops, &(&1[:verification_status] == "pending" and &1[:status] == "done"))
 
     # Phase counts
     research_quests = Enum.count(missions, &(&1[:current_phase] == "research"))
@@ -176,10 +179,12 @@ defmodule GiTF.Dashboard.OverviewLive do
 
     # Sectors
     sectors = safe_list(fn -> GiTF.Sector.list() end)
-    current_sector_id = case GiTF.Sector.current() do
-      {:ok, s} -> s.id
-      _ -> nil
-    end
+
+    current_sector_id =
+      case GiTF.Sector.current() do
+        {:ok, s} -> s.id
+        _ -> nil
+      end
 
     # Mission cards (enriched)
     ghost_by_mission = count_ghosts_by_mission(active_ghost_list)
@@ -216,7 +221,7 @@ defmodule GiTF.Dashboard.OverviewLive do
   end
 
   defp schedule_refresh(socket) do
-    unless socket.assigns.refresh_scheduled do
+    if !socket.assigns.refresh_scheduled do
       Process.send_after(self(), :debounced_refresh, 150)
     end
 
@@ -241,7 +246,9 @@ defmodule GiTF.Dashboard.OverviewLive do
   defp count_ghosts_by_mission(active_ghosts) do
     Enum.reduce(active_ghosts, %{}, fn ghost, acc ->
       case ghost[:op_id] do
-        nil -> acc
+        nil ->
+          acc
+
         op_id ->
           case GiTF.Archive.get(:ops, op_id) do
             %{mission_id: mid} when not is_nil(mid) -> Map.update(acc, mid, 1, &(&1 + 1))

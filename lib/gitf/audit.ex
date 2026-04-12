@@ -232,25 +232,34 @@ defmodule GiTF.Audit do
         else
           # Check for successful test execution in ghost events
           events = GiTF.Link.list_by_op(op_id)
-          
-          has_pass = Enum.any?(events, fn e ->
-            # Look for tool_use results from command execution
-            # This is a heuristic: look for test-like commands that succeeded
-            is_test_cmd?(e) and cmd_succeeded?(e)
-          end)
+
+          has_pass =
+            Enum.any?(events, fn e ->
+              # Look for tool_use results from command execution
+              # This is a heuristic: look for test-like commands that succeeded
+              is_test_cmd?(e) and cmd_succeeded?(e)
+            end)
 
           if has_pass, do: :pass, else: :fail
         end
 
-      _ -> :fail
+      _ ->
+        :fail
     end
   end
 
   # Heuristic: does the command look like a test runner?
-  defp is_test_cmd?(%{"type" => "tool_use", "name" => "run_shell_command", "input" => %{"command" => cmd}}) do
+  defp is_test_cmd?(%{
+         "type" => "tool_use",
+         "name" => "run_shell_command",
+         "input" => %{"command" => cmd}
+       }) do
     cmd = String.downcase(cmd)
-    String.contains?(cmd, "test") or String.contains?(cmd, "check") or String.contains?(cmd, "spec")
+
+    String.contains?(cmd, "test") or String.contains?(cmd, "check") or
+      String.contains?(cmd, "spec")
   end
+
   defp is_test_cmd?(_), do: false
 
   # Did the shell command return 0?

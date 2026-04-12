@@ -219,11 +219,14 @@ defmodule GiTF.Plugin.Manager do
                 {:ok, servers} when is_map(servers) -> servers
                 _ -> nil
               end
-            _ -> nil
+
+            _ ->
+              nil
           end
         end) || %{}
 
-      _ -> %{}
+      _ ->
+        %{}
     end
   end
 

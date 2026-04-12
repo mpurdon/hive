@@ -161,7 +161,8 @@ defmodule GiTF.Dashboard.MissionDiagnosticsLive do
     {:noreply, reload(socket)}
   end
 
-  def handle_info({:waggle_received, waggle}, socket), do: {:noreply, socket |> maybe_apply_toast(waggle) |> reload()}
+  def handle_info({:waggle_received, waggle}, socket),
+    do: {:noreply, socket |> maybe_apply_toast(waggle) |> reload()}
 
   def handle_info({ref, {:analysis_result, op_id, result}}, socket) when is_reference(ref) do
     Process.demonitor(ref, [:flush])
@@ -686,7 +687,10 @@ defmodule GiTF.Dashboard.MissionDiagnosticsLive do
 
   defp format_duration(nil), do: "-"
   defp format_duration(seconds) when seconds < 60, do: "#{seconds}s"
-  defp format_duration(seconds) when seconds < 3600, do: "#{div(seconds, 60)}m #{rem(seconds, 60)}s"
+
+  defp format_duration(seconds) when seconds < 3600,
+    do: "#{div(seconds, 60)}m #{rem(seconds, 60)}s"
+
   defp format_duration(seconds), do: "#{div(seconds, 3600)}h #{div(rem(seconds, 3600), 60)}m"
 
   defp recovery_cycles(mission) do

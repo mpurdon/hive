@@ -53,7 +53,7 @@ defmodule GiTF.Exfil do
 
   @impl true
   def terminate(_reason, state) do
-    unless state.shutting_down do
+    if !state.shutting_down do
       do_shutdown(state.drain_timeout)
     end
 

@@ -41,7 +41,10 @@ defmodule GiTF.Dashboard.CostsLive do
   end
 
   def handle_info({:cost_recorded, _cost}, socket), do: {:noreply, assign_data(socket)}
-  def handle_info({:waggle_received, waggle}, socket), do: {:noreply, socket |> maybe_apply_toast(waggle) |> assign_data()}
+
+  def handle_info({:waggle_received, waggle}, socket),
+    do: {:noreply, socket |> maybe_apply_toast(waggle) |> assign_data()}
+
   def handle_info(_msg, socket), do: {:noreply, socket}
 
   defp assign_data(socket) do

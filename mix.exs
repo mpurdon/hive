@@ -1,13 +1,13 @@
 defmodule GiTF.MixProject do
   use Mix.Project
 
-  @version "0.40.61"
+  @version "0.40.62"
 
   def project do
     [
       app: :gitf,
       version: @version,
-      elixir: "~> 1.15",
+      elixir: "~> 1.18",
       elixirc_paths: elixirc_paths(Mix.env()),
       start_permanent: Mix.env() == :prod,
       deps: deps(),

@@ -400,7 +400,6 @@ defmodule GiTF.Major do
     {:noreply, state}
   end
 
-
   def handle_info({:delayed_retry, op_id, feedback}, state) do
     Logger.info("Executing delayed retry for op #{op_id}")
     state = %{state | retry_pending: MapSet.delete(state.retry_pending, op_id)}
@@ -527,12 +526,12 @@ defmodule GiTF.Major do
             end
         end
 
-      unless worker_alive? do
+      if !worker_alive? do
         Logger.warning("Recovering stuck op #{op.id} (worker dead)")
         GiTF.Ops.fail(op.id)
 
         # Trigger retry via delayed_retry (same path as waggle-based failures)
-        unless retry_exists?(op.id) do
+        if !retry_exists?(op.id) do
           send(self(), {:delayed_retry, op.id, "Worker process died unexpectedly"})
         end
       end
@@ -1769,7 +1768,8 @@ defmodule GiTF.Major do
 
       # Take up to available_slots, filtering file overlaps and budget
       {ops_to_spawn, _} =
-        Enum.reduce(candidates, {[], MapSet.new()}, fn {op, mission, _eff}, {selected, selected_files} ->
+        Enum.reduce(candidates, {[], MapSet.new()}, fn {op, mission, _eff},
+                                                       {selected, selected_files} ->
           if length(selected) >= available_slots do
             {selected, selected_files}
           else
@@ -2074,7 +2074,7 @@ defmodule GiTF.Major do
       run ->
         # Add any new ops that aren't already tracked
         Enum.each(jobs_to_spawn, fn op ->
-          unless op.id in run.op_ids do
+          if op.id not in run.op_ids do
             GiTF.Run.add_job(run.id, op.id)
           end
         end)
@@ -2092,7 +2092,7 @@ defmodule GiTF.Major do
   defp register_with_run(run, ghost_id, op_id) do
     GiTF.Run.add_bee(run.id, ghost_id)
 
-    unless op_id in run.op_ids do
+    if op_id not in run.op_ids do
       GiTF.Run.add_job(run.id, op_id)
     end
 

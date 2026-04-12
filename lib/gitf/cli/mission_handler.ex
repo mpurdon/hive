@@ -119,7 +119,7 @@ defmodule GiTF.CLI.MissionHandler do
         IO.puts("Phase:  #{mission[:current_phase] || "pending"}")
         IO.puts("")
 
-        unless GiTF.Client.remote?() do
+        if !GiTF.Client.remote?() do
           # Phase timeline
           display_phase_timeline(mission)
 

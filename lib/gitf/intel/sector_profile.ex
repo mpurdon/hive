@@ -49,7 +49,10 @@ defmodule GiTF.Intel.SectorProfile do
     end
   rescue
     e ->
-      Logger.debug("SectorProfile.get_or_compute failed for #{sector_id}: #{Exception.message(e)}")
+      Logger.debug(
+        "SectorProfile.get_or_compute failed for #{sector_id}: #{Exception.message(e)}"
+      )
+
       empty_profile(sector_id)
   end
 
@@ -275,10 +278,11 @@ defmodule GiTF.Intel.SectorProfile do
   # -- Private: Phase Durations ------------------------------------------------
 
   defp compute_phase_durations(sector_id) do
-    transitions = Archive.filter(:mission_phase_transitions, fn t ->
-      t[:sector_id] == sector_id or
-        (t[:mission_id] && mission_in_sector?(t.mission_id, sector_id))
-    end)
+    transitions =
+      Archive.filter(:mission_phase_transitions, fn t ->
+        t[:sector_id] == sector_id or
+          (t[:mission_id] && mission_in_sector?(t.mission_id, sector_id))
+      end)
 
     if Enum.empty?(transitions) do
       %{}
@@ -379,14 +383,15 @@ defmodule GiTF.Intel.SectorProfile do
         # Cost per success
         cost_per_success = compute_model_cost_per_success(model, sector_id)
 
-        {model, %{
-          success_rate: success_rate,
-          avg_quality: avg_quality,
-          total_jobs: total,
-          trend: trend,
-          recent_rate: recent_rate,
-          cost_per_success: cost_per_success
-        }}
+        {model,
+         %{
+           success_rate: success_rate,
+           avg_quality: avg_quality,
+           total_jobs: total,
+           trend: trend,
+           recent_rate: recent_rate,
+           cost_per_success: cost_per_success
+         }}
       end)
     end
   end
@@ -565,7 +570,10 @@ defmodule GiTF.Intel.SectorProfile do
     patterns =
       case triage_accuracy.bias do
         :under_estimates ->
-          ["Triage under-estimates complexity — simple tasks often need more resources" | patterns]
+          [
+            "Triage under-estimates complexity — simple tasks often need more resources"
+            | patterns
+          ]
 
         :over_estimates ->
           ["Triage over-estimates complexity — could save tokens with lighter models" | patterns]

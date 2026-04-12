@@ -12,7 +12,7 @@ defmodule GiTF.Web.GameChannelTest do
     GiTF.Test.StoreHelper.ensure_infrastructure()
 
     # Use the app's Archive (don't restart it)
-    unless Process.whereis(GiTF.Archive) do
+    if !Process.whereis(GiTF.Archive) do
       tmp_dir = Path.join(System.tmp_dir!(), "game_test_#{:erlang.unique_integer([:positive])}")
       File.mkdir_p!(tmp_dir)
       {:ok, _} = GiTF.Archive.start_link(data_dir: tmp_dir)
@@ -28,8 +28,8 @@ defmodule GiTF.Web.GameChannelTest do
     GiTF.Test.StoreHelper.ensure_infrastructure()
 
     # Ensure PubSubBridge is alive (needed for forwarding telemetry events)
-    unless Process.whereis(GiTF.PubSubBridge) &&
-             Process.alive?(Process.whereis(GiTF.PubSubBridge)) do
+    if !(Process.whereis(GiTF.PubSubBridge) &&
+           Process.alive?(Process.whereis(GiTF.PubSubBridge))) do
       try do
         Supervisor.terminate_child(GiTF.Interface.Supervisor, GiTF.PubSubBridge)
         Supervisor.delete_child(GiTF.Interface.Supervisor, GiTF.PubSubBridge)
