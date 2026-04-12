@@ -1138,10 +1138,10 @@ defmodule GiTF.Major.Orchestrator do
 
           with {:ok, replan} <- Planner.replan_from_failures(mission.id),
                tasks when is_list(tasks) and tasks != [] <- replan.tasks do
-          Planner.create_jobs_from_specs(mission.id, tasks)
-          {:ok, mission} = GiTF.Missions.get(mission.id)
-          spawn_implementation_jobs(mission)
-          {:ok, "implementation"}
+            Planner.create_jobs_from_specs(mission.id, tasks)
+            {:ok, mission} = GiTF.Missions.get(mission.id)
+            spawn_implementation_jobs(mission)
+            {:ok, "implementation"}
           else
             {:error, reason} ->
               Logger.warning("Replan failed for mission #{mission.id}: #{inspect(reason)}")
