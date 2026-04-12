@@ -26,7 +26,7 @@ defmodule GiTF.Debrief do
         sector_id: mission.sector_id,
         status: "active",
         started_at: DateTime.utc_now(),
-        expires_at: DateTime.add(DateTime.utc_now(), @review_duration_seconds, :second),
+        expires_at: DateTime.shift(DateTime.utc_now(), second: @review_duration_seconds),
         outcome: nil
       }
 

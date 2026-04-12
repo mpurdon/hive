@@ -196,7 +196,7 @@ defmodule GiTF.EventStore do
   @spec prune(keyword()) :: non_neg_integer()
   def prune(opts \\ []) do
     days = Keyword.get(opts, :days, 30)
-    cutoff = DateTime.utc_now() |> DateTime.add(-days * 86_400, :second)
+    cutoff = DateTime.utc_now() |> DateTime.shift(day: -days)
 
     to_delete =
       Archive.all(@collection)

@@ -437,7 +437,7 @@ defmodule GiTF.Missions do
   """
   @spec compact_old_artifacts(pos_integer()) :: non_neg_integer()
   def compact_old_artifacts(days) do
-    cutoff = DateTime.add(DateTime.utc_now(), -days * 86_400, :second)
+    cutoff = DateTime.shift(DateTime.utc_now(), day: -days)
 
     Archive.filter(:missions, fn m ->
       m.status in ["completed", "failed"] and
@@ -583,7 +583,7 @@ defmodule GiTF.Missions do
   # Prevents the append-only log from accumulating duplicates when the same
   # phase advance is triggered multiple times (waggle retry, recovery cycles).
   defp recent_duplicate_transition?(mission_id, from_phase, to_phase) do
-    cutoff = DateTime.add(DateTime.utc_now(), -30, :second)
+    cutoff = DateTime.shift(DateTime.utc_now(), second: -30)
 
     Archive.filter(:mission_phase_transitions, fn t ->
       t.mission_id == mission_id and

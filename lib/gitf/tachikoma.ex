@@ -802,10 +802,10 @@ defmodule GiTF.Tachikoma do
 
   defp prune_old_store_data do
     prune_hours = GiTF.Config.get(:archive_prune_age_hours) || 48
-    cutoff = DateTime.add(DateTime.utc_now(), -prune_hours * 3600, :second)
+    cutoff = DateTime.shift(DateTime.utc_now(), hour: -prune_hours)
 
     # Prune old read links (48h) and very old unread links (7d) to prevent unbounded growth
-    unread_cutoff = DateTime.add(DateTime.utc_now(), -7 * 24 * 3600, :second)
+    unread_cutoff = DateTime.shift(DateTime.utc_now(), day: -7)
 
     pruned_waggles =
       GiTF.Archive.filter(:links, fn w ->
@@ -837,21 +837,21 @@ defmodule GiTF.Tachikoma do
 
     # Prune costs and audit_results for completed missions
     cost_hours = GiTF.Config.get(:cost_retention_hours) || 168
-    cost_cutoff = DateTime.add(DateTime.utc_now(), -cost_hours * 3600, :second)
+    cost_cutoff = DateTime.shift(DateTime.utc_now(), hour: -cost_hours)
     completed_mission_ids = completed_mission_ids()
 
     pruned_costs = prune_collection(:costs, cost_cutoff, completed_mission_ids)
     pruned_audits = prune_collection(:audit_results, cost_cutoff, completed_mission_ids)
 
     # Prune old debriefs (>30 days)
-    thirty_day_cutoff = DateTime.add(DateTime.utc_now(), -30 * 86_400, :second)
+    thirty_day_cutoff = DateTime.shift(DateTime.utc_now(), day: -30)
     pruned_debriefs = prune_by_age(:debriefs, thirty_day_cutoff)
 
     # Prune phase transitions for old completed missions
     pruned_transitions = prune_by_mission_age(:mission_phase_transitions, thirty_day_cutoff)
 
     # Prune context snapshots (>7 days)
-    seven_day_cutoff = DateTime.add(DateTime.utc_now(), -7 * 86_400, :second)
+    seven_day_cutoff = DateTime.shift(DateTime.utc_now(), day: -7)
     pruned_snapshots = prune_by_age(:context_snapshots, seven_day_cutoff)
 
     # Cap pattern collections at max records

@@ -264,7 +264,7 @@ defmodule GiTF.Autonomy do
 
   defp cleanup_stale_worktrees(shells) do
     # Check for active worktrees older than 7 days
-    cutoff = DateTime.add(DateTime.utc_now(), -7, :day)
+    cutoff = DateTime.shift(DateTime.utc_now(), day: -7)
 
     stale =
       Enum.filter(shells, fn shell ->
@@ -296,7 +296,7 @@ defmodule GiTF.Autonomy do
 
   defp recover_stuck_jobs(ops) do
     # Check for ops stuck in running state for > 1 hour
-    cutoff = DateTime.add(DateTime.utc_now(), -1, :hour)
+    cutoff = DateTime.shift(DateTime.utc_now(), hour: -1)
 
     stuck =
       Enum.filter(ops, fn op ->

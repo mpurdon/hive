@@ -56,7 +56,7 @@ defmodule GiTF.Observability.Health do
         true
       else
         # Any op activity in last 30 minutes?
-        thirty_min_ago = DateTime.add(DateTime.utc_now(), -1800, :second)
+        thirty_min_ago = DateTime.shift(DateTime.utc_now(), minute: -30)
 
         recent_activity =
           Archive.filter(:ops, fn j ->

@@ -53,7 +53,7 @@ defmodule GiTF.Dashboard.CostsLive do
     missions = GiTF.Missions.list()
 
     # Burn rate: cost in last hour
-    one_hour_ago = DateTime.add(DateTime.utc_now(), -3600, :second)
+    one_hour_ago = DateTime.shift(DateTime.utc_now(), hour: -1)
 
     recent_costs =
       Enum.filter(all_costs, fn c ->
@@ -104,8 +104,8 @@ defmodule GiTF.Dashboard.CostsLive do
 
     0..(hours - 1)
     |> Enum.map(fn offset ->
-      hour_start = DateTime.add(now, -(offset + 1) * 3600, :second)
-      hour_end = DateTime.add(now, -offset * 3600, :second)
+      hour_start = DateTime.shift(now, hour: -(offset + 1))
+      hour_end = DateTime.shift(now, hour: -offset)
 
       hour_costs =
         Enum.filter(costs, fn c ->

@@ -1844,7 +1844,7 @@ defmodule GiTF.Major do
   end
 
   defp recover_missed_waggles(state) do
-    cutoff = DateTime.add(DateTime.utc_now(), -@waggle_stale_seconds, :second)
+    cutoff = DateTime.shift(DateTime.utc_now(), second: -@waggle_stale_seconds)
 
     unread =
       GiTF.Link.list(to: "major", read: false)
