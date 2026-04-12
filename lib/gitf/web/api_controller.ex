@@ -689,7 +689,9 @@ defmodule GiTF.Web.ApiController do
       path: c[:path],
       repo_url: c[:repo_url],
       sync_strategy: c[:sync_strategy],
-      validation_command: c[:validation_command]
+      validation_command: c[:validation_command],
+      github_owner: c[:github_owner],
+      github_repo: c[:github_repo]
     }
   end
 end

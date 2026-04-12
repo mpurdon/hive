@@ -205,7 +205,20 @@ defmodule GiTF.Dashboard.SectorsLive do
   end
 
   defp has_github_token? do
-    System.get_env("GITHUB_TOKEN") != nil
+    # Check env var first, then config.toml — same logic as GiTF.GitHub
+    case System.get_env("GITHUB_TOKEN") do
+      nil -> config_has_github_token?()
+      "" -> config_has_github_token?()
+      _ -> true
+    end
+  end
+
+  defp config_has_github_token? do
+    case GiTF.Config.Provider.get([:github, :token]) do
+      nil -> false
+      "" -> false
+      _ -> true
+    end
   end
 
   defp discover_local_repos do

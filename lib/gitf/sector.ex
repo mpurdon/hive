@@ -11,6 +11,7 @@ defmodule GiTF.Sector do
   """
 
   alias GiTF.Archive
+  require Logger
 
   @doc """
   Registers a sector with the section.
@@ -124,6 +125,30 @@ defmodule GiTF.Sector do
   end
 
   @doc """
+  Backfills `github_owner` and `github_repo` on sectors that have a local path
+  with a GitHub remote but no GitHub config set. Safe to call on boot.
+  """
+  @spec backfill_github_config() :: :ok
+  def backfill_github_config do
+    list()
+    |> Enum.each(fn sector ->
+      if sector.path && is_nil(Map.get(sector, :github_owner)) do
+        {owner, repo} = detect_github_remote(sector.path)
+
+        if owner && repo do
+          updated =
+            sector
+            |> Map.put(:github_owner, owner)
+            |> Map.put(:github_repo, repo)
+
+          Archive.put(:sectors, updated)
+          Logger.info("Sector #{sector.name}: detected GitHub #{owner}/#{repo}")
+        end
+      end
+    end)
+  end
+
+  @doc """
   Renames a sector and updates all stored path references.
 
   If the sector directory exists on disk and its basename matches the old name,
@@ -168,14 +193,21 @@ defmodule GiTF.Sector do
          :ok <- validate_unique_name(opts, expanded) do
       name = Keyword.get(opts, :name, Path.basename(expanded))
 
+      # Auto-detect GitHub owner/repo from git remote if not explicitly provided
+      {gh_owner, gh_repo} =
+        case {Keyword.get(opts, :github_owner), Keyword.get(opts, :github_repo)} do
+          {o, r} when is_binary(o) and is_binary(r) -> {o, r}
+          _ -> detect_github_remote(expanded)
+        end
+
       record = %{
         name: name,
         path: expanded,
         repo_url: nil,
         sync_strategy: Keyword.get(opts, :sync_strategy, "manual"),
         validation_command: Keyword.get(opts, :validation_command),
-        github_owner: Keyword.get(opts, :github_owner),
-        github_repo: Keyword.get(opts, :github_repo)
+        github_owner: gh_owner,
+        github_repo: gh_repo
       }
 
       with {:ok, sector} <- Archive.insert(:sectors, record) do
@@ -268,5 +300,37 @@ defmodule GiTF.Sector do
       updated_path = String.replace_prefix(ghost.shell_path, old_path, new_path)
       Archive.put(:ghosts, %{ghost | shell_path: updated_path})
     end)
+  end
+
+  defp detect_github_remote(repo_path) do
+    case GiTF.Git.safe_cmd(["remote", "get-url", "origin"],
+           cd: repo_path,
+           stderr_to_stdout: true
+         ) do
+      {url, 0} ->
+        url = String.trim(url)
+        parse_github_url(url)
+
+      _ ->
+        {nil, nil}
+    end
+  rescue
+    _ -> {nil, nil}
+  end
+
+  # Parse owner/repo from GitHub URLs:
+  #   https://github.com/owner/repo.git
+  #   git@github.com:owner/repo.git
+  defp parse_github_url(url) do
+    cond do
+      String.contains?(url, "github.com") ->
+        case Regex.run(~r{github\.com[:/]([^/]+)/([^/.]+)}, url) do
+          [_, owner, repo] -> {owner, repo}
+          _ -> {nil, nil}
+        end
+
+      true ->
+        {nil, nil}
+    end
   end
 end
