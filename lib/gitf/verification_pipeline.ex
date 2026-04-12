@@ -29,7 +29,7 @@ defmodule GiTF.VerificationPipeline do
     else
       Logger.info("VerificationPipeline: starting cycle with #{length(ops)} pending ops")
 
-      :telemetry.span([:gitf, :verification_pipeline, :cycle], %{total: length(ops)}, fn ->
+      GiTF.Telemetry.span([:gitf, :verification_pipeline, :cycle], %{total: length(ops)}, fn ->
         {verified, failed} = verify_batch(ops)
 
         Logger.info(
@@ -86,7 +86,7 @@ defmodule GiTF.VerificationPipeline do
   defp verify_one(op) do
     op_id = op.id
 
-    :telemetry.span(
+    GiTF.Telemetry.span(
       [:gitf, :verification_pipeline, :op],
       %{op_id: op_id, system_time: System.system_time()},
       fn ->

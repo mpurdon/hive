@@ -85,6 +85,18 @@ defmodule GiTF.Telemetry do
     :telemetry.execute(event, measurements, metadata)
   end
 
+  @doc """
+  Wraps a function in a telemetry span for automatic timing.
+
+  Emits `event ++ [:start]` before execution and `event ++ [:stop]`
+  (or `event ++ [:exception]`) after, with duration measurements.
+  Consistent with `emit/3` — use this instead of raw `:telemetry.span`.
+  """
+  @spec span(list(atom()), map(), (-> {term(), map()})) :: term()
+  def span(event, metadata \\ %{}, fun) do
+    :telemetry.span(event, metadata, fun)
+  end
+
   @doc false
   def handle_event(event, measurements, metadata, _config) do
     event_name = Enum.join(event, ".")

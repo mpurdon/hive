@@ -1121,34 +1121,36 @@ defmodule GiTF.Major.Orchestrator do
         # Adaptive re-decomposition: replan from failure context
         replan_count = Map.get(mission, :replan_count, 0)
 
-        with true <- replan_count < 2,
-             _ =
-               Logger.info(
-                 "Quest #{mission.id}: no fallback plans, attempting replan (#{replan_count + 1}/2)"
-               ),
-             quest_record when not is_nil(quest_record) <- Archive.get(:missions, mission.id),
-             _ = Archive.put(:missions, Map.put(quest_record, :replan_count, replan_count + 1)),
-             {:ok, replan} <- Planner.replan_from_failures(mission.id),
-             tasks when is_list(tasks) and tasks != [] <- replan.tasks do
+        if replan_count >= 2 do
+          Logger.warning(
+            "Quest #{mission.id}: all recovery strategies exhausted (fallback + #{replan_count} replans)"
+          )
+
+          fail_exhausted_quest(mission)
+        else
+          Logger.info(
+            "Quest #{mission.id}: no fallback plans, attempting replan (#{replan_count + 1}/2)"
+          )
+
+          # Bump replan count before attempting
+          quest_record = Archive.get(:missions, mission.id)
+          if quest_record, do: Archive.put(:missions, Map.put(quest_record, :replan_count, replan_count + 1))
+
+          with {:ok, replan} <- Planner.replan_from_failures(mission.id),
+               tasks when is_list(tasks) and tasks != [] <- replan.tasks do
           Planner.create_jobs_from_specs(mission.id, tasks)
           {:ok, mission} = GiTF.Missions.get(mission.id)
           spawn_implementation_jobs(mission)
           {:ok, "implementation"}
-        else
-          false ->
-            Logger.warning(
-              "Quest #{mission.id}: all recovery strategies exhausted (fallback + #{replan_count} replans)"
-            )
+          else
+            {:error, reason} ->
+              Logger.warning("Replan failed for mission #{mission.id}: #{inspect(reason)}")
+              fail_exhausted_quest(mission)
 
-            fail_exhausted_quest(mission)
-
-          {:error, reason} ->
-            Logger.warning("Replan failed for mission #{mission.id}: #{inspect(reason)}")
-            fail_exhausted_quest(mission)
-
-          _ ->
-            Logger.warning("Replan produced no tasks for mission #{mission.id}")
-            fail_exhausted_quest(mission)
+            _ ->
+              Logger.warning("Replan produced no tasks for mission #{mission.id}")
+              fail_exhausted_quest(mission)
+          end
         end
     end
   end
