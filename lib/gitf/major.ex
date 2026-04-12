@@ -149,12 +149,10 @@ defmodule GiTF.Major do
     # Periodically re-evaluate ghost capacity against budget pressure
     schedule_autoscale()
 
-    # On startup, resume active missions that may have stalled during crash
-    # 1s gives supervision tree time to settle; Registry and Archive are
-    # started before Major in the supervision tree.
-    Process.send_after(self(), :resume_active_quests, 1_000)
-
-    {:ok, state}
+    # Resume active missions via handle_continue — runs immediately after
+    # init completes but before any other message is processed. Registry
+    # and Archive are already started (earlier in the supervision tree).
+    {:ok, state, {:continue, :resume_active_quests}}
   end
 
   @impl true
@@ -207,6 +205,12 @@ defmodule GiTF.Major do
   end
 
   def handle_cast(_msg, state), do: {:noreply, state}
+
+  @impl true
+  def handle_continue(:resume_active_quests, state) do
+    resume_active_quests(state)
+    {:noreply, state}
+  end
 
   @impl true
   def handle_info({:waggle_received, link_msg}, state) do
@@ -396,10 +400,6 @@ defmodule GiTF.Major do
     {:noreply, state}
   end
 
-  def handle_info(:resume_active_quests, state) do
-    resume_active_quests(state)
-    {:noreply, state}
-  end
 
   def handle_info({:delayed_retry, op_id, feedback}, state) do
     Logger.info("Executing delayed retry for op #{op_id}")

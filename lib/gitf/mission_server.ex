@@ -113,6 +113,8 @@ defmodule GiTF.MissionServer do
 
   @impl true
   def init(mission_id) do
+    GiTF.Logger.set_mission_context(mission_id)
+
     case Missions.get(mission_id) do
       {:ok, mission} ->
         ops = Map.get(mission, :ops, [])

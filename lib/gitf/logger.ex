@@ -24,6 +24,13 @@ defmodule GiTF.Logger do
     :ok
   end
 
+  @doc "Sets process metadata for a MissionServer."
+  @spec set_mission_context(String.t()) :: :ok
+  def set_mission_context(mission_id) do
+    Logger.metadata(role: :mission_server, mission_id: mission_id)
+    :ok
+  end
+
   @doc "Logs a structured event at info level."
   @spec info(String.t(), keyword()) :: :ok
   def info(message, extra \\ []) do
