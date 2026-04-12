@@ -132,18 +132,38 @@ defmodule GiTF.Sector do
   def backfill_github_config do
     list()
     |> Enum.each(fn sector ->
-      if sector.path && is_nil(Map.get(sector, :github_owner)) do
-        {owner, repo} = detect_github_remote(sector.path)
+      needs_github = sector.path && is_nil(Map.get(sector, :github_owner))
+      needs_strategy = Map.get(sector, :sync_strategy) == "manual"
 
-        if owner && repo do
-          updated =
-            sector
+      if needs_github or needs_strategy do
+        {owner, repo} =
+          if needs_github,
+            do: detect_github_remote(sector.path),
+            else: {sector[:github_owner], sector[:github_repo]}
+
+        updated = sector
+
+        updated =
+          if owner && repo && needs_github do
+            Logger.info("Sector #{sector.name}: detected GitHub #{owner}/#{repo}")
+
+            updated
             |> Map.put(:github_owner, owner)
             |> Map.put(:github_repo, repo)
+          else
+            updated
+          end
 
-          Archive.put(:sectors, updated)
-          Logger.info("Sector #{sector.name}: detected GitHub #{owner}/#{repo}")
-        end
+        updated =
+          if needs_strategy do
+            strategy = detect_sync_strategy(updated[:github_owner], updated[:github_repo])
+            Logger.info("Sector #{sector.name}: sync strategy → #{strategy}")
+            Map.put(updated, :sync_strategy, strategy)
+          else
+            updated
+          end
+
+        if updated != sector, do: Archive.put(:sectors, updated)
       end
     end)
   end
@@ -200,11 +220,15 @@ defmodule GiTF.Sector do
           _ -> detect_github_remote(expanded)
         end
 
+      sync_strategy =
+        Keyword.get(opts, :sync_strategy) ||
+          detect_sync_strategy(gh_owner, gh_repo)
+
       record = %{
         name: name,
         path: expanded,
         repo_url: nil,
-        sync_strategy: Keyword.get(opts, :sync_strategy, "manual"),
+        sync_strategy: sync_strategy,
         validation_command: Keyword.get(opts, :validation_command),
         github_owner: gh_owner,
         github_repo: gh_repo
@@ -300,6 +324,49 @@ defmodule GiTF.Sector do
       updated_path = String.replace_prefix(ghost.shell_path, old_path, new_path)
       Archive.put(:ghosts, %{ghost | shell_path: updated_path})
     end)
+  end
+
+  # Determines sync strategy based on whether the GitHub repo's default branch
+  # is protected. Protected → PR, unprotected → direct merge.
+  defp detect_sync_strategy(nil, _), do: "auto_merge"
+  defp detect_sync_strategy(_, nil), do: "auto_merge"
+
+  defp detect_sync_strategy(owner, repo) do
+    case GiTF.GitHub.client(%{github_owner: owner, github_repo: repo}) do
+      {:ok, client} ->
+        # Get the default branch, then check its protection status
+        case Req.get(client, url: "/repos/#{owner}/#{repo}") do
+          {:ok, %{status: 200, body: %{"default_branch" => branch}}} ->
+            check_branch_protection(client, owner, repo, branch)
+
+          _ ->
+            "auto_merge"
+        end
+
+      {:error, _} ->
+        "auto_merge"
+    end
+  rescue
+    _ -> "auto_merge"
+  end
+
+  defp check_branch_protection(client, owner, repo, branch) do
+    case Req.get(client,
+           url: "/repos/#{owner}/#{repo}/branches/#{branch}/protection"
+         ) do
+      {:ok, %{status: 200}} ->
+        # Branch is protected — use PR workflow
+        "pr_branch"
+
+      {:ok, %{status: 404}} ->
+        # No protection rules — direct merge is fine
+        "auto_merge"
+
+      _ ->
+        "auto_merge"
+    end
+  rescue
+    _ -> "auto_merge"
   end
 
   defp detect_github_remote(repo_path) do
