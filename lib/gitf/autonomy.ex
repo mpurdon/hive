@@ -9,6 +9,7 @@ defmodule GiTF.Autonomy do
   @doc """
   Perform self-healing checks and repairs.
   """
+  @spec self_heal() :: [tuple()]
   def self_heal do
     # Batch-load all data once to avoid repeated full-scans of the archive
     ghosts = Archive.all(:ghosts)
@@ -31,6 +32,7 @@ defmodule GiTF.Autonomy do
   (`gitf autonomy`) and dashboard. No automated action is taken on
   these recommendations.
   """
+  @spec optimize_resources() :: [{atom(), String.t()}]
   def optimize_resources do
     metrics = collect_metrics()
 
@@ -166,6 +168,7 @@ defmodule GiTF.Autonomy do
   Combines per-op failure patterns with cross-mission sector trends
   to surface both granular and systemic risks.
   """
+  @spec predict_issues(String.t()) :: [{atom(), String.t()}]
   def predict_issues(sector_id) do
     patterns = GiTF.Intel.FailureAnalysis.get_failure_patterns(sector_id)
     insights = GiTF.Intel.get_insights(sector_id)
@@ -198,6 +201,7 @@ defmodule GiTF.Autonomy do
   @doc """
   Create audit trail entry.
   """
+  @spec audit(String.t(), map()) :: {:ok, map()} | {:error, term()}
   def audit(action, details) do
     entry = %{
       id: generate_id("audit"),

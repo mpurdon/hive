@@ -53,6 +53,7 @@ defmodule GiTF.Observability.Alerts do
   def severity(type), do: Map.get(@severity_map, type, :low)
 
   @doc "Check all alert rules and return triggered alerts"
+  @spec check_alerts(keyword()) :: [{atom(), String.t()}]
   def check_alerts(opts \\ []) do
     data = %{
       ops: opts[:ops] || Archive.all(:ops),
@@ -75,6 +76,7 @@ defmodule GiTF.Observability.Alerts do
   suppressed. Alerts below the configured minimum webhook severity
   are logged but not sent to the webhook.
   """
+  @spec notify([{atom(), String.t()}], atom()) :: :ok
   def notify(alerts, channel \\ :auto) do
     Enum.each(alerts, fn {type, message} ->
       if duplicate?(type, message) do
@@ -124,6 +126,7 @@ defmodule GiTF.Observability.Alerts do
   Attach a telemetry handler that forwards [:gitf, :alert, :raised] events
   to the webhook. Also initializes the dedup ETS table.
   """
+  @spec attach_webhook_handler() :: :ok
   def attach_webhook_handler do
     init_dedup_table()
 
@@ -298,6 +301,7 @@ defmodule GiTF.Observability.Alerts do
   @dedup_gc_interval 60
 
   @doc false
+  @spec init_dedup_table() :: atom()
   def init_dedup_table do
     :ets.new(@dedup_table, [:set, :public, :named_table])
   rescue

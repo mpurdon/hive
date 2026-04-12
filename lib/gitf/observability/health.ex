@@ -7,6 +7,7 @@ defmodule GiTF.Observability.Health do
   alias GiTF.Archive
 
   @doc "Perform health check"
+  @spec check() :: map()
   def check do
     checks = [
       {:pubsub, check_pubsub()},
@@ -30,11 +31,13 @@ defmodule GiTF.Observability.Health do
   end
 
   @doc "Get readiness status"
+  @spec ready?() :: boolean()
   def ready? do
     check_store() == :ok
   end
 
   @doc "Get liveness status — detects zombie state (alive but unproductive)"
+  @spec alive?() :: boolean()
   def alive? do
     # Check critical processes exist
     queen_alive = Process.whereis(GiTF.Major) != nil

@@ -88,8 +88,17 @@ defmodule GiTF.Archive do
   @doc "Returns all records in a collection."
   @spec all(atom()) :: [map()]
   def all(collection) do
-    data = read_data()
-    data |> Map.get(collection, %{}) |> Map.values()
+    # Per-collection cache: avoids Map.values() conversion on every call
+    case collection_cache_get(collection) do
+      {:ok, list} ->
+        list
+
+      :miss ->
+        data = read_data()
+        list = data |> Map.get(collection, %{}) |> Map.values()
+        collection_cache_put(collection, list)
+        list
+    end
   end
 
   @doc "Returns records matching a filter function."
@@ -361,6 +370,31 @@ defmodule GiTF.Archive do
 
   defp cache_put(data) do
     :ets.insert(@cache_table, {:data, data})
+    # Invalidate per-collection caches on any write
+    invalidate_collection_caches()
+  rescue
+    ArgumentError -> :ok
+  end
+
+  defp collection_cache_get(collection) do
+    case :ets.lookup(@cache_table, {:collection, collection}) do
+      [{{:collection, ^collection}, list}] -> {:ok, list}
+      [] -> :miss
+    end
+  rescue
+    ArgumentError -> :miss
+  end
+
+  defp collection_cache_put(collection, list) do
+    :ets.insert(@cache_table, {{:collection, collection}, list})
+  rescue
+    ArgumentError -> :ok
+  end
+
+  defp invalidate_collection_caches do
+    :ets.select_delete(@cache_table, [
+      {{{:collection, :_}, :_}, [], [true]}
+    ])
   rescue
     ArgumentError -> :ok
   end
