@@ -1282,7 +1282,7 @@ defmodule GiTF.Major.Orchestrator do
       |> Enum.filter(fn r -> Map.get(r, "met") == false end)
 
     # Collect file paths from previous implementation ops for context
-    impl_files = collect_implementation_files(mission)
+    impl_files = get_mission_changed_files(mission)
 
     fix_specs =
       cond do
@@ -1301,7 +1301,7 @@ defmodule GiTF.Major.Orchestrator do
               Requirement: #{Map.get(req, "req_id", "unknown")}
               Evidence: #{evidence}
 
-              #{if mentioned_files != [], do: "Files mentioned: #{Enum.join(mentioned_files, ", ")}\n", else: ""}#{if impl_files != [], do: "Files from previous implementation: #{Enum.join(impl_files, ", ")}\n", else: ""}
+              #{format_file_context(mentioned_files, impl_files)}
               ## Instructions
               1. Read the files mentioned above to understand the current code
               2. Make the minimal, focused changes needed to fix this specific issue
@@ -1326,7 +1326,7 @@ defmodule GiTF.Major.Orchestrator do
 
               #{gap_text}
 
-              #{if mentioned_files != [], do: "Files mentioned: #{Enum.join(mentioned_files, ", ")}\n", else: ""}#{if impl_files != [], do: "Files from previous implementation: #{Enum.join(impl_files, ", ")}\n", else: ""}
+              #{format_file_context(mentioned_files, impl_files)}
               Fix this specific issue. Read the relevant files, make minimal changes, and commit.
               """,
               "target_files" => Enum.uniq(mentioned_files ++ impl_files),
@@ -1343,7 +1343,7 @@ defmodule GiTF.Major.Orchestrator do
             "description" => """
             Validation failed: #{summary}
 
-            #{if impl_files != [], do: "Files from previous implementation: #{Enum.join(impl_files, ", ")}\n", else: ""}
+            #{format_file_context([], impl_files)}
             Fix all identified issues. Read the relevant files, make changes, and commit.
             """,
             "target_files" => impl_files,
@@ -1388,12 +1388,11 @@ defmodule GiTF.Major.Orchestrator do
 
   defp extract_file_paths(_), do: []
 
-  # Collect changed_files from all implementation ops in this mission
-  defp collect_implementation_files(mission) do
-    (mission.ops || [])
-    |> Enum.reject(& &1[:phase_job])
-    |> Enum.flat_map(fn op -> op[:changed_files] || [] end)
-    |> Enum.uniq()
+  defp format_file_context(mentioned, impl) do
+    parts = []
+    parts = if mentioned != [], do: parts ++ ["Files mentioned: #{Enum.join(mentioned, ", ")}"], else: parts
+    parts = if impl != [], do: parts ++ ["Files from previous implementation: #{Enum.join(impl, ", ")}"], else: parts
+    if parts != [], do: Enum.join(parts, "\n") <> "\n", else: ""
   end
 
   # -- Simplify Phase: 3 parallel agents (reuse, quality, efficiency) ----------
@@ -1690,41 +1689,41 @@ defmodule GiTF.Major.Orchestrator do
   end
 
   defp complete_quest(mission_id) do
-    # Verify the mission actually produced code changes before completing.
-    # A mission that ran through the pipeline but changed nothing is a failure.
-    with {:ok, mission} <- GiTF.Missions.get(mission_id) do
-      impl_ops = Enum.reject(mission.ops || [], & &1[:phase_job])
-      total_files = impl_ops |> Enum.map(&(&1[:files_changed] || 0)) |> Enum.sum()
+    case GiTF.Missions.get(mission_id) do
+      {:ok, mission} ->
+        # Verify the mission actually produced code changes before completing.
+        impl_ops = Enum.reject(mission.ops || [], & &1[:phase_job])
+        total_files = impl_ops |> Enum.map(&(&1[:files_changed] || 0)) |> Enum.sum()
 
-      if impl_ops != [] and total_files == 0 do
-        Logger.warning(
-          "Quest #{mission_id}: no implementation ops produced file changes — marking as failed"
-        )
+        if impl_ops != [] and total_files == 0 do
+          Logger.warning(
+            "Quest #{mission_id}: no implementation ops produced file changes — marking as failed"
+          )
 
-        fail_quest(mission_id, "No code changes produced by any implementation op")
-      else
-        do_complete_quest(mission_id)
-      end
+          fail_quest(mission_id, "No code changes produced by any implementation op")
+        else
+          do_complete_quest(mission)
+        end
+
+      {:error, _} ->
+        fail_quest(mission_id, "Mission not found at completion")
     end
   end
 
-  defp do_complete_quest(mission_id) do
+  defp do_complete_quest(mission) do
     GiTF.Telemetry.end_current_span()
 
     with {:ok, _} <-
-           GiTF.Missions.transition_phase(mission_id, "completed", "All phases complete") do
-      GiTF.Missions.update_status!(mission_id)
+           GiTF.Missions.transition_phase(mission.id, "completed", "All phases complete") do
+      GiTF.Missions.update_status!(mission.id)
 
       GiTF.Observability.Alerts.dispatch_webhook(
         :quest_completed,
-        "Quest #{mission_id} completed successfully"
+        "Quest #{mission.id} completed successfully"
       )
 
-      # Start post-review if enabled for this sector
-      with {:ok, mission} <- GiTF.Missions.get(mission_id),
-           sector_id when not is_nil(sector_id) <- mission.sector_id,
-           true <- GiTF.Debrief.enabled?(sector_id) do
-        GiTF.Debrief.start_review(mission_id)
+      if mission.sector_id && GiTF.Debrief.enabled?(mission.sector_id) do
+        GiTF.Debrief.start_review(mission.id)
       end
 
       {:ok, "completed"}
