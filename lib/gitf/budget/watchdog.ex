@@ -38,7 +38,7 @@ defmodule GiTF.Budget.Watchdog do
     state = check_active_quests(state)
     check_paused_quests()
     schedule_check()
-    {:noreply, state}
+    {:noreply, state, :hibernate}
   end
 
   defp schedule_check do

@@ -796,9 +796,7 @@ defmodule GiTF.Major.Orchestrator do
   defp revalidate_quest(mission) do
     # Quick re-validation: check that implementation ops still pass verification
     impl_jobs =
-      mission.ops
-      |> Enum.reject(& &1[:phase_job])
-      |> Enum.filter(&(&1.status == "done"))
+      for op <- mission.ops, !op[:phase_job], op.status == "done", do: op
 
     if impl_jobs == [] do
       true
@@ -875,19 +873,12 @@ defmodule GiTF.Major.Orchestrator do
             end)
 
           running_worker =
-            if running_phase_job do
-              case running_phase_job[:ghost_id] do
-                nil ->
-                  false
-
-                ghost_id ->
-                  case GiTF.Ghost.Worker.lookup(ghost_id) do
-                    {:ok, pid} -> Process.alive?(pid)
-                    :error -> false
-                  end
-              end
+            with %{} <- running_phase_job,
+                 ghost_id when not is_nil(ghost_id) <- running_phase_job[:ghost_id],
+                 {:ok, pid} <- GiTF.Ghost.Worker.lookup(ghost_id) do
+              Process.alive?(pid)
             else
-              false
+              _ -> false
             end
 
           if running_worker do
@@ -1086,7 +1077,7 @@ defmodule GiTF.Major.Orchestrator do
   end
 
   defp majority_failed?(impl_jobs) do
-    terminal_jobs = Enum.filter(impl_jobs, &(&1.status in ["done", "failed"]))
+    terminal_jobs = for op <- impl_jobs, op.status in ["done", "failed"], do: op
     failed = Enum.count(terminal_jobs, &(&1.status == "failed"))
     total = length(terminal_jobs)
 
@@ -1130,45 +1121,34 @@ defmodule GiTF.Major.Orchestrator do
         # Adaptive re-decomposition: replan from failure context
         replan_count = Map.get(mission, :replan_count, 0)
 
-        if replan_count < 2 do
-          Logger.info(
-            "Quest #{mission.id}: no fallback plans, attempting replan (#{replan_count + 1}/2)"
-          )
-
-          # Increment replan count
-          quest_record = Archive.get(:missions, mission.id)
-
-          if quest_record do
-            updated = Map.put(quest_record, :replan_count, replan_count + 1)
-            Archive.put(:missions, updated)
-          end
-
-          case Planner.replan_from_failures(mission.id) do
-            {:ok, replan} ->
-              specs = replan.tasks
-
-              case specs do
-                tasks when is_list(tasks) and tasks != [] ->
-                  Planner.create_jobs_from_specs(mission.id, tasks)
-                  {:ok, mission} = GiTF.Missions.get(mission.id)
-                  spawn_implementation_jobs(mission)
-                  {:ok, "implementation"}
-
-                _ ->
-                  Logger.warning("Replan produced no tasks for mission #{mission.id}")
-                  fail_exhausted_quest(mission)
-              end
-
-            {:error, reason} ->
-              Logger.warning("Replan failed for mission #{mission.id}: #{inspect(reason)}")
-              fail_exhausted_quest(mission)
-          end
+        with true <- replan_count < 2,
+             _ =
+               Logger.info(
+                 "Quest #{mission.id}: no fallback plans, attempting replan (#{replan_count + 1}/2)"
+               ),
+             quest_record when not is_nil(quest_record) <- Archive.get(:missions, mission.id),
+             _ = Archive.put(:missions, Map.put(quest_record, :replan_count, replan_count + 1)),
+             {:ok, replan} <- Planner.replan_from_failures(mission.id),
+             tasks when is_list(tasks) and tasks != [] <- replan.tasks do
+          Planner.create_jobs_from_specs(mission.id, tasks)
+          {:ok, mission} = GiTF.Missions.get(mission.id)
+          spawn_implementation_jobs(mission)
+          {:ok, "implementation"}
         else
-          Logger.warning(
-            "Quest #{mission.id}: all recovery strategies exhausted (fallback + #{replan_count} replans)"
-          )
+          false ->
+            Logger.warning(
+              "Quest #{mission.id}: all recovery strategies exhausted (fallback + #{replan_count} replans)"
+            )
 
-          fail_exhausted_quest(mission)
+            fail_exhausted_quest(mission)
+
+          {:error, reason} ->
+            Logger.warning("Replan failed for mission #{mission.id}: #{inspect(reason)}")
+            fail_exhausted_quest(mission)
+
+          _ ->
+            Logger.warning("Replan produced no tasks for mission #{mission.id}")
+            fail_exhausted_quest(mission)
         end
     end
   end
@@ -1521,19 +1501,12 @@ defmodule GiTF.Major.Orchestrator do
     end
 
     # Rollback worktree if mission has a sector
-    case GiTF.Missions.get(mission_id) do
-      {:ok, %{sector_id: sid}} when is_binary(sid) ->
-        case Archive.get(:sectors, sid) do
-          %{path: path} when is_binary(path) ->
-            Logger.info("Quest #{mission_id} failed: rolling back sector at #{path}")
-            GiTF.Git.rollback(path)
-
-          _ ->
-            :ok
-        end
-
-      _ ->
-        :ok
+    with {:ok, %{sector_id: sid}} when is_binary(sid) <- GiTF.Missions.get(mission_id),
+         %{path: path} when is_binary(path) <- Archive.get(:sectors, sid) do
+      Logger.info("Quest #{mission_id} failed: rolling back sector at #{path}")
+      GiTF.Git.rollback(path)
+    else
+      _ -> :ok
     end
 
     # Feed the learning loop — analyze failed ops
@@ -1555,9 +1528,7 @@ defmodule GiTF.Major.Orchestrator do
       case GiTF.Missions.get(mission_id) do
         {:ok, m} ->
           failed_ids =
-            m.ops
-            |> Enum.filter(&(&1.status == "failed"))
-            |> Enum.map(& &1.id)
+            for op <- m.ops, op.status == "failed", do: op.id
 
           {Map.get(m, :current_phase, "unknown"), failed_ids}
 
@@ -1716,53 +1687,25 @@ defmodule GiTF.Major.Orchestrator do
       assigned_model: model_id(model)
     }
 
-    case GiTF.Ops.create(job_attrs) do
-      {:ok, op} ->
-        # Record which op serves which phase
-        GiTF.Missions.record_phase_job(mission.id, phase, op.id)
+    with {:ok, op} <- GiTF.Ops.create(job_attrs),
+         _ = GiTF.Missions.record_phase_job(mission.id, phase, op.id),
+         {:ok, gitf_root} <- GiTF.gitf_dir(),
+         {:ok, ghost} <- GiTF.Ghosts.spawn_detached(op.id, mission.sector_id, gitf_root, prompt: prompt) do
+      Logger.info(
+        "Phase ghost #{ghost.id} spawned for #{phase} phase of mission #{mission.id}"
+      )
 
-        # Spawn the ghost
-        case GiTF.gitf_dir() do
-          {:ok, gitf_root} ->
-            case GiTF.Ghosts.spawn_detached(op.id, mission.sector_id, gitf_root, prompt: prompt) do
-              {:ok, ghost} ->
-                Logger.info(
-                  "Phase ghost #{ghost.id} spawned for #{phase} phase of mission #{mission.id}"
-                )
-
-                {:ok, ghost}
-
-              {:error, reason} ->
-                Logger.error("Failed to spawn #{phase} phase ghost: #{inspect(reason)}")
-
-                GiTF.Telemetry.emit([:gitf, :phase, :spawn_failed], %{}, %{
-                  mission_id: mission.id,
-                  phase: phase,
-                  reason: inspect(reason)
-                })
-
-                {:error, reason}
-            end
-
-          {:error, reason} ->
-            Logger.error("Cannot spawn phase ghost — no gitf root: #{inspect(reason)}")
-
-            GiTF.Telemetry.emit([:gitf, :phase, :spawn_failed], %{}, %{
-              mission_id: mission.id,
-              phase: phase,
-              reason: "no_gitf_root"
-            })
-
-            {:error, :no_gitf_root}
-        end
-
+      {:ok, ghost}
+    else
       {:error, reason} ->
-        Logger.error("Failed to create #{phase} phase op: #{inspect(reason)}")
+        error_reason = if reason == :no_gitf_root, do: "no_gitf_root", else: inspect(reason)
+
+        Logger.error("Failed to spawn #{phase} phase ghost: #{error_reason}")
 
         GiTF.Telemetry.emit([:gitf, :phase, :spawn_failed], %{}, %{
           mission_id: mission.id,
           phase: phase,
-          reason: inspect(reason)
+          reason: error_reason
         })
 
         {:error, reason}

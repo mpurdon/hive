@@ -144,7 +144,7 @@ defmodule GiTF.MissionServer do
           phase: state.phase
         })
 
-        {:ok, state}
+        {:ok, state, :hibernate}
 
       {:error, reason} ->
         {:stop, reason}
@@ -234,7 +234,12 @@ defmodule GiTF.MissionServer do
       end
 
     schedule_budget_check()
-    {:noreply, %{state | budget_remaining: budget_remaining}}
+
+    if budget_remaining > 0 do
+      {:noreply, %{state | budget_remaining: budget_remaining}, :hibernate}
+    else
+      {:noreply, %{state | budget_remaining: budget_remaining}}
+    end
   end
 
   # Handle PubSub messages relevant to this mission

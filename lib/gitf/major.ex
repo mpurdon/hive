@@ -1153,9 +1153,10 @@ defmodule GiTF.Major do
 
       :ok ->
         pending_jobs =
-          mission.ops
-          |> Enum.filter(&(&1.status == "pending"))
-          |> Enum.filter(&GiTF.Ops.ready?(&1.id))
+          for op <- mission.ops,
+              op.status == "pending",
+              GiTF.Ops.ready?(op.id),
+              do: op
 
         active_count = GiTF.Ghosts.list(status: GhostStatus.working()) |> length()
         available_slots = max(state.effective_max_ghosts - active_count, 0)
@@ -1212,7 +1213,7 @@ defmodule GiTF.Major do
       {:git, check_git_ok()}
     ]
 
-    failed = Enum.reject(checks, fn {_, ok?} -> ok? end) |> Enum.map(&elem(&1, 0))
+    failed = for {name, ok?} <- checks, !ok?, do: name
 
     if failed == [] do
       :ok
@@ -1281,10 +1282,11 @@ defmodule GiTF.Major do
   defp filter_file_overlaps(candidates, mission) do
     # Get target_files of all currently running (non-phase) ops for this mission
     running_files =
-      mission.ops
-      |> Enum.filter(&(&1.status in ["running", "assigned"] and not (&1[:phase_job] || false)))
-      |> Enum.flat_map(&(&1[:target_files] || []))
-      |> MapSet.new()
+      for op <- mission.ops,
+          op.status in ["running", "assigned"] and not (op[:phase_job] || false),
+          file <- op[:target_files] || [],
+          into: MapSet.new(),
+          do: file
 
     if MapSet.size(running_files) == 0 do
       candidates

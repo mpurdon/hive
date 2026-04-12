@@ -185,12 +185,11 @@ defmodule GiTF.Autonomy do
 
     # Predict based on all significant failure patterns
     pattern_predictions =
-      patterns
-      |> Enum.filter(&(&1.frequency > 0.3))
-      |> Enum.map(fn pattern ->
+      for pattern <- patterns,
+          pattern.frequency > 0.3 do
         {:recurring_failure,
          "#{pattern.type} failures are common (#{Float.round(pattern.frequency * 100, 1)}%)"}
-      end)
+      end
 
     # Cross-mission sector trends from recent completed missions
     sector_predictions = cross_mission_predictions(sector_id)
@@ -238,10 +237,7 @@ defmodule GiTF.Autonomy do
   defp reconcile_state(ops, ghosts) do
     # Check for inconsistent state — build a set for O(1) ghost lookup
     active_ghost_ids =
-      ghosts
-      |> Enum.filter(&(&1.status == "active"))
-      |> Enum.map(& &1.id)
-      |> MapSet.new()
+      for ghost <- ghosts, ghost.status == "active", into: MapSet.new(), do: ghost.id
 
     inconsistent =
       Enum.filter(ops, fn op ->
@@ -362,9 +358,7 @@ defmodule GiTF.Autonomy do
       triage_feedback = Archive.filter(:triage_feedback, &(&1.sector_id == sector_id))
 
       low_scores =
-        triage_feedback
-        |> Enum.filter(&((&1.quality_score || 100) < 70))
-        |> length()
+        Enum.count(triage_feedback, &((&1.quality_score || 100) < 70))
 
       predictions =
         if length(triage_feedback) > 5 and low_scores / length(triage_feedback) > 0.3 do

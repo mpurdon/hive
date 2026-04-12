@@ -112,6 +112,7 @@ defmodule GiTF.Application do
               name: GiTF.RateLimiter, max_tokens: 30, refill_rate: 30, refill_interval: 1_000},
              {DynamicSupervisor,
               name: GiTF.Runtime.ProviderLimiter.Supervisor, strategy: :one_for_one},
+             {DynamicSupervisor, name: GiTF.MissionSupervisor, strategy: :one_for_one},
              {GiTF.Major, gitf_root: Application.get_env(:gitf, :store_dir, File.cwd!())},
              {GiTF.SectorSupervisor, []},
              {GiTF.Budget.Watchdog, []},

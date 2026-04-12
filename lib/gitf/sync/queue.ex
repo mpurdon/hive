@@ -255,6 +255,10 @@ defmodule GiTF.Sync.Queue do
     {:noreply, state}
   end
 
+  def handle_info(_msg, %{pending: [], active: nil} = state) do
+    {:noreply, state, :hibernate}
+  end
+
   def handle_info(_msg, state) do
     {:noreply, state}
   end
