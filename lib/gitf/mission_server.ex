@@ -20,7 +20,7 @@ defmodule GiTF.MissionServer do
   use GenServer
   require Logger
 
-  alias GiTF.{Archive, Budget, Missions, Ops}
+  alias GiTF.{Budget, Missions, Ops}
   alias GiTF.Major.Orchestrator
 
   @registry GiTF.Registry
@@ -271,7 +271,9 @@ defmodule GiTF.MissionServer do
   end
 
   defp schedule_budget_check do
-    Process.send_after(self(), :check_budget, @budget_check_interval)
+    # Jitter ±5s to avoid thundering herd when many MissionServers run
+    jitter = :rand.uniform(10_000) - 5_000
+    Process.send_after(self(), :check_budget, @budget_check_interval + jitter)
   end
 
   # Refresh a single op's data from Archive and update it in our in-memory list.
@@ -293,10 +295,17 @@ defmodule GiTF.MissionServer do
 
   # Reload the current phase from the archive after an advance.
   @spec reload_phase(map()) :: map()
+  # Reload both phase and ops from Archive to pick up new phase ops
+  # created by advance_quest (e.g., new implementation ops after planning).
   defp reload_phase(state) do
-    case Archive.get(:missions, state.mission_id) do
-      %{current_phase: phase} -> %{state | phase: phase}
-      _ -> state
+    case GiTF.Missions.get(state.mission_id) do
+      {:ok, mission} ->
+        ops = Map.get(mission, :ops, state.ops)
+
+        %{state | phase: mission[:current_phase] || state.phase, ops: ops}
+
+      _ ->
+        state
     end
   end
 

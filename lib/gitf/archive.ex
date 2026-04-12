@@ -34,11 +34,14 @@ defmodule GiTF.Archive do
     record = ensure_id(collection, record)
     record = ensure_timestamps(record)
 
-    with_lock(fn data ->
-      col = Map.get(data, collection, %{})
-      col = Map.put(col, record.id, record)
-      Map.put(data, collection, col)
-    end)
+    with_lock(
+      fn data ->
+        col = Map.get(data, collection, %{})
+        col = Map.put(col, record.id, record)
+        Map.put(data, collection, col)
+      end,
+      collection
+    )
 
     {:ok, record}
   end
@@ -64,11 +67,14 @@ defmodule GiTF.Archive do
   def put(collection, record) do
     record = ensure_updated_at(record)
 
-    with_lock(fn data ->
-      col = Map.get(data, collection, %{})
-      col = Map.put(col, record.id, record)
-      Map.put(data, collection, col)
-    end)
+    with_lock(
+      fn data ->
+        col = Map.get(data, collection, %{})
+        col = Map.put(col, record.id, record)
+        Map.put(data, collection, col)
+      end,
+      collection
+    )
 
     {:ok, record}
   end
@@ -76,11 +82,14 @@ defmodule GiTF.Archive do
   @doc "Deletes a record by collection and ID."
   @spec delete(atom(), String.t()) :: :ok
   def delete(collection, id) do
-    with_lock(fn data ->
-      col = Map.get(data, collection, %{})
-      col = Map.delete(col, id)
-      Map.put(data, collection, col)
-    end)
+    with_lock(
+      fn data ->
+        col = Map.get(data, collection, %{})
+        col = Map.delete(col, id)
+        Map.put(data, collection, col)
+      end,
+      collection
+    )
 
     :ok
   end
@@ -293,21 +302,21 @@ defmodule GiTF.Archive do
     end
   end
 
-  defp write_data(data) do
+  defp write_data(data, changed_collection) do
     path = data_path()
     tmp_path = path <> ".tmp"
     binary = :erlang.term_to_binary(data)
 
     with :ok <- File.write(tmp_path, binary),
          :ok <- File.rename(tmp_path, path) do
-      cache_put(data)
+      cache_put(data, changed_collection)
       maybe_backup(path, binary)
     else
       {:error, reason} ->
         require Logger
         Logger.error("Archive write failed: #{inspect(reason)}")
         # Still update cache so in-memory state is consistent
-        cache_put(data)
+        cache_put(data, changed_collection)
         GiTF.Telemetry.emit([:gitf, :store, :write_error], %{}, %{reason: reason})
     end
   end
@@ -368,10 +377,13 @@ defmodule GiTF.Archive do
     ArgumentError -> :miss
   end
 
-  defp cache_put(data) do
+  defp cache_put(data, invalidate_collection \\ nil) do
     :ets.insert(@cache_table, {:data, data})
-    # Invalidate per-collection caches on any write
-    invalidate_collection_caches()
+
+    case invalidate_collection do
+      nil -> invalidate_all_collection_caches()
+      col when is_atom(col) -> invalidate_collection_cache(col)
+    end
   rescue
     ArgumentError -> :ok
   end
@@ -391,7 +403,7 @@ defmodule GiTF.Archive do
     ArgumentError -> :ok
   end
 
-  defp invalidate_collection_caches do
+  defp invalidate_all_collection_caches do
     :ets.select_delete(@cache_table, [
       {{{:collection, :_}, :_}, [], [true]}
     ])
@@ -399,13 +411,19 @@ defmodule GiTF.Archive do
     ArgumentError -> :ok
   end
 
-  defp with_lock(mutate_fn) do
+  defp invalidate_collection_cache(collection) do
+    :ets.delete(@cache_table, {:collection, collection})
+  rescue
+    ArgumentError -> :ok
+  end
+
+  defp with_lock(mutate_fn, collection \\ nil) do
     acquire_lock()
 
     try do
       data = read_data()
       new_data = mutate_fn.(data)
-      write_data(new_data)
+      write_data(new_data, collection)
     after
       release_lock()
     end
