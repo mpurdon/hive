@@ -45,6 +45,7 @@ defmodule GiTF.Dashboard.MissionDetailLive do
          |> assign(:priority, :normal)
          |> assign(:duration, nil)
          |> assign(:phase_durations, %{})
+         |> assign(:confirm_remove, false)
          |> compute_op_stats()
          |> reload()}
 
@@ -112,11 +113,17 @@ defmodule GiTF.Dashboard.MissionDetailLive do
     end
   end
 
+  def handle_event("confirm_remove", _params, socket) do
+    {:noreply, assign(socket, :confirm_remove, true)}
+  end
+
+  def handle_event("cancel_remove", _params, socket) do
+    {:noreply, assign(socket, :confirm_remove, false)}
+  end
+
   def handle_event("remove", _params, socket) do
     mission_id = socket.assigns.mission.id
 
-    # Kill first to clean up all child artifacts (ops, ghosts, shells, deps)
-    # then delete residual data (links, events, costs, phase transitions)
     case GiTF.Missions.kill(mission_id) do
       :ok ->
         cleanup_mission_artifacts(mission_id)
@@ -127,7 +134,10 @@ defmodule GiTF.Dashboard.MissionDetailLive do
          |> push_navigate(to: "/dashboard/missions")}
 
       {:error, reason} ->
-        {:noreply, put_flash(socket, :error, "Failed to remove: #{inspect(reason)}")}
+        {:noreply,
+         socket
+         |> assign(:confirm_remove, false)
+         |> put_flash(:error, "Failed to remove: #{inspect(reason)}")}
     end
   end
 
@@ -775,7 +785,17 @@ defmodule GiTF.Dashboard.MissionDetailLive do
             <% end %>
 
             <%!-- Remove (always last, danger) --%>
-            <button phx-click="remove" class="btn btn-red" data-confirm="Permanently remove this mission and all its data? This cannot be undone." style="margin-top:0.25rem">Remove</button>
+            <button phx-click="confirm_remove" class="btn btn-red" style="margin-top:0.25rem">Remove</button>
+
+            <%= if @confirm_remove do %>
+              <div style="margin-top:0.75rem; padding:0.75rem; background:#1c1010; border:1px solid #f85149; border-radius:6px">
+                <p style="color:#f85149; font-size:0.85rem; margin:0 0 0.5rem">Permanently remove this mission and all its data? This cannot be undone.</p>
+                <div style="display:flex; gap:0.5rem">
+                  <button phx-click="remove" class="btn btn-red">Yes, Remove</button>
+                  <button phx-click="cancel_remove" class="btn btn-grey">Cancel</button>
+                </div>
+              </div>
+            <% end %>
           </div>
         </div>
 
