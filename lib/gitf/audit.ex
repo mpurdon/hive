@@ -240,21 +240,34 @@ defmodule GiTF.Audit do
   defp verify_proof_of_test(op_id) do
     case GiTF.Ops.get(op_id) do
       {:ok, op} ->
-        # If no files were changed, proof of test is N/A (pass)
-        if (op[:files_changed] || 0) == 0 do
-          :pass
-        else
-          # Check for successful test execution in ghost events
-          events = GiTF.Link.list_by_op(op_id)
+        is_phase = Map.get(op, :phase_job, false)
+        files_changed = op[:files_changed]
 
-          has_pass =
-            Enum.any?(events, fn e ->
-              # Look for tool_use results from command execution
-              # This is a heuristic: look for test-like commands that succeeded
-              is_test_cmd?(e) and cmd_succeeded?(e)
-            end)
+        cond do
+          # Phase ops (research, design, etc.) don't change files — auto-pass
+          is_phase ->
+            :pass
 
-          if has_pass, do: :pass, else: :fail
+          # files_changed not yet recorded (ghost still running) — pass for now
+          is_nil(files_changed) ->
+            :pass
+
+          # Implementation op completed with zero file changes — fail so the
+          # pipeline retries or escalates rather than silently completing
+          files_changed == 0 ->
+            Logger.warning("Proof-of-test: op #{op_id} completed with 0 files changed — failing")
+            :fail
+
+          true ->
+            # Check for successful test execution in ghost events
+            events = GiTF.Link.list_by_op(op_id)
+
+            has_pass =
+              Enum.any?(events, fn e ->
+                is_test_cmd?(e) and cmd_succeeded?(e)
+              end)
+
+            if has_pass, do: :pass, else: :fail
         end
 
       _ ->

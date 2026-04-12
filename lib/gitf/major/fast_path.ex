@@ -7,9 +7,9 @@ defmodule GiTF.Major.FastPath do
   to implementation with a single op and ghost. Verification still runs
   (Tachikoma reviews the work and SyncQueue merges it).
 
-  A mission is auto-eligible if it has a short, focused goal without
-  multi-system complexity indicators. It can also be forced onto the
-  fast path with `force: true` (via `gitf run` or `--quick` flag).
+  The fast path enriches the op description with sector intelligence
+  (key files, patterns, tech stack) so the ghost has codebase context
+  even without a dedicated research phase.
   """
 
   require Logger
@@ -49,8 +49,9 @@ defmodule GiTF.Major.FastPath do
 
   @doc """
   Executes the fast path: transitions directly to implementation, creates
-  a single op, and spawns a single ghost. Verification is NOT skipped —
-  the op goes through the standard Tachikoma review and merge pipeline.
+  a single op with enriched context, and spawns a single ghost.
+  Verification is NOT skipped — the op goes through the standard
+  Tachikoma review and merge pipeline.
 
   Returns `{:ok, "implementation"}` or `{:error, reason}`.
   """
@@ -59,10 +60,11 @@ defmodule GiTF.Major.FastPath do
     with {:ok, mission} <- GiTF.Missions.get(mission_id),
          {:ok, _} <-
            GiTF.Missions.transition_phase(mission_id, "implementation", "Fast path: focused task") do
-      # Create a single implementation op (verification enabled)
+      description = build_enriched_description(mission)
+
       job_attrs = %{
         title: mission.goal,
-        description: mission.goal,
+        description: description,
         mission_id: mission_id,
         sector_id: mission.sector_id,
         phase_job: false,
@@ -104,6 +106,83 @@ defmodule GiTF.Major.FastPath do
   end
 
   # -- Private ---------------------------------------------------------------
+
+  defp build_enriched_description(mission) do
+    goal = mission.goal
+    sector_id = mission.sector_id
+
+    context_parts = [goal, "", "## Instructions", ""]
+
+    context_parts =
+      context_parts ++
+        [
+          "1. First, read the relevant source files to understand the codebase structure",
+          "2. Identify the specific file(s) that need to change",
+          "3. Make the minimal, focused changes needed",
+          "4. Verify your changes are correct (run tests if available)",
+          "5. Commit your changes with a clear message",
+          ""
+        ]
+
+    # Add sector intelligence context if available
+    context_parts =
+      if sector_id do
+        case sector_context(sector_id) do
+          nil -> context_parts
+          ctx -> context_parts ++ ["## Codebase Context", "", ctx, ""]
+        end
+      else
+        context_parts
+      end
+
+    Enum.join(context_parts, "\n")
+  end
+
+  defp sector_context(sector_id) do
+    profile = GiTF.Intel.SectorProfile.get_or_compute(sector_id)
+    prompt_ctx = Map.get(profile, :prompt_context)
+
+    # Also try to get key files from any previous research artifacts
+    research_ctx =
+      case GiTF.Archive.filter(:missions, fn m -> m[:sector_id] == sector_id end)
+           |> Enum.find_value(fn m ->
+             GiTF.Missions.get_artifact(m.id, "research")
+           end) do
+        nil ->
+          nil
+
+        research ->
+          key_files = Map.get(research, "key_files", [])
+          tech_stack = Map.get(research, "tech_stack", [])
+          architecture = Map.get(research, "architecture", "")
+
+          parts = []
+
+          parts =
+            if architecture != "",
+              do: parts ++ ["Architecture: #{architecture}"],
+              else: parts
+
+          parts =
+            if tech_stack != [],
+              do: parts ++ ["Tech stack: #{Enum.join(tech_stack, ", ")}"],
+              else: parts
+
+          parts =
+            if key_files != [],
+              do: parts ++ ["Key files: #{Enum.join(key_files, ", ")}"],
+              else: parts
+
+          if parts != [], do: Enum.join(parts, "\n"), else: nil
+      end
+
+    [prompt_ctx, research_ctx]
+    |> Enum.reject(&is_nil/1)
+    |> case do
+      [] -> nil
+      parts -> Enum.join(parts, "\n\n")
+    end
+  end
 
   defp short_goal?(goal), do: String.length(goal) < @max_goal_length
 

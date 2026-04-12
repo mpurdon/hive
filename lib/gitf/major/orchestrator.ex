@@ -1281,22 +1281,34 @@ defmodule GiTF.Major.Orchestrator do
       (Map.get(validation, "requirements_met", []) || [])
       |> Enum.filter(fn r -> Map.get(r, "met") == false end)
 
+    # Collect file paths from previous implementation ops for context
+    impl_files = collect_implementation_files(mission)
+
     fix_specs =
       cond do
         # Create fix ops from unmet requirements
         unmet != [] ->
           Enum.map(unmet, fn req ->
+            evidence = Map.get(req, "evidence", "No details")
+            mentioned_files = extract_file_paths(evidence)
+
             %{
               "title" =>
-                "Fix: #{Map.get(req, "req_id", "unknown")} — #{Map.get(req, "evidence", "validation failed")}",
+                "Fix: #{Map.get(req, "req_id", "unknown")} — #{String.slice(evidence, 0, 80)}",
               "description" => """
               The validation phase found this requirement was NOT met.
 
               Requirement: #{Map.get(req, "req_id", "unknown")}
-              Evidence: #{Map.get(req, "evidence", "No details")}
+              Evidence: #{evidence}
 
-              Fix this specific issue. Check the existing implementation and make the minimal changes needed.
+              #{if mentioned_files != [], do: "Files mentioned: #{Enum.join(mentioned_files, ", ")}\n", else: ""}#{if impl_files != [], do: "Files from previous implementation: #{Enum.join(impl_files, ", ")}\n", else: ""}
+              ## Instructions
+              1. Read the files mentioned above to understand the current code
+              2. Make the minimal, focused changes needed to fix this specific issue
+              3. Verify your fix is correct
+              4. Commit your changes
               """,
+              "target_files" => Enum.uniq(mentioned_files ++ impl_files),
               "op_type" => "fix"
             }
           end)
@@ -1304,15 +1316,20 @@ defmodule GiTF.Major.Orchestrator do
         # Create fix ops from gap descriptions
         gaps != [] ->
           Enum.map(gaps, fn gap ->
+            gap_text = to_string(gap)
+            mentioned_files = extract_file_paths(gap_text)
+
             %{
-              "title" => "Fix validation gap: #{String.slice(to_string(gap), 0, 60)}",
+              "title" => "Fix validation gap: #{String.slice(gap_text, 0, 60)}",
               "description" => """
               The validation phase identified this gap:
 
-              #{gap}
+              #{gap_text}
 
-              Fix this specific issue with minimal changes.
+              #{if mentioned_files != [], do: "Files mentioned: #{Enum.join(mentioned_files, ", ")}\n", else: ""}#{if impl_files != [], do: "Files from previous implementation: #{Enum.join(impl_files, ", ")}\n", else: ""}
+              Fix this specific issue. Read the relevant files, make minimal changes, and commit.
               """,
+              "target_files" => Enum.uniq(mentioned_files ++ impl_files),
               "op_type" => "fix"
             }
           end)
@@ -1321,13 +1338,18 @@ defmodule GiTF.Major.Orchestrator do
         true ->
           summary = Map.get(validation, "summary", "Validation failed")
 
-          [
-            %{
-              "title" => "Fix validation issues: #{String.slice(summary, 0, 60)}",
-              "description" => "Validation failed: #{summary}\n\nFix all identified issues.",
-              "op_type" => "fix"
-            }
-          ]
+          %{
+            "title" => "Fix validation issues: #{String.slice(summary, 0, 60)}",
+            "description" => """
+            Validation failed: #{summary}
+
+            #{if impl_files != [], do: "Files from previous implementation: #{Enum.join(impl_files, ", ")}\n", else: ""}
+            Fix all identified issues. Read the relevant files, make changes, and commit.
+            """,
+            "target_files" => impl_files,
+            "op_type" => "fix"
+          }
+          |> List.wrap()
       end
 
     if fix_specs != [] do
@@ -1354,6 +1376,24 @@ defmodule GiTF.Major.Orchestrator do
       )
 
       fail_quest(mission.id, "Validation fix attempt crashed")
+  end
+
+  # Extract file paths from text (looks for common patterns like path/to/file.ext)
+  defp extract_file_paths(text) when is_binary(text) do
+    regex = ~r/(?:^|[\s`'"])([a-zA-Z][\w.\/-]*\.\w{1,6})(?:[\s`'",:\]]|$)/
+    Regex.scan(regex, text)
+    |> Enum.map(fn [_, path] -> path end)
+    |> Enum.uniq()
+  end
+
+  defp extract_file_paths(_), do: []
+
+  # Collect changed_files from all implementation ops in this mission
+  defp collect_implementation_files(mission) do
+    (mission.ops || [])
+    |> Enum.reject(& &1[:phase_job])
+    |> Enum.flat_map(fn op -> op[:changed_files] || [] end)
+    |> Enum.uniq()
   end
 
   # -- Simplify Phase: 3 parallel agents (reuse, quality, efficiency) ----------
@@ -1650,6 +1690,25 @@ defmodule GiTF.Major.Orchestrator do
   end
 
   defp complete_quest(mission_id) do
+    # Verify the mission actually produced code changes before completing.
+    # A mission that ran through the pipeline but changed nothing is a failure.
+    with {:ok, mission} <- GiTF.Missions.get(mission_id) do
+      impl_ops = Enum.reject(mission.ops || [], & &1[:phase_job])
+      total_files = impl_ops |> Enum.map(&(&1[:files_changed] || 0)) |> Enum.sum()
+
+      if impl_ops != [] and total_files == 0 do
+        Logger.warning(
+          "Quest #{mission_id}: no implementation ops produced file changes — marking as failed"
+        )
+
+        fail_quest(mission_id, "No code changes produced by any implementation op")
+      else
+        do_complete_quest(mission_id)
+      end
+    end
+  end
+
+  defp do_complete_quest(mission_id) do
     GiTF.Telemetry.end_current_span()
 
     with {:ok, _} <-
