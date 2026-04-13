@@ -1279,105 +1279,45 @@ defmodule GiTF.Major.Orchestrator do
       Archive.put(:missions, updated)
     end
 
-    # Extract specific gaps from validation artifact
-    gaps = Map.get(validation, "gaps", [])
+    # Build a single fix description from all validation findings
+    fix_description = build_fix_description(mission, validation)
 
-    unmet =
-      (Map.get(validation, "requirements_met", []) || [])
-      |> Enum.filter(fn r -> Map.get(r, "met") == false end)
+    # Find the implementation ghost's worktree to reuse — the fix ghost should
+    # work in the same worktree so it sees the existing code and can iterate
+    shell = find_implementation_shell(mission)
 
-    # Collect file paths from previous implementation ops for context
-    impl_files = get_mission_changed_files(mission)
+    fix_title = "Fix validation issues (attempt #{fix_attempt + 1})"
 
-    fix_specs =
-      cond do
-        # Create fix ops from unmet requirements
-        unmet != [] ->
-          Enum.map(unmet, fn req ->
-            evidence = Map.get(req, "evidence", "No details")
-            mentioned_files = extract_file_paths(evidence)
+    case GiTF.Ops.create(%{
+           title: fix_title,
+           description: fix_description,
+           mission_id: mission.id,
+           sector_id: mission.sector_id,
+           phase_job: false,
+           skip_verification: false,
+           target_files: get_mission_changed_files(mission)
+         }) do
+      {:ok, fix_op} ->
+        GiTF.Missions.transition_phase(
+          mission.id,
+          "implementation",
+          "Validation fix attempt #{fix_attempt + 1}"
+        )
 
-            %{
-              "title" =>
-                "Fix: #{Map.get(req, "req_id", "unknown")} — #{String.slice(evidence, 0, 80)}",
-              "description" => """
-              The validation phase found this requirement was NOT met.
+        # Spawn the fix ghost in the same worktree if available
+        if shell do
+          spawn_fix_in_worktree(fix_op, shell, mission)
+        else
+          # Fallback: use normal spawn (new worktree)
+          {:ok, mission} = GiTF.Missions.get(mission.id)
+          spawn_implementation_jobs(mission)
+        end
 
-              Requirement: #{Map.get(req, "req_id", "unknown")}
-              Evidence: #{evidence}
+        {:ok, "implementation"}
 
-              #{format_file_context(mentioned_files, impl_files)}
-              ## Instructions
-              1. Read the files mentioned above to understand the current code
-              2. Make the minimal, focused changes needed to fix this specific issue
-              3. Verify your fix is correct
-              4. Commit your changes
-              """,
-              "target_files" => Enum.uniq(mentioned_files ++ impl_files),
-              "op_type" => "fix"
-            }
-          end)
-
-        # Create fix ops from gap descriptions
-        gaps != [] ->
-          Enum.map(gaps, fn gap ->
-            gap_text = to_string(gap)
-            mentioned_files = extract_file_paths(gap_text)
-
-            %{
-              "title" => "Fix validation gap: #{String.slice(gap_text, 0, 60)}",
-              "description" => """
-              The validation phase identified this gap:
-
-              #{gap_text}
-
-              #{format_file_context(mentioned_files, impl_files)}
-              Fix this specific issue. Read the relevant files, make minimal changes, and commit.
-              """,
-              "target_files" => Enum.uniq(mentioned_files ++ impl_files),
-              "op_type" => "fix"
-            }
-          end)
-
-        # Fallback: single fix op from summary + raw output for context
-        true ->
-          summary = Map.get(validation, "summary", "Validation failed")
-          raw = Map.get(validation, "raw_output", "")
-          # Include the first 2000 chars of raw validator output so the fix ghost
-          # has actual feedback, not just "Validation failed"
-          raw_context = if raw != "", do: String.slice(raw, 0, 2000), else: ""
-
-          %{
-            "title" => "Fix validation issues: #{String.slice(summary, 0, 60)}",
-            "description" => """
-            Validation failed: #{summary}
-
-            #{format_file_context([], impl_files)}
-            #{if raw_context != "", do: "## Validator Feedback\n\n#{raw_context}\n", else: ""}
-            Fix all identified issues. Read the relevant files, make changes, and commit.
-            """,
-            "target_files" => impl_files,
-            "op_type" => "fix"
-          }
-          |> List.wrap()
-      end
-
-    if fix_specs != [] do
-      Planner.create_jobs_from_specs(mission.id, fix_specs)
-
-      # Transition back to implementation to run the fix ops
-      GiTF.Missions.transition_phase(
-        mission.id,
-        "implementation",
-        "Validation fix attempt #{fix_attempt + 1}"
-      )
-
-      {:ok, mission} = GiTF.Missions.get(mission.id)
-      spawn_implementation_jobs(mission)
-      {:ok, "implementation"}
-    else
-      Logger.warning("Quest #{mission.id}: no fixable issues extracted from validation")
-      fail_quest(mission.id, "Validation failed, no fixable issues identified")
+      {:error, reason} ->
+        Logger.warning("Quest #{mission.id}: failed to create fix op: #{inspect(reason)}")
+        fail_quest(mission.id, "Could not create fix op")
     end
   rescue
     e ->
@@ -1386,6 +1326,118 @@ defmodule GiTF.Major.Orchestrator do
       )
 
       fail_quest(mission.id, "Validation fix attempt crashed")
+  end
+
+  # Build a comprehensive fix description from validation findings
+  defp build_fix_description(mission, validation) do
+    impl_files = get_mission_changed_files(mission)
+
+    gaps = Map.get(validation, "gaps", [])
+
+    unmet =
+      (Map.get(validation, "requirements_met", []) || [])
+      |> Enum.filter(fn r -> Map.get(r, "met") == false end)
+
+    raw = Map.get(validation, "raw_output", "")
+    summary = Map.get(validation, "summary", "")
+
+    sections = ["## Validation Feedback\n"]
+
+    sections =
+      if unmet != [] do
+        req_lines =
+          Enum.map(unmet, fn req ->
+            id = Map.get(req, "req_id", "?")
+            evidence = Map.get(req, "evidence", "No details")
+            files = extract_file_paths(evidence)
+            file_hint = if files != [], do: " (#{Enum.join(files, ", ")})", else: ""
+            "- **#{id}**: #{evidence}#{file_hint}"
+          end)
+
+        sections ++ ["### Unmet Requirements\n"] ++ req_lines ++ [""]
+      else
+        sections
+      end
+
+    sections =
+      if gaps != [] do
+        gap_lines = Enum.map(gaps, fn gap -> "- #{gap}" end)
+        sections ++ ["### Gaps\n"] ++ gap_lines ++ [""]
+      else
+        sections
+      end
+
+    sections =
+      if summary != "" do
+        sections ++ ["### Summary\n", summary, ""]
+      else
+        sections
+      end
+
+    sections =
+      if unmet == [] and gaps == [] and raw != "" do
+        sections ++ ["### Raw Validator Output\n", String.slice(raw, 0, 2000), ""]
+      else
+        sections
+      end
+
+    sections =
+      if impl_files != [] do
+        sections ++ ["### Files Changed\n", Enum.join(impl_files, ", "), ""]
+      else
+        sections
+      end
+
+    instructions = """
+    ## Instructions
+
+    Your previous implementation was reviewed and the issues above were found.
+    You are working in the SAME worktree with your previous changes still present.
+
+    1. Review the feedback above carefully
+    2. Read the specific files mentioned to understand what needs to change
+    3. Make the minimal fixes needed to address each issue
+    4. Verify your fixes are correct
+    5. Commit your changes
+    """
+
+    Enum.join(sections, "\n") <> "\n" <> instructions
+  end
+
+  # Find a shell with an on-disk worktree from the mission's implementation ops
+  defp find_implementation_shell(mission) do
+    ghost_ids =
+      mission.ops
+      |> Enum.reject(& &1[:phase_job])
+      |> Enum.map(& &1[:ghost_id])
+      |> Enum.reject(&is_nil/1)
+
+    # Prefer the most recent implementation ghost's shell
+    ghost_ids
+    |> Enum.reverse()
+    |> Enum.find_value(fn ghost_id ->
+      Archive.find_one(:shells, fn s ->
+        s.ghost_id == ghost_id and
+          s[:worktree_path] != nil and
+          File.dir?(s.worktree_path)
+      end)
+    end)
+  end
+
+  # Spawn a fix ghost in an existing worktree so it inherits the implementation's code
+  defp spawn_fix_in_worktree(fix_op, shell, mission) do
+    case GiTF.gitf_dir() do
+      {:ok, gitf_root} ->
+        case GiTF.Ghosts.spawn_in_worktree(fix_op.id, shell.id, mission.sector_id, gitf_root) do
+          {:ok, _ghost} -> :ok
+          {:error, _} -> spawn_implementation_jobs(mission)
+        end
+
+      _ ->
+        spawn_implementation_jobs(mission)
+    end
+  rescue
+    _ -> spawn_implementation_jobs(mission)
   end
 
   # Extract file paths from text (looks for common patterns like path/to/file.ext)
@@ -1398,12 +1450,6 @@ defmodule GiTF.Major.Orchestrator do
 
   defp extract_file_paths(_), do: []
 
-  defp format_file_context(mentioned, impl) do
-    parts = []
-    parts = if mentioned != [], do: parts ++ ["Files mentioned: #{Enum.join(mentioned, ", ")}"], else: parts
-    parts = if impl != [], do: parts ++ ["Files from previous implementation: #{Enum.join(impl, ", ")}"], else: parts
-    if parts != [], do: Enum.join(parts, "\n") <> "\n", else: ""
-  end
 
   # -- Simplify Phase: 3 parallel agents (reuse, quality, efficiency) ----------
 

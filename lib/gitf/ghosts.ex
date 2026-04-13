@@ -157,6 +157,39 @@ defmodule GiTF.Ghosts do
   end
 
   @doc """
+  Spawns a new ghost for an op in an existing worktree (shell).
+
+  Used for validation fix ops — the fix ghost works in the same worktree
+  as the original implementation ghost, preserving code changes and context.
+
+  Returns `{:ok, ghost}` or `{:error, reason}`.
+  """
+  @spec spawn_in_worktree(String.t(), String.t(), String.t(), String.t()) ::
+          {:ok, map()} | {:error, term()}
+  def spawn_in_worktree(op_id, shell_id, sector_id, gitf_root) do
+    with {:ok, shell} <- GiTF.Shell.get(shell_id),
+         :ok <- validate_worktree_exists(shell),
+         {:ok, ghost} <- create_ghost_record(generate_ghost_name(), op_id),
+         {:ok, _} <- GiTF.Shell.adopt(shell_id, ghost.id),
+         {:assign, :ok} <- {:assign, assign_job(op_id, ghost.id)},
+         {:ok, _pid} <-
+           start_worker(ghost.id, op_id, sector_id, gitf_root,
+             revive: true,
+             shell_id: shell_id
+           ) do
+      Logger.info("Ghost #{ghost.id} spawned in existing worktree for fix op #{op_id}")
+      {:ok, ghost}
+    else
+      {step, {:error, reason}} ->
+        Logger.error("spawn_in_worktree failed at #{step}: #{inspect(reason)}")
+        {:error, reason}
+
+      {:error, reason} ->
+        {:error, reason}
+    end
+  end
+
+  @doc """
   Revives a dead ghost by spawning a new ghost into its existing worktree.
 
   The dead ghost must be "stopped" or "crashed". Its shell and worktree are
