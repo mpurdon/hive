@@ -83,10 +83,7 @@ defmodule GiTF.Sync do
     title = if op, do: op.title, else: "gitf: #{shell.branch}"
 
     base_body = if op, do: op.description || "", else: ""
-
-    body =
-      base_body <>
-        "\n\n---\n*The net is vast and infinite.* — Ghost in the Shell\n"
+    body = GiTF.Signature.sign(base_body)
 
     # If sector has GitHub API config, prefer that
     if Map.get(sector, :github_owner) && Map.get(sector, :github_repo) && op do
