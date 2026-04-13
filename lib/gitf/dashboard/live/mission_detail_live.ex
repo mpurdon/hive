@@ -857,8 +857,8 @@ defmodule GiTF.Dashboard.MissionDetailLive do
   defp normalise_phase("awaiting_approval"), do: "sync"
   defp normalise_phase(phase), do: phase
 
-  # Phases that fast-path missions actually execute
-  @fast_phases ~w(pending implementation validation sync scoring completed)
+  # Fast mode skips only the review phase (single design, no comparison needed)
+  @fast_skipped_phases ~w(review)
 
   defp phase_done?(mission, phase) do
     current = normalise_phase(Map.get(mission, :current_phase, "pending"))
@@ -868,7 +868,7 @@ defmodule GiTF.Dashboard.MissionDetailLive do
   end
 
   defp phase_skipped?(mission, phase) do
-    Map.get(mission, :pipeline_mode) == "fast" and phase not in @fast_phases
+    Map.get(mission, :pipeline_mode) == "fast" and phase in @fast_skipped_phases
   end
 
   defp phase_step_class(mission, phase) do

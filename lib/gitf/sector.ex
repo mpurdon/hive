@@ -350,23 +350,25 @@ defmodule GiTF.Sector do
     _ -> "auto_merge"
   end
 
+  # When in doubt, prefer PRs — they're safe and reviewable.
+  # Only use auto_merge when we can confirm no branch protection (404).
   defp check_branch_protection(client, owner, repo, branch) do
     case Req.get(client,
            url: "/repos/#{owner}/#{repo}/branches/#{branch}/protection"
          ) do
       {:ok, %{status: 200}} ->
-        # Branch is protected — use PR workflow
         "pr_branch"
 
       {:ok, %{status: 404}} ->
-        # No protection rules — direct merge is fine
+        # Confirmed: no protection rules — direct merge is safe
         "auto_merge"
 
       _ ->
-        "auto_merge"
+        # Can't confirm unprotected — default to PR for safety
+        "pr_branch"
     end
   rescue
-    _ -> "auto_merge"
+    _ -> "pr_branch"
   end
 
   defp detect_github_remote(repo_path) do
