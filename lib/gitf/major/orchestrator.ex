@@ -589,13 +589,8 @@ defmodule GiTF.Major.Orchestrator do
           "error" => inspect(reason)
         })
 
-        Logger.warning(
-          "Quest #{mission.id} sync failed: #{inspect(reason)}, completing as failed"
-        )
-
-        GiTF.Missions.transition_phase(mission.id, "completed", "Sync failed: #{inspect(reason)}")
-        GiTF.Missions.update_status!(mission.id)
-        {:ok, "completed"}
+        Logger.warning("Quest #{mission.id} sync failed: #{inspect(reason)}")
+        fail_quest(mission.id, "Sync failed: #{inspect(reason)}")
     end
   end
 

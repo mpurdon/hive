@@ -327,9 +327,14 @@ defmodule GiTF.Sync do
       mission.ops
       |> Enum.map(& &1.ghost_id)
       |> Enum.reject(&is_nil/1)
+      |> MapSet.new()
 
+    # Find shells for this mission's ghosts that still have worktrees on disk.
+    # Ghosts may have stopped by the time sync runs, so don't require "active" status.
     Archive.filter(:shells, fn c ->
-      c.ghost_id in ghost_ids and c.status == "active"
+      c.ghost_id in ghost_ids and
+        c[:worktree_path] != nil and
+        File.dir?(c.worktree_path)
     end)
   end
 
