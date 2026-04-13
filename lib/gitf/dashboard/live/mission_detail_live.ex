@@ -46,6 +46,7 @@ defmodule GiTF.Dashboard.MissionDetailLive do
          |> assign(:duration, nil)
          |> assign(:phase_durations, %{})
          |> assign(:confirm_remove, false)
+         |> assign(:removing, false)
          |> compute_op_stats()
          |> reload()}
 
@@ -80,6 +81,20 @@ defmodule GiTF.Dashboard.MissionDetailLive do
          socket
          |> assign(:report_loading, false)
          |> put_flash(:error, "Report failed: #{inspect(reason)}")}
+    end
+  end
+
+  def handle_info(:generate_report_for_phase, socket) do
+    if is_nil(socket.assigns.report) do
+      mission_id = socket.assigns.mission.id
+
+      Task.async(fn ->
+        {:report, GiTF.Report.generate(mission_id)}
+      end)
+
+      {:noreply, assign(socket, :report_loading, true)}
+    else
+      {:noreply, socket}
     end
   end
 
@@ -123,6 +138,7 @@ defmodule GiTF.Dashboard.MissionDetailLive do
 
   def handle_event("remove", _params, socket) do
     mission_id = socket.assigns.mission.id
+    socket = assign(socket, :removing, true)
 
     case GiTF.Missions.kill(mission_id) do
       :ok ->
@@ -137,6 +153,7 @@ defmodule GiTF.Dashboard.MissionDetailLive do
         {:noreply,
          socket
          |> assign(:confirm_remove, false)
+         |> assign(:removing, false)
          |> put_flash(:error, "Failed to remove: #{inspect(reason)}")}
     end
   end
@@ -162,8 +179,24 @@ defmodule GiTF.Dashboard.MissionDetailLive do
   end
 
   def handle_event("select_phase", %{"phase" => phase}, socket) do
-    artifact = GiTF.Missions.get_artifact(socket.assigns.mission.id, phase)
-    {:noreply, assign(socket, selected_phase: phase, artifact: artifact)}
+    mission = socket.assigns.mission
+
+    case phase do
+      "planning" ->
+        {:noreply, push_navigate(socket, to: "/dashboard/missions/#{mission.id}/plan")}
+
+      "design" ->
+        {:noreply, push_navigate(socket, to: "/dashboard/missions/#{mission.id}/design")}
+
+      "completed" ->
+        # Auto-generate report when clicking completed phase
+        send(self(), :generate_report_for_phase)
+        {:noreply, assign(socket, selected_phase: phase, artifact: nil)}
+
+      _ ->
+        artifact = GiTF.Missions.get_artifact(mission.id, phase)
+        {:noreply, assign(socket, selected_phase: phase, artifact: artifact)}
+    end
   end
 
   def handle_event("reset_op", %{"id" => op_id}, socket) do
@@ -741,14 +774,6 @@ defmodule GiTF.Dashboard.MissionDetailLive do
         <div class="panel" style="padding:0.85rem 1rem">
           <div class="panel-title" style="font-size:0.85rem; margin-bottom:0.75rem; padding-bottom:0.4rem">Actions</div>
           <div class="sidebar-actions">
-            <%!-- View buttons --%>
-            <%= if has_artifacts?(@mission) do %>
-              <a href={"/dashboard/missions/#{@mission.id}/plan"} class="btn btn-purple">View Plans</a>
-            <% end %>
-            <%= if has_design_artifacts?(@mission) do %>
-              <a href={"/dashboard/missions/#{@mission.id}/design"} class="btn btn-purple">View Designs</a>
-            <% end %>
-
             <%!-- Status-specific --%>
             <%= case Map.get(@mission, :status, "pending") do %>
               <% "pending" -> %>
@@ -791,8 +816,15 @@ defmodule GiTF.Dashboard.MissionDetailLive do
               <div style="margin-top:0.75rem; padding:0.75rem; background:#1c1010; border:1px solid #f85149; border-radius:6px">
                 <p style="color:#f85149; font-size:0.85rem; margin:0 0 0.5rem">Permanently remove this mission and all its data? This cannot be undone.</p>
                 <div style="display:flex; gap:0.5rem">
-                  <button phx-click="remove" class="btn btn-red">Yes, Remove</button>
-                  <button phx-click="cancel_remove" class="btn btn-grey">Cancel</button>
+                  <button phx-click="remove" class="btn btn-red" disabled={@removing}>
+                    <%= if @removing do %>
+                      <span class="loading-spinner" style="width:14px;height:14px;border-width:2px"></span>
+                      Removing...
+                    <% else %>
+                      Yes, Remove
+                    <% end %>
+                  </button>
+                  <button phx-click="cancel_remove" class="btn btn-grey" disabled={@removing}>Cancel</button>
                 </div>
               </div>
             <% end %>
@@ -919,20 +951,6 @@ defmodule GiTF.Dashboard.MissionDetailLive do
 
   defp format_tokens_mb(_), do: "-"
 
-  defp has_artifacts?(mission) do
-    artifacts = Map.get(mission, :artifacts, %{})
-    is_map(artifacts) and map_size(artifacts) > 0
-  end
-
-  defp has_design_artifacts?(mission) do
-    artifacts = Map.get(mission, :artifacts, %{})
-
-    is_map(artifacts) and
-      Enum.any?(
-        ["design_minimal", "design_normal", "design_complex", "design"],
-        &Map.has_key?(artifacts, &1)
-      )
-  end
 
   defp context_gauge_color(pct) when pct >= 45, do: "#ef4444"
   defp context_gauge_color(pct) when pct >= 35, do: "#f59e0b"
