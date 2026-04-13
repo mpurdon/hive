@@ -1279,13 +1279,9 @@ defmodule GiTF.Major.Orchestrator do
       Archive.put(:missions, updated)
     end
 
-    # Build a single fix description from all validation findings
-    fix_description = build_fix_description(mission, validation)
-
-    # Find the implementation ghost's worktree to reuse — the fix ghost should
-    # work in the same worktree so it sees the existing code and can iterate
+    impl_files = get_mission_changed_files(mission)
+    fix_description = build_fix_description(mission, validation, impl_files)
     shell = find_implementation_shell(mission)
-
     fix_title = "Fix validation issues (attempt #{fix_attempt + 1})"
 
     case GiTF.Ops.create(%{
@@ -1295,7 +1291,7 @@ defmodule GiTF.Major.Orchestrator do
            sector_id: mission.sector_id,
            phase_job: false,
            skip_verification: false,
-           target_files: get_mission_changed_files(mission)
+           target_files: impl_files
          }) do
       {:ok, fix_op} ->
         GiTF.Missions.transition_phase(
@@ -1329,8 +1325,7 @@ defmodule GiTF.Major.Orchestrator do
   end
 
   # Build a comprehensive fix description from validation findings
-  defp build_fix_description(mission, validation) do
-    impl_files = get_mission_changed_files(mission)
+  defp build_fix_description(_mission, validation, impl_files) do
 
     gaps = Map.get(validation, "gaps", [])
 

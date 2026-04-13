@@ -171,7 +171,7 @@ defmodule GiTF.Ghosts do
          :ok <- validate_worktree_exists(shell),
          {:ok, ghost} <- create_ghost_record(generate_ghost_name(), op_id),
          {:ok, _} <- GiTF.Shell.adopt(shell_id, ghost.id),
-         {:assign, :ok} <- {:assign, assign_job(op_id, ghost.id)},
+         :ok <- assign_job(op_id, ghost.id),
          {:ok, _pid} <-
            start_worker(ghost.id, op_id, sector_id, gitf_root,
              revive: true,
@@ -179,13 +179,6 @@ defmodule GiTF.Ghosts do
            ) do
       Logger.info("Ghost #{ghost.id} spawned in existing worktree for fix op #{op_id}")
       {:ok, ghost}
-    else
-      {step, {:error, reason}} ->
-        Logger.error("spawn_in_worktree failed at #{step}: #{inspect(reason)}")
-        {:error, reason}
-
-      {:error, reason} ->
-        {:error, reason}
     end
   end
 
