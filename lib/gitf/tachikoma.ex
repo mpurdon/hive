@@ -1109,25 +1109,16 @@ defmodule GiTF.Tachikoma do
     end
   end
 
-  # -- Audit & improvement pipeline ------------------------------------
-
-  @verification_max_attempts 3
+  # -- Quality Gate (single-shot, delegates to Togusa for fixes) ----------
 
   defp do_review_job(op_id, _ghost_id, shell_id) do
-    do_review_job_attempt(op_id, shell_id, 1)
-  rescue
-    e ->
-      Logger.error("Tachikoma: review crashed for op #{op_id}: #{Exception.message(e)}")
-  end
-
-  defp do_review_job_attempt(op_id, shell_id, attempt) do
-    case GiTF.Audit.verify_job(op_id) do
+    # Run quality gate once — no retries against unchanged code
+    case GiTF.Togusa.run_quality_gate(op_id) do
       {:ok, :pass, result} ->
-        Logger.info("Tachikoma: op #{op_id} passed verification (attempt #{attempt})")
+        Logger.info("Tachikoma: op #{op_id} passed quality gate")
         update_reputation(op_id)
         score_model(op_id, result)
 
-        # Forward to sync queue
         Phoenix.PubSub.broadcast(
           GiTF.PubSub,
           "sync:queue",
@@ -1135,223 +1126,46 @@ defmodule GiTF.Tachikoma do
         )
 
       {:ok, :fail, result} ->
-        if attempt < @verification_max_attempts do
-          Logger.info(
-            "Tachikoma: op #{op_id} failed verification (attempt #{attempt}/#{@verification_max_attempts}), retrying"
-          )
+        Logger.warning("Tachikoma: op #{op_id} failed quality gate")
 
-          Process.sleep(attempt * 2_000)
-          do_review_job_attempt(op_id, shell_id, attempt + 1)
-        else
-          Logger.warning("Tachikoma: op #{op_id} failed verification after #{attempt} attempts")
+        # Load or create fix context for this op
+        fix_ctx = load_fix_context(op_id)
+
+        if GiTF.Togusa.FixContext.exhausted?(fix_ctx) do
+          Logger.warning("Tachikoma: op #{op_id} fix attempts exhausted, rejecting")
+          GiTF.Ops.reject(op_id)
           update_reputation(op_id)
           score_model(op_id, result)
-          reject_and_improve(op_id, shell_id, result)
+        else
+          # Learn from failure (updates agent profile)
+          GiTF.Togusa.learn_from_failure(op_id, result)
+
+          # Spawn fix ghost in same worktree with accumulated context
+          GiTF.Togusa.request_fix(op_id, shell_id, result, fix_ctx)
         end
 
       {:error, reason} ->
-        if attempt < @verification_max_attempts do
-          Logger.info(
-            "Tachikoma: verification error for op #{op_id} (attempt #{attempt}/#{@verification_max_attempts}): #{inspect(reason)}, retrying"
-          )
-
-          Process.sleep(attempt * 3_000)
-          do_review_job_attempt(op_id, shell_id, attempt + 1)
-        else
-          Logger.error(
-            "Tachikoma: verification error for op #{op_id} after #{attempt} attempts: #{inspect(reason)}"
-          )
-
-          reject_and_improve(op_id, shell_id, %{output: "Audit error: #{inspect(reason)}"})
-        end
+        Logger.error("Tachikoma: quality gate error for op #{op_id}: #{inspect(reason)}")
+        GiTF.Ops.reject(op_id)
     end
-  end
-
-  defp reject_and_improve(op_id, shell_id, audit_result) do
-    # 1. Reject the op
-    GiTF.Ops.reject(op_id)
-
-    # 2. Clean up the worktree
-    cleanup_cell(shell_id)
-
-    # 3. Analyze the failure
-    feedback = extract_feedback(audit_result)
-    analysis = analyze_failure(op_id, feedback)
-
-    # 4. Improve agent profile
-    improve_from_failure(op_id, analysis)
-
-    # 5. Create retry op if under max retries
-    create_retry_if_allowed(op_id, feedback)
   rescue
     e ->
-      Logger.error(
-        "Tachikoma: reject_and_improve failed for op #{op_id}: #{Exception.message(e)}"
-      )
-
-      GiTF.Telemetry.emit([:gitf, :tachikoma, :review_failed], %{}, %{
-        op_id: op_id,
-        step: :reject_and_improve,
-        reason: Exception.message(e)
-      })
+      Logger.error("Tachikoma: review crashed for op #{op_id}: #{Exception.message(e)}")
   end
 
-  defp cleanup_cell(nil), do: :ok
-
-  defp cleanup_cell(shell_id) do
-    GiTF.Shell.remove(shell_id, force: true)
-  rescue
-    _ -> :ok
-  end
-
-  defp extract_feedback(result) do
-    Map.get(result, :output) ||
-      Map.get(result, "output") ||
-      inspect(result) |> String.slice(0, 500)
-  end
-
-  defp analyze_failure(op_id, feedback) do
-    case GiTF.Intel.FailureAnalysis.analyze_failure(op_id, feedback) do
-      {:ok, analysis} -> analysis
-      _ -> nil
-    end
-  rescue
-    _ -> nil
-  end
-
-  defp improve_from_failure(op_id, analysis) do
-    with {:ok, op} <- GiTF.Ops.get(op_id) do
-      case GiTF.Archive.get(:sectors, op.sector_id) do
-        nil -> :ok
-        sector when is_binary(sector.path) -> improve_agent_profile(sector.path, analysis, op)
-        _ -> :ok
-      end
-    end
-  rescue
-    _ -> :ok
-  end
-
-  defp improve_agent_profile(sector_path, analysis, op) do
-    alias GiTF.AgentProfile.FailureModes
-
-    agents_dir = Path.join(sector_path, ".claude/agents")
-
-    if File.dir?(agents_dir) do
-      agents_dir
-      |> File.ls!()
-      |> Enum.filter(&String.ends_with?(&1, ".md"))
-      |> Enum.each(fn filename ->
-        path = Path.join(agents_dir, filename)
-        content = File.read!(path)
-        existing_modes = parse_existing_learned_modes(content)
-
-        failure_analysis = build_failure_analysis(analysis, op)
-        append_learned_mode(path, content, failure_analysis, existing_modes)
-      end)
-
-      Logger.info("Tachikoma: improved agent profile at #{sector_path} with failure lesson")
-    end
-  rescue
-    e -> Logger.debug("Agent profile improvement failed: #{Exception.message(e)}")
-  end
-
-  defp build_failure_analysis(nil, op) do
-    %{
-      type: :unknown,
-      root_cause: "Audit failed for: #{op.title}",
-      suggestions: ["Ensure changes pass all quality gates before completion"]
-    }
-  end
-
-  defp build_failure_analysis(analysis, _job) do
-    %{
-      type: Map.get(analysis, :failure_type, :unknown),
-      root_cause: Map.get(analysis, :root_cause, "Unknown"),
-      suggestions: Map.get(analysis, :suggestions, [])
-    }
-  end
-
-  defp append_learned_mode(path, content, failure_analysis, existing_modes) do
-    alias GiTF.AgentProfile.FailureModes
-
-    case FailureModes.learn_from_failure(failure_analysis, existing_modes) do
-      {:ok, mode} ->
-        section_header =
-          if !String.contains?(content, "## Lessons Learned") do
-            "\n\n## Lessons Learned\n\n"
-          else
-            "\n"
-          end
-
-        learned_text = FailureModes.format_learned_mode(mode)
-        File.write!(path, content <> section_header <> learned_text)
-
-      :skip ->
-        Logger.debug("Tachikoma: skipping duplicate failure mode for #{Path.basename(path)}")
-    end
-  end
-
-  defp parse_existing_learned_modes(content) do
-    # Extract learned mode keys from existing "### LEARNED: KEY (from failure)" lines
-    ~r/### LEARNED: (\S+) \(from failure\)/
-    |> Regex.scan(content)
-    |> Enum.map(fn [_, name] ->
-      key = name |> String.downcase() |> String.to_atom()
-      %{key: key, name: name, description: "", severity: :high}
-    end)
-  end
-
-  defp create_retry_if_allowed(op_id, feedback) do
+  defp load_fix_context(op_id) do
     case GiTF.Ops.get(op_id) do
       {:ok, op} ->
-        retry_count = Map.get(op, :retry_count, 0)
-
-        if retry_count < 3 do
-          case GiTF.Ops.create_retry(op_id, feedback: feedback) do
-            {:ok, retry_job} ->
-              Logger.info(
-                "Tachikoma: created retry op #{retry_job.id} for #{op_id} (attempt #{retry_count + 1})"
-              )
-
-              GiTF.Link.send(
-                "tachikoma",
-                "major",
-                "job_retry_created",
-                "Retry #{retry_job.id} for failed op #{op_id} (attempt #{retry_count + 1})"
-              )
-
-            {:error, :max_retries_exceeded} ->
-              Logger.warning("Tachikoma: op #{op_id} exhausted retries")
-
-              GiTF.Link.send(
-                "tachikoma",
-                "major",
-                "job_exhausted_retries",
-                "Job #{op_id} exhausted all retries"
-              )
-
-            {:error, reason} ->
-              Logger.warning("Tachikoma: retry creation failed for #{op_id}: #{inspect(reason)}")
-          end
-        else
-          Logger.warning(
-            "Tachikoma: op #{op_id} already at #{retry_count} retries, no more attempts"
-          )
-
-          GiTF.Link.send(
-            "tachikoma",
-            "major",
-            "job_exhausted_retries",
-            "Job #{op_id} exhausted #{retry_count} retries"
-          )
+        case op[:fix_context] do
+          nil -> GiTF.Togusa.FixContext.new(op[:fix_of] || op_id)
+          ctx_map -> GiTF.Togusa.FixContext.from_map(ctx_map) || GiTF.Togusa.FixContext.new(op_id)
         end
 
       _ ->
-        :ok
+        GiTF.Togusa.FixContext.new(op_id)
     end
-  rescue
-    _ -> :ok
   end
+
 
   defp score_model(op_id, audit_result) do
     with {:ok, op} <- GiTF.Ops.get(op_id) do

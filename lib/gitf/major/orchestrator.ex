@@ -1249,62 +1249,76 @@ defmodule GiTF.Major.Orchestrator do
         end
 
       true ->
-        # Validation failed — attempt targeted fixes before giving up
-        fix_attempt = Map.get(mission, :validation_fix_count, 0)
+        # Validation failed — use Togusa's fix context for accumulated tracking
+        fix_ctx = load_mission_fix_context(mission)
 
-        max_fixes = max_fix_attempts_for(mission.sector_id)
-
-        if fix_attempt < max_fixes do
-          Logger.info(
-            "Quest #{mission.id} validation failed (attempt #{fix_attempt + 1}/#{max_fixes}), creating fix ops"
-          )
-
-          attempt_validation_fixes(mission, validation, fix_attempt)
-        else
+        if GiTF.Togusa.FixContext.exhausted?(fix_ctx) do
           Logger.warning(
-            "Quest #{mission.id} validation failed after #{fix_attempt} fix attempts: #{validation["summary"]}"
+            "Quest #{mission.id} validation failed after #{fix_ctx.attempt} fix attempts"
           )
 
-          fail_quest(mission.id, "Validation failed after #{fix_attempt} fix attempts")
+          fail_quest(mission.id, "Validation failed after #{fix_ctx.attempt} fix attempts")
+        else
+          Logger.info(
+            "Quest #{mission.id} validation failed (attempt #{fix_ctx.attempt + 1}/#{fix_ctx.max_attempts})"
+          )
+
+          attempt_validation_fixes(mission, validation, fix_ctx)
         end
     end
   end
 
-  defp attempt_validation_fixes(mission, validation, fix_attempt) do
-    # Increment fix attempt counter
-    quest_record = Archive.get(:missions, mission.id)
-
-    if quest_record do
-      updated = Map.put(quest_record, :validation_fix_count, fix_attempt + 1)
-      Archive.put(:missions, updated)
-    end
-
+  defp attempt_validation_fixes(mission, validation, %GiTF.Togusa.FixContext{} = fix_ctx) do
     impl_files = get_mission_changed_files(mission)
+
+    # Build fix description with full validation feedback
     fix_description = build_fix_description(mission, validation, impl_files)
+
+    # Record this attempt in the fix context
+    fix_ctx =
+      GiTF.Togusa.FixContext.record_attempt(
+        fix_ctx,
+        :goal_fulfillment,
+        mission.id,
+        validation,
+        fix_description
+      )
+
+    # Persist updated fix context on the mission record
+    store_mission_fix_context(mission.id, fix_ctx)
+
+    # Learn from failure (agent profile improvement — previously missing from orchestrator)
+    learn_from_validation_failure(mission, validation)
+
     shell = find_implementation_shell(mission)
-    fix_title = "Fix validation issues (attempt #{fix_attempt + 1})"
+
+    # Include fix history in the prompt so the ghost sees all prior attempts
+    history_prompt = GiTF.Togusa.FixContext.format_for_prompt(fix_ctx)
+    full_description = fix_description <> "\n" <> history_prompt
+
+    fix_title = "Fix validation issues (attempt #{fix_ctx.attempt})"
 
     case GiTF.Ops.create(%{
            title: fix_title,
-           description: fix_description,
+           description: full_description,
            mission_id: mission.id,
            sector_id: mission.sector_id,
            phase_job: false,
            skip_verification: false,
+           fix_context: GiTF.Togusa.FixContext.to_map(fix_ctx),
+           fix_of: fix_ctx.original_op_id,
            target_files: impl_files
          }) do
       {:ok, fix_op} ->
         GiTF.Missions.transition_phase(
           mission.id,
           "implementation",
-          "Validation fix attempt #{fix_attempt + 1}"
+          "Validation fix attempt #{fix_ctx.attempt}"
         )
 
-        # Spawn the fix ghost in the same worktree if available
         if shell do
           spawn_fix_in_worktree(fix_op, shell, mission)
         else
-          # Fallback: use normal spawn (new worktree)
           {:ok, mission} = GiTF.Missions.get(mission.id)
           spawn_implementation_jobs(mission)
         end
@@ -1433,6 +1447,39 @@ defmodule GiTF.Major.Orchestrator do
     end
   rescue
     _ -> spawn_implementation_jobs(mission)
+  end
+
+  defp load_mission_fix_context(mission) do
+    case Map.get(mission, :fix_context) do
+      nil ->
+        max = max_fix_attempts_for(mission.sector_id)
+        GiTF.Togusa.FixContext.new(mission.id, max_attempts: max)
+
+      ctx_map ->
+        GiTF.Togusa.FixContext.from_map(ctx_map) ||
+          GiTF.Togusa.FixContext.new(mission.id, max_attempts: max_fix_attempts_for(mission.sector_id))
+    end
+  end
+
+  defp store_mission_fix_context(mission_id, fix_ctx) do
+    case Archive.get(:missions, mission_id) do
+      nil -> :ok
+      record -> Archive.put(:missions, Map.put(record, :fix_context, GiTF.Togusa.FixContext.to_map(fix_ctx)))
+    end
+  end
+
+  defp learn_from_validation_failure(mission, validation) do
+    # Find the most recent implementation op to attribute the failure to
+    impl_op =
+      (mission.ops || [])
+      |> Enum.reject(& &1[:phase_job])
+      |> Enum.max_by(& &1[:inserted_at], fn -> nil end)
+
+    if impl_op do
+      GiTF.Togusa.learn_from_failure(impl_op.id, validation)
+    end
+  rescue
+    _ -> :ok
   end
 
   # Extract file paths from text (looks for common patterns like path/to/file.ext)
