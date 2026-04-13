@@ -43,54 +43,51 @@ defmodule GiTF.Major.Orchestrator do
       force = Keyword.get(opts, :force_fast_path, false)
       force_full = Keyword.get(opts, :force_full_pipeline, false)
 
-      # Fast path: skip all phases for focused tasks (unless user forced full pipeline)
-      if not force_full and FastPath.eligible?(mission, force: force) do
-        Logger.info("Quest #{mission_id} eligible for fast path, skipping phase pipeline")
-        GiTF.Missions.update(mission_id, %{pipeline_mode: "fast"})
-        FastPath.execute(mission_id)
-      else
-        planning_artifact = GiTF.Missions.get_artifact(mission_id, "planning")
-
-        # Check for existing active ops (restart scenario — don't create duplicates)
-        active_ops =
-          Enum.filter(mission.ops, &(&1.status in ["pending", "running", "assigned", "blocked"]))
-
-        existing_impl_ops =
-          active_ops
-          |> Enum.reject(& &1[:phase_job])
-
-        existing_phase_ops =
-          active_ops
-          |> Enum.filter(& &1[:phase_job])
-
-        cond do
-          existing_phase_ops != [] ->
-            Logger.info(
-              "Quest #{mission_id} has #{length(existing_phase_ops)} active phase ops, triggering spawner"
-            )
-
-            GiTF.Missions.update(mission_id, %{pipeline_mode: "full", status: "active"})
-            send(Process.whereis(GiTF.Major), :spawn_ready_jobs)
-            {:ok, mission[:current_phase] || "research"}
-
-          existing_impl_ops != [] ->
-            Logger.info(
-              "Quest #{mission_id} has #{length(existing_impl_ops)} existing impl ops, triggering spawner"
-            )
-
-            GiTF.Missions.update(mission_id, %{pipeline_mode: "full", status: "active"})
-            send(Process.whereis(GiTF.Major), :spawn_ready_jobs)
-            {:ok, "implementation"}
-
-          planning_artifact && is_list(planning_artifact) && planning_artifact != [] ->
-            Logger.info("Quest #{mission_id} has pre-confirmed plan, skipping to implementation")
-            GiTF.Missions.update(mission_id, %{pipeline_mode: "full"})
-            start_implementation(mission)
-
-          true ->
-            GiTF.Missions.update(mission_id, %{pipeline_mode: "full"})
-            start_research(mission)
+      # Set pipeline mode: "fast" uses streamlined phases (1 design, skip review)
+      pipeline_mode =
+        if not force_full and FastPath.eligible?(mission, force: force) do
+          Logger.info("Quest #{mission_id} eligible for fast path (streamlined pipeline)")
+          "fast"
+        else
+          "full"
         end
+
+      GiTF.Missions.update(mission_id, %{pipeline_mode: pipeline_mode})
+
+      planning_artifact = GiTF.Missions.get_artifact(mission_id, "planning")
+
+      # Check for existing active ops (restart scenario — don't create duplicates)
+      active_ops =
+        Enum.filter(mission.ops, &(&1.status in ["pending", "running", "assigned", "blocked"]))
+
+      existing_impl_ops = Enum.reject(active_ops, & &1[:phase_job])
+      existing_phase_ops = Enum.filter(active_ops, & &1[:phase_job])
+
+      cond do
+        existing_phase_ops != [] ->
+          Logger.info(
+            "Quest #{mission_id} has #{length(existing_phase_ops)} active phase ops, triggering spawner"
+          )
+
+          GiTF.Missions.update(mission_id, %{status: "active"})
+          send(Process.whereis(GiTF.Major), :spawn_ready_jobs)
+          {:ok, mission[:current_phase] || "research"}
+
+        existing_impl_ops != [] ->
+          Logger.info(
+            "Quest #{mission_id} has #{length(existing_impl_ops)} existing impl ops, triggering spawner"
+          )
+
+          GiTF.Missions.update(mission_id, %{status: "active"})
+          send(Process.whereis(GiTF.Major), :spawn_ready_jobs)
+          {:ok, "implementation"}
+
+        planning_artifact && is_list(planning_artifact) && planning_artifact != [] ->
+          Logger.info("Quest #{mission_id} has pre-confirmed plan, skipping to implementation")
+          start_implementation(mission)
+
+        true ->
+          start_research(mission)
       end
     else
       {:error, :no_sector_assigned} ->
@@ -380,7 +377,12 @@ defmodule GiTF.Major.Orchestrator do
           ""
         end
 
-      strategies = strategies_for_complexity(research, mission.sector_id)
+      strategies =
+        if FastPath.fast_mode?(mission) do
+          [%{name: "minimal", hint: "Simplest approach that satisfies the core requirements"}]
+        else
+          strategies_for_complexity(research, mission.sector_id)
+        end
 
       # Store strategy count so advance logic knows how many to wait for
       quest_record = Archive.get(:missions, mission.id)
@@ -726,7 +728,15 @@ defmodule GiTF.Major.Orchestrator do
           fail_quest(mission.id, "All design strategies failed")
         else
           {:ok, mission} = GiTF.Missions.get(mission.id)
-          start_review(mission)
+
+          # Fast mode: single design, skip review → go straight to planning
+          if FastPath.fast_mode?(mission) do
+            promote_selected_design(mission.id, %{"selected_design" => "minimal"})
+            {:ok, mission} = GiTF.Missions.get(mission.id)
+            start_planning(mission)
+          else
+            start_review(mission)
+          end
         end
       else
         {:ok, "design"}
@@ -930,13 +940,13 @@ defmodule GiTF.Major.Orchestrator do
     if artifact && !artifact_failed?(artifact) do
       complexity = Map.get(artifact, "complexity") || "high"
 
-      if complexity == "low" do
+      if complexity == "low" and Map.get(mission, :pipeline_mode) != "full" do
         Logger.info(
-          "Quest #{mission.id}: Research identified low complexity, switching to fast path"
+          "Quest #{mission.id}: Research identified low complexity, using streamlined pipeline"
         )
 
         GiTF.Missions.update(mission.id, %{pipeline_mode: "fast"})
-        FastPath.execute(mission.id)
+        start_requirements(mission)
       else
         Logger.info(
           "Quest #{mission.id}: Research identified high complexity, continuing deep plan"
