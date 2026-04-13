@@ -1339,9 +1339,13 @@ defmodule GiTF.Major.Orchestrator do
             }
           end)
 
-        # Fallback: single fix op from summary
+        # Fallback: single fix op from summary + raw output for context
         true ->
           summary = Map.get(validation, "summary", "Validation failed")
+          raw = Map.get(validation, "raw_output", "")
+          # Include the first 2000 chars of raw validator output so the fix ghost
+          # has actual feedback, not just "Validation failed"
+          raw_context = if raw != "", do: String.slice(raw, 0, 2000), else: ""
 
           %{
             "title" => "Fix validation issues: #{String.slice(summary, 0, 60)}",
@@ -1349,6 +1353,7 @@ defmodule GiTF.Major.Orchestrator do
             Validation failed: #{summary}
 
             #{format_file_context([], impl_files)}
+            #{if raw_context != "", do: "## Validator Feedback\n\n#{raw_context}\n", else: ""}
             Fix all identified issues. Read the relevant files, make changes, and commit.
             """,
             "target_files" => impl_files,

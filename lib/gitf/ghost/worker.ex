@@ -1149,10 +1149,15 @@ defmodule GiTF.Ghost.Worker do
           "Phase output parse failed for #{op.phase}: #{inspect(reason)}, storing raw output as fallback"
         )
 
+        # Extract a useful summary from the raw output so fix ops get context
+        summary = extract_fallback_summary(raw_output)
+
         fallback_artifact = %{
           "raw_output" => String.slice(raw_output, 0, 50_000),
           "parse_failed" => true,
-          "parse_error" => inspect(reason)
+          "parse_error" => inspect(reason),
+          "summary" => summary,
+          "overall_verdict" => "fail"
         }
 
         GiTF.Missions.store_artifact(op.mission_id, artifact_key, fallback_artifact)
@@ -1184,6 +1189,24 @@ defmodule GiTF.Ghost.Worker do
 
       phase ->
         phase
+    end
+  end
+
+  # Extract a meaningful summary from raw ghost output when JSON parsing fails.
+  # Takes the last non-empty lines that aren't code fences or formatting.
+  defp extract_fallback_summary(raw_output) do
+    raw_output
+    |> String.split("\n")
+    |> Enum.reject(fn line ->
+      trimmed = String.trim(line)
+      trimmed == "" or String.starts_with?(trimmed, "```") or trimmed == "---"
+    end)
+    |> Enum.take(-10)
+    |> Enum.join("\n")
+    |> String.slice(0, 1000)
+    |> case do
+      "" -> "Ghost output contained no parseable JSON"
+      summary -> summary
     end
   end
 
@@ -1262,8 +1285,10 @@ defmodule GiTF.Ghost.Worker do
 
   defp record_files_changed(state) do
     case Archive.get(:shells, state.shell_id) do
-      %{worktree_path: path} when is_binary(path) ->
-        case GiTF.Git.safe_cmd(["diff", "--name-only", "HEAD~1..HEAD"],
+      %{worktree_path: path, base_commit_sha: base} when is_binary(path) and is_binary(base) ->
+        # Diff against the shell's base SHA (captured at worktree creation) to isolate
+        # only this ghost's changes, ignoring pre-existing commits on the branch
+        case GiTF.Git.safe_cmd(["diff", "--name-only", "#{base}..HEAD"],
                cd: path,
                stderr_to_stdout: true
              ) do
@@ -1279,6 +1304,27 @@ defmodule GiTF.Ghost.Worker do
                     changed_files: files
                   })
                 )
+
+              _ ->
+                :ok
+            end
+
+          _ ->
+            :ok
+        end
+
+      %{worktree_path: path} when is_binary(path) ->
+        # Fallback: no base SHA recorded, use HEAD~1
+        case GiTF.Git.safe_cmd(["diff", "--name-only", "HEAD~1..HEAD"],
+               cd: path,
+               stderr_to_stdout: true
+             ) do
+          {output, 0} ->
+            files = String.split(output, "\n", trim: true)
+
+            case GiTF.Ops.get(state.op_id) do
+              {:ok, op} ->
+                Archive.put(:ops, Map.merge(op, %{files_changed: length(files), changed_files: files}))
 
               _ ->
                 :ok
