@@ -436,7 +436,7 @@ defmodule GiTF.Dashboard.CostsLive do
       <div style="display:grid; grid-template-columns: 1fr 1fr; gap:0.75rem; margin-bottom:0.75rem">
         <%!-- Productive vs Overhead — horizontal stacked bar --%>
         <div class="panel" style="margin-bottom:0; display:flex; flex-direction:column">
-          <div class="panel-title" style="margin-bottom:0.5rem">Productive vs Overhead</div>
+          <div class="panel-title" style="margin-bottom:0.5rem">Cost Distribution</div>
           <%= if @summary.by_phase_type == %{} do %>
             <div class="empty">No cost data recorded yet.</div>
           <% else %>
