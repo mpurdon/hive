@@ -474,13 +474,11 @@ defmodule GiTF.Dashboard.CostsLive do
                 <span style="color:#d29922; font-weight:600">Overhead</span>
                 <span style="color:#8b949e">{format_cost(@overhead_cost)} ({@overhead_pct}%)</span>
               </div>
-              <%= if @rework_pct > 0 do %>
-                <div style="display:flex; align-items:center; gap:0.3rem">
-                  <div style="width:10px; height:10px; border-radius:2px; background:#f85149"></div>
-                  <span style="color:#f85149; font-weight:600">Rework</span>
-                  <span style="color:#8b949e">{format_cost(@rework_cost)} ({@rework_pct}%)</span>
-                </div>
-              <% end %>
+              <div style="display:flex; align-items:center; gap:0.3rem">
+                <div style="width:10px; height:10px; border-radius:2px; background:#f85149"></div>
+                <span style="color:#f85149; font-weight:600">Rework</span>
+                <span style="color:#8b949e">{format_cost(@rework_cost)} ({@rework_pct}%)</span>
+              </div>
             </div>
           <% end %>
         </div>
