@@ -325,19 +325,36 @@ defmodule GiTF.Sync do
   # -- Private: mission sync helpers -------------------------------------------
 
   defp cells_for_quest(mission) do
-    ghost_ids =
+    # Implementation ops that completed and have branch info stored on the op record.
+    # This is the primary source — survives worktree/shell cleanup.
+    impl_ops =
       mission.ops
-      |> Enum.map(& &1.ghost_id)
-      |> Enum.reject(&is_nil/1)
-      |> MapSet.new()
+      |> Enum.filter(fn op ->
+        op.status in ["done", "completed"] and
+          not Map.get(op, :phase_job, false) and
+          not Map.get(op, :recon, false) and
+          is_binary(op[:branch])
+      end)
 
-    # Find shells for this mission's ghosts that still have worktrees on disk.
-    # Ghosts may have stopped by the time sync runs, so don't require "active" status.
-    Archive.filter(:shells, fn c ->
-      c.ghost_id in ghost_ids and
-        c[:worktree_path] != nil and
-        File.dir?(c.worktree_path)
-    end)
+    if impl_ops != [] do
+      # Return pseudo-shell maps with the fields merge_cells_into_quest_branch needs
+      Enum.map(impl_ops, fn op ->
+        %{branch: op.branch, sector_id: op.sector_id, ghost_id: op.ghost_id}
+      end)
+      |> Enum.uniq_by(& &1.branch)
+    else
+      # Fallback: look for shells that still exist (legacy path)
+      ghost_ids =
+        mission.ops
+        |> Enum.map(& &1.ghost_id)
+        |> Enum.reject(&is_nil/1)
+        |> MapSet.new()
+
+      Archive.filter(:shells, fn c ->
+        c.ghost_id in ghost_ids and
+          c[:branch] != nil
+      end)
+    end
   end
 
   defp fetch_sector_for_cells([shell | _]) do
@@ -359,6 +376,9 @@ defmodule GiTF.Sync do
 
     results =
       Enum.map(shells, fn shell ->
+        # Ensure local branch exists — it may have been pushed to origin but deleted locally
+        ensure_local_branch(repo_path, shell.branch)
+
         case GiTF.Git.sync(repo_path, shell.branch, no_ff: true) do
           :ok ->
             Logger.info("Syncd #{shell.branch} into #{quest_branch}")
@@ -387,6 +407,19 @@ defmodule GiTF.Sync do
       failed_branches = Enum.map(failures, fn {:error, branch, _} -> branch end)
       {:error, {:merge_conflicts, quest_branch, failed_branches}}
     end
+  end
+
+  # If a local branch was deleted (by worktree cleanup) but exists on origin,
+  # recreate it from the remote tracking branch.
+  defp ensure_local_branch(repo_path, branch) do
+    # Fetch from origin unconditionally — no-op if branch already exists locally.
+    # Avoids TOCTOU race between branch_exists? check and fetch.
+    GiTF.Git.safe_cmd(["fetch", "origin", "#{branch}:#{branch}"],
+      cd: repo_path,
+      stderr_to_stdout: true
+    )
+  rescue
+    _ -> :ok
   end
 
   # -- Private: git helpers ----------------------------------------------------

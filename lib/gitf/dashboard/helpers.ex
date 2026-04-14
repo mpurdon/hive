@@ -40,12 +40,10 @@ defmodule GiTF.Dashboard.Helpers do
   def verification_badge("pending"), do: "badge-yellow"
   def verification_badge(_), do: "badge-grey"
 
-  def format_cost(cost) when is_float(cost), do: "$#{:erlang.float_to_binary(cost, decimals: 4)}"
-
-  def format_cost(cost) when is_integer(cost),
-    do: "$#{:erlang.float_to_binary(cost * 1.0, decimals: 4)}"
-
-  def format_cost(_), do: "$0.0000"
+  def format_cost(cost, decimals \\ 4)
+  def format_cost(cost, decimals) when is_float(cost), do: "$#{:erlang.float_to_binary(cost, decimals: decimals)}"
+  def format_cost(cost, decimals) when is_integer(cost), do: "$#{:erlang.float_to_binary(cost * 1.0, decimals: decimals)}"
+  def format_cost(_, _), do: "$0.00"
 
   def format_tokens(count) when count >= 1_000_000, do: "#{Float.round(count / 1_000_000, 1)}M"
   def format_tokens(count) when count >= 1_000, do: "#{Float.round(count / 1_000, 1)}K"

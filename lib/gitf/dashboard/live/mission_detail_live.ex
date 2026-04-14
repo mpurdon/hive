@@ -73,8 +73,8 @@ defmodule GiTF.Dashboard.MissionDetailLive do
 
     case result do
       {:ok, report} ->
-        formatted = GiTF.Report.format(report)
-        {:noreply, assign(socket, report: formatted, report_loading: false)}
+        display = GiTF.Report.for_display(report)
+        {:noreply, assign(socket, report: display, report_loading: false)}
 
       {:error, reason} ->
         {:noreply,
@@ -580,9 +580,132 @@ defmodule GiTF.Dashboard.MissionDetailLive do
 
       <%!-- Report (full width) --%>
       <%= if @report do %>
+        <%!-- Summary Metrics --%>
         <div class="panel">
-          <div class="panel-title">Report</div>
-          <div class="pre-block">{@report}</div>
+          <div class="panel-title">Report: {@report.mission_name}</div>
+          <div class="report-metrics-grid">
+            <div class="metric-card">
+              <div class="metric-label">Status</div>
+              <div class="metric-value">
+                <span class={"badge #{status_badge(@report.mission_status)}"}>{String.upcase(@report.mission_status)}</span>
+              </div>
+            </div>
+            <div class="metric-card">
+              <div class="metric-label">Duration</div>
+              <div class="metric-value">{@report.timing.wall_clock || "-"}</div>
+            </div>
+            <div class="metric-card">
+              <div class="metric-label">Total Cost</div>
+              <div class="metric-value">{format_cost(@report.tokens.cost_usd, 2)}</div>
+            </div>
+            <div class="metric-card">
+              <div class="metric-label">Files Changed</div>
+              <div class="metric-value">{@report.file_summary.total}</div>
+            </div>
+            <%= if @report.quality_score do %>
+              <div class="metric-card">
+                <div class="metric-label">Quality Score</div>
+                <div class="metric-value">{@report.quality_score}</div>
+              </div>
+            <% end %>
+            <%= if @report.pr_url do %>
+              <div class="metric-card">
+                <div class="metric-label">Pull Request</div>
+                <div class="metric-value"><a href={@report.pr_url} target="_blank" style="color:#58a6ff">View PR</a></div>
+              </div>
+            <% end %>
+            <div class="metric-card">
+              <div class="metric-label">Ops</div>
+              <div class="metric-value">{@report.summary.done}/{@report.summary.total_ops}</div>
+            </div>
+            <div class="metric-card">
+              <div class="metric-label">Ghosts</div>
+              <div class="metric-value">{@report.summary.ghosts}</div>
+            </div>
+          </div>
+        </div>
+
+        <%!-- Files Changed --%>
+        <%= if @report.files != [] do %>
+          <div class="panel">
+            <div class="panel-title">
+              Files Changed
+              <span style="font-weight:400; font-size:0.8rem; color:#8b949e; margin-left:0.5rem">
+                <span style="color:#3fb950">{@report.file_summary.added} added</span>
+                <span style="color:#d29922; margin-left:0.4rem">{@report.file_summary.modified} modified</span>
+                <span style="color:#f85149; margin-left:0.4rem">{@report.file_summary.deleted} deleted</span>
+              </span>
+            </div>
+            <table style="width:100%; font-size:0.8rem; margin-top:0.5rem">
+              <tbody>
+                <%= for file <- @report.files do %>
+                  <tr style="border-bottom:1px solid #21262d">
+                    <td style="width:2.5rem; text-align:center; padding:0.3rem 0.4rem">
+                      <span class={"badge #{file_status_class(file.status)}"}>{file.status}</span>
+                    </td>
+                    <td style="font-family:monospace; padding:0.3rem 0.4rem; color:#c9d1d9">{file.path}</td>
+                  </tr>
+                <% end %>
+              </tbody>
+            </table>
+          </div>
+        <% end %>
+
+        <%!-- Ops Breakdown --%>
+        <div class="panel">
+          <div class="panel-title">Ops Breakdown</div>
+          <table style="width:100%; font-size:0.8rem; margin-top:0.5rem; border-collapse:collapse">
+            <thead>
+              <tr style="border-bottom:1px solid #30363d">
+                <th style="text-align:left; padding:0.4rem 0.5rem; color:#8b949e; font-weight:500">Op</th>
+                <th style="text-align:left; padding:0.4rem 0.5rem; color:#8b949e; font-weight:500">Status</th>
+                <th style="text-align:right; padding:0.4rem 0.5rem; color:#8b949e; font-weight:500">Duration</th>
+                <th style="text-align:right; padding:0.4rem 0.5rem; color:#8b949e; font-weight:500">Files</th>
+                <th style="text-align:right; padding:0.4rem 0.5rem; color:#8b949e; font-weight:500">Cost</th>
+              </tr>
+            </thead>
+            <tbody>
+              <%= for op <- @report.ops do %>
+                <tr style="border-bottom:1px solid #21262d">
+                  <td style="padding:0.4rem 0.5rem; color:#c9d1d9">
+                    {op.title}
+                    <%= if op.phase_job do %><span style="color:#8b949e; font-size:0.7rem; margin-left:0.3rem">phase</span><% end %>
+                  </td>
+                  <td style="padding:0.4rem 0.5rem"><span class={"badge #{status_badge(op.status)}"}>{op.status}</span></td>
+                  <td style="padding:0.4rem 0.5rem; text-align:right; color:#8b949e">{op.duration}</td>
+                  <td style="padding:0.4rem 0.5rem; text-align:right; color:#8b949e">{op.files_changed}</td>
+                  <td style="padding:0.4rem 0.5rem; text-align:right; color:#8b949e">{format_cost(op.cost_usd, 2)}</td>
+                </tr>
+              <% end %>
+            </tbody>
+          </table>
+        </div>
+
+        <%!-- Token Usage --%>
+        <div class="panel">
+          <div class="panel-title">Token Usage</div>
+          <div class="report-metrics-grid">
+            <div class="metric-card">
+              <div class="metric-label">Input</div>
+              <div class="metric-value">{report_number(@report.tokens.input)}</div>
+            </div>
+            <div class="metric-card">
+              <div class="metric-label">Output</div>
+              <div class="metric-value">{report_number(@report.tokens.output)}</div>
+            </div>
+            <div class="metric-card">
+              <div class="metric-label">Cache Read</div>
+              <div class="metric-value">{report_number(@report.tokens.cache_read)}</div>
+            </div>
+            <div class="metric-card">
+              <div class="metric-label">Cache Create</div>
+              <div class="metric-value">{report_number(@report.tokens.cache_create)}</div>
+            </div>
+            <div class="metric-card">
+              <div class="metric-label">Total Tokens</div>
+              <div class="metric-value">{report_number(@report.total_tokens)}</div>
+            </div>
+          </div>
         </div>
       <% end %>
 
@@ -972,4 +1095,20 @@ defmodule GiTF.Dashboard.MissionDetailLive do
   defp context_gauge_color(pct) when pct >= 45, do: "#ef4444"
   defp context_gauge_color(pct) when pct >= 35, do: "#f59e0b"
   defp context_gauge_color(_pct), do: "#22c55e"
+
+  # -- Report helpers ----------------------------------------------------------
+
+  defp file_status_class("A"), do: "badge-green"
+  defp file_status_class("D"), do: "badge-red"
+  defp file_status_class(_), do: "badge-yellow"
+
+  defp report_number(n) when is_integer(n) do
+    n
+    |> Integer.to_string()
+    |> String.reverse()
+    |> String.replace(~r/.{3}(?=.)/, "\\0,")
+    |> String.reverse()
+  end
+
+  defp report_number(_), do: "0"
 end

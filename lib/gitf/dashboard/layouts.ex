@@ -144,6 +144,22 @@ defmodule GiTF.Dashboard.Layouts do
           .badge-red    { background: #f8514933; color: #f85149; }
           .badge-yellow { background: #d2992233; color: #d29922; }
 
+          /* -- Report metric cards ------------------------------------------ */
+          .report-metrics-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(130px, 1fr));
+            gap: 0.6rem;
+            margin-top: 0.5rem;
+          }
+          .metric-card {
+            background: #0d1117;
+            border: 1px solid #30363d;
+            border-radius: 6px;
+            padding: 0.6rem 0.8rem;
+          }
+          .metric-label { font-size: 0.7rem; color: #8b949e; margin-bottom: 0.15rem; }
+          .metric-value { font-size: 1rem; font-weight: 600; color: #c9d1d9; }
+
           /* -- Link list --------------------------------------------------- */
           .link_msg-item {
             padding: 0.75rem 0;

@@ -31,12 +31,16 @@ defmodule GiTF.Report do
       ops = enrich_jobs(mission.ops, gitf_root)
       tokens = aggregate_tokens(ops)
       timing = compute_timing(ops)
+      files = aggregate_files(mission.ops)
+      artifacts = collect_artifacts(mission)
 
       report = %{
         mission: mission,
         ops: ops,
         tokens: tokens,
-        timing: timing
+        timing: timing,
+        files: files,
+        artifacts: artifacts
       }
 
       {:ok, report}
@@ -51,10 +55,39 @@ defmodule GiTF.Report do
     [
       format_header(report),
       format_timing_table(report),
+      format_files_section(report),
       format_token_table(report),
+      format_artifacts_section(report),
       format_summary(report)
     ]
+    |> Enum.reject(&is_nil/1)
     |> Enum.join("\n")
+  end
+
+  @doc """
+  Returns report data structured for HTML rendering in LiveView.
+  """
+  @spec for_display(map()) :: map()
+  def for_display(report) do
+    %{
+      mission_name: report.mission[:name] || report.mission.id,
+      mission_status: report.mission.status,
+      goal: report.mission[:goal],
+      timing: %{
+        wall_clock: format_duration(report.timing.wall_clock_seconds),
+        started_at: report.timing.started_at && format_time(report.timing.started_at),
+        completed_at: report.timing.completed_at && format_time(report.timing.completed_at)
+      },
+      tokens: report.tokens,
+      total_tokens: report.tokens.input + report.tokens.output + report.tokens.cache_read + report.tokens.cache_create,
+      ops: Enum.map(report.ops, &format_op_for_display/1),
+      files: report.files,
+      file_summary: summarize_files(report.files),
+      pr_url: get_in(report, [:artifacts, :sync, "pr_url"]),
+      sync_status: get_in(report, [:artifacts, :sync, "status"]),
+      quality_score: get_in(report, [:artifacts, :scoring, "overall_score"]),
+      summary: compute_display_summary(report.ops)
+    }
   end
 
   # -- Private: data enrichment ------------------------------------------------
@@ -74,7 +107,9 @@ defmodule GiTF.Report do
         started_at: ghost && ghost[:inserted_at],
         completed_at: ghost && ghost[:updated_at],
         duration: compute_duration(ghost),
-        tokens: log_tokens
+        tokens: log_tokens,
+        files_changed: Map.get(op, :files_changed, 0),
+        phase_job: Map.get(op, :phase_job, false)
       }
     end)
   end
@@ -251,6 +286,94 @@ defmodule GiTF.Report do
 
     Enum.join(lines, "\n") <> "\n"
   end
+
+  # -- Private: file & artifact aggregation ------------------------------------
+
+  defp aggregate_files(ops) do
+    ops
+    |> Enum.reject(& &1[:phase_job])
+    |> Enum.flat_map(fn op ->
+      case op[:changed_files_detail] do
+        details when is_list(details) and details != [] ->
+          details
+
+        _ ->
+          # Fallback: treat all as modified
+          (op[:changed_files] || [])
+          |> Enum.map(&%{status: "M", path: &1})
+      end
+    end)
+    |> Enum.uniq_by(& &1.path)
+    |> Enum.sort_by(& &1.path)
+  end
+
+  defp collect_artifacts(mission) do
+    %{
+      sync: GiTF.Missions.get_artifact(mission.id, "sync"),
+      scoring: GiTF.Missions.get_artifact(mission.id, "scoring")
+    }
+  end
+
+  defp format_op_for_display(op) do
+    %{
+      title: op.title,
+      status: op.status,
+      duration: format_duration(op.duration),
+      files_changed: op.files_changed,
+      cost_usd: op.tokens.cost_usd,
+      ghost_name: op.ghost_name,
+      phase_job: op.phase_job
+    }
+  end
+
+  defp summarize_files(files) do
+    %{
+      added: Enum.count(files, &(&1.status == "A")),
+      modified: Enum.count(files, &(&1.status == "M")),
+      deleted: Enum.count(files, &(&1.status == "D")),
+      total: length(files)
+    }
+  end
+
+  defp compute_display_summary(ops) do
+    %{
+      total_ops: length(ops),
+      done: Enum.count(ops, &(&1.status == "done")),
+      failed: Enum.count(ops, &(&1.status == "failed")),
+      ghosts: ops |> Enum.map(& &1.ghost_id) |> Enum.reject(&is_nil/1) |> Enum.uniq() |> length()
+    }
+  end
+
+  defp format_files_section(%{files: files}) when is_list(files) and files != [] do
+    lines =
+      Enum.map(files, fn f ->
+        icon = case f.status do
+          "A" -> "+"
+          "D" -> "-"
+          _ -> "~"
+        end
+
+        "  #{icon} #{f.path}"
+      end)
+
+    "Files Changed (#{length(files)})\n" <> Enum.join(lines, "\n") <> "\n"
+  end
+
+  defp format_files_section(_), do: nil
+
+  defp format_artifacts_section(%{artifacts: %{sync: sync, scoring: scoring}}) do
+    lines =
+      [
+        sync && sync["pr_url"] && "  PR: #{sync["pr_url"]}",
+        sync && sync["status"] && "  Sync: #{sync["status"]}",
+        scoring && scoring["overall_score"] && "  Quality: #{scoring["overall_score"]}"
+      ]
+      |> Enum.reject(&is_nil/1)
+
+    if lines != [], do: "Artifacts\n" <> Enum.join(lines, "\n") <> "\n", else: nil
+  end
+
+  defp format_artifacts_section(_), do: nil
 
   # -- Private: table formatting -----------------------------------------------
 

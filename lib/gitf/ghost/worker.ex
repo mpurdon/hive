@@ -1045,8 +1045,10 @@ defmodule GiTF.Ghost.Worker do
       record_files_changed(state)
     end
 
-    # Save the ghost's final output summary on the op record
+    # Save the ghost's final output summary and branch info on the op record.
+    # Branch info is critical — sync needs it after worktree cleanup deletes shells.
     save_output_summary(state)
+    save_branch_info(state)
 
     case GiTF.Ops.get(state.op_id) do
       {:ok, %{status: "done"}} ->
@@ -1283,52 +1285,12 @@ defmodule GiTF.Ghost.Worker do
     _ -> :ok
   end
 
-  defp record_files_changed(state) do
+  defp save_branch_info(state) do
     case Archive.get(:shells, state.shell_id) do
-      %{worktree_path: path, base_commit_sha: base} when is_binary(path) and is_binary(base) ->
-        # Diff against the shell's base SHA (captured at worktree creation) to isolate
-        # only this ghost's changes, ignoring pre-existing commits on the branch
-        case GiTF.Git.safe_cmd(["diff", "--name-only", "#{base}..HEAD"],
-               cd: path,
-               stderr_to_stdout: true
-             ) do
-          {output, 0} ->
-            files = String.split(output, "\n", trim: true)
-
-            case GiTF.Ops.get(state.op_id) do
-              {:ok, op} ->
-                Archive.put(
-                  :ops,
-                  Map.merge(op, %{
-                    files_changed: length(files),
-                    changed_files: files
-                  })
-                )
-
-              _ ->
-                :ok
-            end
-
-          _ ->
-            :ok
-        end
-
-      %{worktree_path: path} when is_binary(path) ->
-        # Fallback: no base SHA recorded, use HEAD~1
-        case GiTF.Git.safe_cmd(["diff", "--name-only", "HEAD~1..HEAD"],
-               cd: path,
-               stderr_to_stdout: true
-             ) do
-          {output, 0} ->
-            files = String.split(output, "\n", trim: true)
-
-            case GiTF.Ops.get(state.op_id) do
-              {:ok, op} ->
-                Archive.put(:ops, Map.merge(op, %{files_changed: length(files), changed_files: files}))
-
-              _ ->
-                :ok
-            end
+      %{branch: branch} when is_binary(branch) ->
+        case GiTF.Ops.get(state.op_id) do
+          {:ok, op} ->
+            Archive.put(:ops, Map.merge(op, %{branch: branch, shell_id: state.shell_id}))
 
           _ ->
             :ok
@@ -1338,9 +1300,60 @@ defmodule GiTF.Ghost.Worker do
         :ok
     end
   rescue
+    _ -> :ok
+  end
+
+  defp record_files_changed(state) do
+    case Archive.get(:shells, state.shell_id) do
+      %{worktree_path: path, base_commit_sha: base} when is_binary(path) and is_binary(base) ->
+        # Diff against the shell's base SHA to isolate this ghost's changes.
+        # --name-status gives A/M/D classification per file.
+        record_diff(state.op_id, path, "#{base}..HEAD")
+
+      %{worktree_path: path} when is_binary(path) ->
+        # Fallback: no base SHA recorded, use HEAD~1
+        record_diff(state.op_id, path, "HEAD~1..HEAD")
+
+      _ ->
+        :ok
+    end
+  rescue
     e ->
       Logger.debug("Failed to record files changed: #{inspect(e)}")
       :ok
+  end
+
+  defp record_diff(op_id, worktree_path, range) do
+    case GiTF.Git.safe_cmd(["diff", "--name-status", range],
+           cd: worktree_path,
+           stderr_to_stdout: true
+         ) do
+      {output, 0} ->
+        details = parse_name_status(output)
+        files = Enum.map(details, & &1.path)
+
+        with {:ok, op} <- GiTF.Ops.get(op_id) do
+          Archive.put(:ops, Map.merge(op, %{
+            files_changed: length(files),
+            changed_files: files,
+            changed_files_detail: details
+          }))
+        end
+
+      _ ->
+        :ok
+    end
+  end
+
+  defp parse_name_status(output) do
+    output
+    |> String.split("\n", trim: true)
+    |> Enum.map(fn line ->
+      case String.split(line, "\t", parts: 2) do
+        [status, path] -> %{status: String.first(status), path: path}
+        [path] -> %{status: "M", path: path}
+      end
+    end)
   end
 
   defp mark_failed(state, reason) do

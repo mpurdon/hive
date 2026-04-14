@@ -1119,11 +1119,17 @@ defmodule GiTF.Tachikoma do
         update_reputation(op_id)
         score_model(op_id, result)
 
-        Phoenix.PubSub.broadcast(
-          GiTF.PubSub,
-          "sync:queue",
-          {:merge_ready, op_id, shell_id}
-        )
+        # For pr_branch missions, skip per-op sync — the orchestrator creates
+        # a single mission-level PR after validation. Other strategies sync per-op.
+        if mission_uses_pr_branch?(op_id) do
+          Logger.info("Tachikoma: op #{op_id} passed, deferring sync to mission-level PR")
+        else
+          Phoenix.PubSub.broadcast(
+            GiTF.PubSub,
+            "sync:queue",
+            {:merge_ready, op_id, shell_id}
+          )
+        end
 
       {:ok, :fail, result} ->
         Logger.warning("Tachikoma: op #{op_id} failed quality gate")
@@ -1151,6 +1157,17 @@ defmodule GiTF.Tachikoma do
   rescue
     e ->
       Logger.error("Tachikoma: review crashed for op #{op_id}: #{Exception.message(e)}")
+  end
+
+  defp mission_uses_pr_branch?(op_id) do
+    with {:ok, op} <- GiTF.Ops.get(op_id),
+         mid when is_binary(mid) <- op[:mission_id],
+         mission when not is_nil(mission) <- GiTF.Archive.get(:missions, mid),
+         {:ok, sector} <- GiTF.Sector.get(mission.sector_id) do
+      Map.get(sector, :sync_strategy) == "pr_branch"
+    else
+      _ -> false
+    end
   end
 
   defp load_fix_context(op_id) do

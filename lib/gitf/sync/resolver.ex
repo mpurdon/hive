@@ -32,7 +32,7 @@ defmodule GiTF.Sync.Resolver do
   @spec resolve(String.t(), String.t()) ::
           {:ok, :merged, non_neg_integer()} | {:error, term(), non_neg_integer()}
   def resolve(op_id, shell_id) do
-    with {:ok, shell} <- fetch_cell(shell_id),
+    with {:ok, shell} <- fetch_cell_with_fallback(shell_id, op_id),
          {:ok, sector} <- fetch_sector(shell.sector_id),
          {:ok, target} <- determine_target_branch(op_id, sector) do
       strategy = Map.get(sector, :sync_strategy) || "auto_merge"
@@ -657,10 +657,20 @@ defmodule GiTF.Sync.Resolver do
     end
   end
 
-  defp fetch_cell(shell_id) do
+  defp fetch_cell_with_fallback(shell_id, op_id) do
     case Archive.get(:shells, shell_id) do
-      nil -> {:error, :cell_not_found}
-      shell -> {:ok, shell}
+      %{branch: branch} = shell when is_binary(branch) ->
+        {:ok, shell}
+
+      _ ->
+        # Shell cleaned up — read branch info from op record (saved by save_branch_info)
+        case GiTF.Ops.get(op_id) do
+          {:ok, %{branch: branch, sector_id: sid}} when is_binary(branch) and is_binary(sid) ->
+            {:ok, %{id: shell_id, branch: branch, sector_id: sid, ghost_id: nil}}
+
+          _ ->
+            {:error, :cell_not_found}
+        end
     end
   end
 

@@ -1831,8 +1831,29 @@ defmodule GiTF.Major.Orchestrator do
         GiTF.Debrief.start_review(mission.id)
       end
 
+      cleanup_mission_branch(mission)
+
       {:ok, "completed"}
     end
+  end
+
+  defp cleanup_mission_branch(mission) do
+    mission_id = mission.id
+    sector_id = mission.sector_id
+
+    Task.Supervisor.start_child(GiTF.TaskSupervisor, fn ->
+      try do
+        with sync_art when is_map(sync_art) <- GiTF.Missions.get_artifact(mission_id, "sync"),
+             branch when is_binary(branch) <- sync_art["branch"],
+             {:ok, sector} <- GiTF.Sector.get(sector_id) do
+          GiTF.Git.safe_cmd(["branch", "-D", branch], cd: sector.path, stderr_to_stdout: true)
+          GiTF.Git.safe_cmd(["push", "origin", "--delete", branch], cd: sector.path, stderr_to_stdout: true)
+          Logger.info("Cleaned up mission branch #{branch}")
+        end
+      rescue
+        _ -> :ok
+      end
+    end)
   end
 
   # -- Ghost Spawning ----------------------------------------------------------
