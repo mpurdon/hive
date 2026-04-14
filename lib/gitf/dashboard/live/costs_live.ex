@@ -39,9 +39,18 @@ defmodule GiTF.Dashboard.CostsLive do
 
   def handle_event("set_range", %{"range" => range}, socket) do
     valid = @range_options
-    range = if range in valid, do: range, else: "24h"
+    range = if range in valid, do: range, else: "Today"
+    socket = socket |> assign(:trend_range, range) |> assign_data()
+    {:noreply, push_event(socket, "store_session", %{key: "costs_range", value: range})}
+  end
+
+  def handle_event("restore_session", %{"key" => "costs_range", "value" => range}, socket) do
+    valid = @range_options
+    range = if range in valid, do: range, else: "Today"
     {:noreply, socket |> assign(:trend_range, range) |> assign_data()}
   end
+
+  def handle_event("restore_session", _params, socket), do: {:noreply, socket}
 
   @impl true
   def handle_info(:heartbeat, socket) do
@@ -258,6 +267,7 @@ defmodule GiTF.Dashboard.CostsLive do
   def render(assigns) do
     ~H"""
     <.live_component module={GiTF.Dashboard.AppLayout} id="layout" current_path={@current_path} flash={@flash} toasts={@toasts}>
+      <div id="costs-session" phx-hook="SessionStore" data-store-key="costs_range"></div>
       <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:1rem">
         <h1 class="page-title" style="margin-bottom:0">Cost Tracking</h1>
         <div style="display:flex; align-items:center; gap:0.5rem">

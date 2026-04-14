@@ -619,8 +619,20 @@ defmodule GiTF.Dashboard.Layouts do
         <script src="/assets/phoenix_live_view.min.js"></script>
         <script>
           let csrfToken = document.querySelector("meta[name='csrf-token']").getAttribute("content");
+          let Hooks = {};
+          Hooks.SessionStore = {
+            mounted() {
+              let key = this.el.dataset.storeKey;
+              let saved = sessionStorage.getItem(key);
+              if (saved) { this.pushEvent("restore_session", { key: key, value: saved }); }
+              this.handleEvent("store_session", ({ key, value }) => {
+                sessionStorage.setItem(key, value);
+              });
+            }
+          };
           let liveSocket = new window.LiveView.LiveSocket("/live", window.Phoenix.Socket, {
-            params: { _csrf_token: csrfToken }
+            params: { _csrf_token: csrfToken },
+            hooks: Hooks
           });
           liveSocket.connect();
 
