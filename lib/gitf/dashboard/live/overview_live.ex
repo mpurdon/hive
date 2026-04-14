@@ -40,7 +40,7 @@ defmodule GiTF.Dashboard.OverviewLive do
       |> assign(:refresh_scheduled, false)
       |> assign_core_data()
       |> assign_async(:health_status, fn -> {:ok, %{health_status: safe_health_check()}} end)
-      |> assign_async(:cost_summary, fn -> {:ok, %{cost_summary: GiTF.Costs.summary()}} end)
+      |> assign_async(:cost_summary, fn -> {:ok, %{cost_summary: billing_cycle_summary()}} end)
 
     {:ok, socket}
   end
@@ -68,7 +68,7 @@ defmodule GiTF.Dashboard.OverviewLive do
     {:noreply,
      socket
      |> schedule_refresh()
-     |> assign_async(:cost_summary, fn -> {:ok, %{cost_summary: GiTF.Costs.summary()}} end,
+     |> assign_async(:cost_summary, fn -> {:ok, %{cost_summary: billing_cycle_summary()}} end,
        reset: true
      )}
   end
@@ -282,6 +282,15 @@ defmodule GiTF.Dashboard.OverviewLive do
         budget_pct: budget_pct
       })
     end)
+  end
+
+  defp billing_cycle_summary do
+    month_start = Date.utc_today() |> Date.beginning_of_month()
+    cutoff = DateTime.new!(month_start, ~T[00:00:00], "Etc/UTC")
+
+    GiTF.Archive.all(:costs)
+    |> Enum.filter(fn c -> c[:recorded_at] && DateTime.compare(c.recorded_at, cutoff) != :lt end)
+    |> GiTF.Costs.summary_from()
   end
 
   defp safe_health_check do
@@ -527,7 +536,7 @@ defmodule GiTF.Dashboard.OverviewLive do
 
         <%!-- Total Cost: col 3, spans 2 rows --%>
         <div class="card" style="grid-row:1 / 3">
-          <div class="card-label">Total Cost</div>
+          <div class="card-label">Cost This Month</div>
           <% costs = case @cost_summary do
             %{ok?: true, result: r} -> r
             _ -> nil

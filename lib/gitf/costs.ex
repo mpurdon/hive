@@ -129,10 +129,13 @@ defmodule GiTF.Costs do
   Returns an aggregate summary of all recorded costs.
   """
   @spec summary() :: map()
-  def summary do
+  def summary, do: summary_from(Archive.all(:costs))
+
+  @doc "Computes a summary from a pre-filtered list of cost records."
+  @spec summary_from(list()) :: map()
+  def summary_from(raw_costs) do
     costs =
-      Archive.all(:costs)
-      |> Enum.map(fn c ->
+      Enum.map(raw_costs, fn c ->
         c = Map.update(c, :model, nil, &normalize_model/1)
 
         if Map.get(c, :cost_usd) in [nil, 0, 0.0] do
