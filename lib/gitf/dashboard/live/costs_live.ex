@@ -57,22 +57,27 @@ defmodule GiTF.Dashboard.CostsLive do
   def handle_info(_msg, socket), do: {:noreply, socket}
 
   defp assign_data(socket) do
-    summary = GiTF.Costs.summary()
-    all_costs = GiTF.Archive.all(:costs)
+    all_costs_raw = GiTF.Archive.all(:costs)
     missions = GiTF.Missions.list()
 
-    # Burn rate: cost in last hour
+    # Page-level date range filter — applies to ALL data on the page
+    range = socket.assigns[:trend_range] || "24h"
+    {hours, buckets} = range_config(range)
+    all_costs = filter_costs_by_range(all_costs_raw, hours)
+
+    # Compute summary from filtered costs
+    summary = compute_summary(all_costs)
+
+    # Burn rate: cost in last hour (always from raw, not filtered)
     one_hour_ago = DateTime.shift(DateTime.utc_now(), hour: -1)
 
-    recent_costs =
-      Enum.filter(all_costs, fn c ->
-        c[:recorded_at] && DateTime.compare(c.recorded_at, one_hour_ago) != :lt
-      end)
+    burn_rate =
+      all_costs_raw
+      |> Enum.filter(fn c -> c[:recorded_at] && DateTime.compare(c.recorded_at, one_hour_ago) != :lt end)
+      |> Enum.map(&(&1[:cost_usd] || 0.0))
+      |> Enum.sum()
 
-    burn_rate = Enum.sum(Enum.map(recent_costs, &(&1[:cost_usd] || 0.0)))
-
-    # Per-mission cost breakdown — group costs by mission_id in one pass
-    # instead of N calls to Costs.for_quest (which each scan all costs)
+    # Per-mission cost breakdown — group filtered costs by mission_id
     costs_by_mission = Enum.group_by(all_costs, & &1[:mission_id])
 
     mission_costs =
@@ -96,11 +101,9 @@ defmodule GiTF.Dashboard.CostsLive do
           op_count: length(m[:ops] || [])
         }
       end)
+      |> Enum.filter(&(&1.spent > 0))
       |> Enum.sort_by(&Map.get(&1, socket.assigns[:cost_sort] || :spent, 0), :desc)
 
-    # Trend based on selected range
-    range = socket.assigns[:trend_range] || "24h"
-    {hours, buckets} = range_config(range)
     trend = build_trend(all_costs, hours, buckets)
 
     # Cache stats
@@ -116,6 +119,12 @@ defmodule GiTF.Dashboard.CostsLive do
     total_spent = Enum.sum(Enum.map(mission_costs, & &1.spent))
     budget_pct = if total_budget > 0, do: Float.round(total_spent / total_budget * 100, 1), else: 0.0
 
+    # Productive vs overhead percentages for stacked bar
+    prod_data = summary.by_phase_type["productive"]
+    overhead_data = summary.by_phase_type["overhead"]
+    prod_pct = if prod_data, do: cost_pct(summary.total_cost, prod_data.cost), else: 0.0
+    overhead_pct = if overhead_data, do: cost_pct(summary.total_cost, overhead_data.cost), else: 0.0
+
     socket
     |> assign(:page_title, "Costs")
     |> assign(:current_path, "/costs")
@@ -129,6 +138,49 @@ defmodule GiTF.Dashboard.CostsLive do
     |> assign(:total_budget, total_budget)
     |> assign(:total_spent, total_spent)
     |> assign(:range_options, @range_options)
+    |> assign(:prod_pct, prod_pct)
+    |> assign(:overhead_pct, overhead_pct)
+    |> assign(:prod_cost, if(prod_data, do: prod_data.cost, else: 0.0))
+    |> assign(:overhead_cost, if(overhead_data, do: overhead_data.cost, else: 0.0))
+  end
+
+  defp filter_costs_by_range(costs, nil), do: costs
+
+  defp filter_costs_by_range(costs, hours) do
+    cutoff = DateTime.shift(DateTime.utc_now(), hour: -hours)
+    Enum.filter(costs, fn c -> c[:recorded_at] && DateTime.compare(c.recorded_at, cutoff) != :lt end)
+  end
+
+  defp compute_summary(costs) do
+    by_model = group_costs_by(costs, & &1[:model])
+    by_category = group_costs_by(costs, & &1[:category])
+    by_phase = group_costs_by(costs, & &1[:phase])
+    by_phase_type = group_costs_by(costs, & &1[:phase_type])
+
+    %{
+      total_cost: costs |> Enum.map(&(&1[:cost_usd] || 0.0)) |> Enum.sum(),
+      total_input_tokens: costs |> Enum.map(&(&1[:input_tokens] || 0)) |> Enum.sum(),
+      total_output_tokens: costs |> Enum.map(&(&1[:output_tokens] || 0)) |> Enum.sum(),
+      total_cache_read_tokens: costs |> Enum.map(&(&1[:cache_read_tokens] || 0)) |> Enum.sum(),
+      total_cache_write_tokens: costs |> Enum.map(&(&1[:cache_write_tokens] || 0)) |> Enum.sum(),
+      by_model: by_model,
+      by_category: by_category,
+      by_phase: by_phase,
+      by_phase_type: by_phase_type
+    }
+  end
+
+  defp group_costs_by(costs, key_fn) do
+    costs
+    |> Enum.group_by(key_fn)
+    |> Map.delete(nil)
+    |> Map.new(fn {k, group} ->
+      {k, %{
+        cost: group |> Enum.map(&(&1[:cost_usd] || 0.0)) |> Enum.sum(),
+        input_tokens: group |> Enum.map(&(&1[:input_tokens] || 0)) |> Enum.sum(),
+        output_tokens: group |> Enum.map(&(&1[:output_tokens] || 0)) |> Enum.sum()
+      }}
+    end)
   end
 
   defp range_config("1h"), do: {1, 12}
@@ -201,7 +253,20 @@ defmodule GiTF.Dashboard.CostsLive do
     <.live_component module={GiTF.Dashboard.AppLayout} id="layout" current_path={@current_path} flash={@flash} toasts={@toasts}>
       <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:1rem">
         <h1 class="page-title" style="margin-bottom:0">Cost Tracking</h1>
-        <button phx-click="refresh" class="btn btn-grey" style="font-size:0.8rem">Refresh</button>
+        <div style="display:flex; align-items:center; gap:0.5rem">
+          <div style="display:flex; gap:2px">
+            <%= for label <- @range_options do %>
+              <button
+                phx-click="set_range"
+                phx-value-range={label}
+                style={"padding:0.25rem 0.6rem; font-size:0.7rem; border-radius:4px; border:1px solid #{if @trend_range == label, do: "#58a6ff", else: "#30363d"}; background:#{if @trend_range == label, do: "#1f6feb33", else: "transparent"}; color:#{if @trend_range == label, do: "#58a6ff", else: "#8b949e"}; cursor:pointer"}
+              >
+                {label}
+              </button>
+            <% end %>
+          </div>
+          <button phx-click="refresh" class="btn btn-grey" style="font-size:0.8rem">Refresh</button>
+        </div>
       </div>
 
       <%!-- Row 1: Gauges + Key Metrics --%>
@@ -266,22 +331,9 @@ defmodule GiTF.Dashboard.CostsLive do
         </div>
       </div>
 
-      <%!-- Cost Trend with range selector --%>
+      <%!-- Cost Trend --%>
       <div class="panel" style="margin-bottom:0.75rem">
-        <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:0.75rem; padding-bottom:0.5rem; border-bottom:1px solid #30363d">
-          <span style="font-size:1rem; font-weight:600; color:#f0f6fc">Cost Trend</span>
-          <div style="display:flex; gap:2px">
-            <%= for label <- @range_options do %>
-              <button
-                phx-click="set_range"
-                phx-value-range={label}
-                style={"padding:0.2rem 0.5rem; font-size:0.65rem; border-radius:4px; border:1px solid #{if @trend_range == label, do: "#58a6ff", else: "#30363d"}; background:#{if @trend_range == label, do: "#1f6feb33", else: "transparent"}; color:#{if @trend_range == label, do: "#58a6ff", else: "#8b949e"}; cursor:pointer"}
-              >
-                {label}
-              </button>
-            <% end %>
-          </div>
-        </div>
+        <div class="panel-title" style="margin-bottom:0.5rem">Cost Trend</div>
         <% max_cost = Enum.max_by(@trend, & &1.cost, fn -> %{cost: 0} end).cost %>
         <div style="display:flex; align-items:flex-end; gap:2px; height:90px; padding:0.25rem 0">
           <%= for bucket <- @trend do %>
@@ -295,42 +347,44 @@ defmodule GiTF.Dashboard.CostsLive do
         </div>
       </div>
 
-      <%!-- Two-column: Mission Budgets + By Model --%>
+      <%!-- Two-column: Productive/Overhead + By Model --%>
       <div style="display:grid; grid-template-columns: 1fr 1fr; gap:0.75rem; margin-bottom:0.75rem">
-        <%!-- Mission Budgets --%>
+        <%!-- Productive vs Overhead — horizontal stacked bar --%>
         <div class="panel" style="margin-bottom:0">
-          <div class="panel-title" style="margin-bottom:0.5rem">Mission Budgets</div>
-          <%= if @mission_costs != [] do %>
-            <table>
-              <thead>
-                <tr>
-                  <th>Mission</th>
-                  <th class="sortable" phx-click="sort_costs" phx-value-col="spent" style="text-align:right">Spent {if @cost_sort == :spent, do: "▼"}</th>
-                  <th class="sortable" phx-click="sort_costs" phx-value-col="pct" style="text-align:right; width:100px">Usage {if @cost_sort == :pct, do: "▼"}</th>
-                </tr>
-              </thead>
-              <tbody>
-                <%= for m <- @mission_costs do %>
-                  <tr>
-                    <td style="font-size:0.8rem">
-                      <a href={"/dashboard/missions/#{m.id}"} style="color:#58a6ff">{m.name || short_id(m.id)}</a>
-                      <span class={"badge #{status_badge(m.status)}"} style="margin-left:0.25rem; font-size:0.6rem">{m.status}</span>
-                    </td>
-                    <td style="text-align:right; font-family:monospace; font-size:0.8rem">{format_cost(m.spent)}</td>
-                    <td>
-                      <div style="display:flex; align-items:center; gap:0.2rem">
-                        <div class="cost-bar" style="flex:1">
-                          <div class="cost-bar-fill" style={"width:#{min(m.pct, 100)}%; background:#{budget_color(m.pct)}"}></div>
-                        </div>
-                        <span style="font-size:0.6rem; color:#8b949e; min-width:28px; text-align:right">{m.pct}%</span>
-                      </div>
-                    </td>
-                  </tr>
-                <% end %>
-              </tbody>
-            </table>
+          <div class="panel-title" style="margin-bottom:0.5rem">Productive vs Overhead</div>
+          <%= if @summary.by_phase_type == %{} do %>
+            <div class="empty">No cost data recorded yet.</div>
           <% else %>
-            <div class="empty">No missions yet.</div>
+            <%!-- Stacked horizontal bar --%>
+            <div style="display:flex; height:28px; border-radius:6px; overflow:hidden; margin-bottom:0.5rem">
+              <%= if @prod_pct > 0 do %>
+                <div style={"width:#{@prod_pct}%; background:#3fb950; display:flex; align-items:center; justify-content:center; font-size:0.65rem; font-weight:600; color:#0d1117; min-width:#{if @prod_pct > 8, do: "0", else: "30px"}"}>
+                  {if @prod_pct > 8, do: "#{@prod_pct}%", else: ""}
+                </div>
+              <% end %>
+              <%= if @overhead_pct > 0 do %>
+                <div style={"width:#{@overhead_pct}%; background:#d29922; display:flex; align-items:center; justify-content:center; font-size:0.65rem; font-weight:600; color:#0d1117; min-width:#{if @overhead_pct > 8, do: "0", else: "30px"}"}>
+                  {if @overhead_pct > 8, do: "#{@overhead_pct}%", else: ""}
+                </div>
+              <% end %>
+              <% unknown_pct = max(100.0 - @prod_pct - @overhead_pct, 0) %>
+              <%= if unknown_pct > 1 do %>
+                <div style={"width:#{unknown_pct}%; background:#30363d"}></div>
+              <% end %>
+            </div>
+            <%!-- Legend --%>
+            <div style="display:flex; gap:1.5rem; font-size:0.75rem">
+              <div style="display:flex; align-items:center; gap:0.3rem">
+                <div style="width:10px; height:10px; border-radius:2px; background:#3fb950"></div>
+                <span style="color:#3fb950; font-weight:600">Productive</span>
+                <span style="color:#8b949e">{format_cost(@prod_cost)} ({@prod_pct}%)</span>
+              </div>
+              <div style="display:flex; align-items:center; gap:0.3rem">
+                <div style="width:10px; height:10px; border-radius:2px; background:#d29922"></div>
+                <span style="color:#d29922; font-weight:600">Overhead</span>
+                <span style="color:#8b949e">{format_cost(@overhead_cost)} ({@overhead_pct}%)</span>
+              </div>
+            </div>
           <% end %>
         </div>
 
@@ -366,29 +420,42 @@ defmodule GiTF.Dashboard.CostsLive do
         </div>
       </div>
 
-      <%!-- Two-column: Productive vs Overhead + By Phase --%>
+      <%!-- Two-column: Mission Budgets + By Phase --%>
       <div style="display:grid; grid-template-columns: 1fr 1fr; gap:0.75rem; margin-bottom:0.75rem">
-        <%!-- Productive vs Overhead --%>
+        <%!-- Mission Budgets --%>
         <div class="panel" style="margin-bottom:0">
-          <div class="panel-title" style="margin-bottom:0.5rem">Productive vs Overhead</div>
-          <%= if @summary.by_phase_type == %{} do %>
-            <div class="empty">No cost data recorded yet.</div>
-          <% else %>
-            <div style="display:flex; gap:0.75rem; margin-bottom:0.75rem">
-              <%= for type <- ["productive", "overhead"] do %>
-                <%= if data = @summary.by_phase_type[type] do %>
-                  <% pct = cost_pct(@summary.total_cost, data.cost) %>
-                  <div style="flex:1; text-align:center">
-                    <.gauge pct={pct} color={phase_type_color(type)} />
-                    <div style={"font-size:0.8rem; font-weight:600; color:#{phase_type_color(type)}; margin-top:0.25rem"}>{String.capitalize(type)}</div>
-                    <div style="font-size:0.75rem; color:#8b949e">{format_cost(data.cost)}</div>
-                  </div>
+          <div class="panel-title" style="margin-bottom:0.5rem">Mission Budgets</div>
+          <%= if @mission_costs != [] do %>
+            <table>
+              <thead>
+                <tr>
+                  <th>Mission</th>
+                  <th class="sortable" phx-click="sort_costs" phx-value-col="spent" style="text-align:right">Spent {if @cost_sort == :spent, do: "▼"}</th>
+                  <th class="sortable" phx-click="sort_costs" phx-value-col="pct" style="text-align:right; width:100px">Usage {if @cost_sort == :pct, do: "▼"}</th>
+                </tr>
+              </thead>
+              <tbody>
+                <%= for m <- @mission_costs do %>
+                  <tr>
+                    <td style="font-size:0.8rem">
+                      <a href={"/dashboard/missions/#{m.id}"} style="color:#58a6ff">{m.name || short_id(m.id)}</a>
+                      <span class={"badge #{status_badge(m.status)}"} style="margin-left:0.25rem; font-size:0.6rem">{m.status}</span>
+                    </td>
+                    <td style="text-align:right; font-family:monospace; font-size:0.8rem">{format_cost(m.spent)}</td>
+                    <td>
+                      <div style="display:flex; align-items:center; gap:0.2rem">
+                        <div class="cost-bar" style="flex:1">
+                          <div class="cost-bar-fill" style={"width:#{min(m.pct, 100)}%; background:#{budget_color(m.pct)}"}></div>
+                        </div>
+                        <span style="font-size:0.6rem; color:#8b949e; min-width:28px; text-align:right">{m.pct}%</span>
+                      </div>
+                    </td>
+                  </tr>
                 <% end %>
-              <% end %>
-            </div>
-            <%= if unknown = @summary.by_phase_type["unknown"] do %>
-              <div style="font-size:0.75rem; color:#8b949e; text-align:center">Unknown: {format_cost(unknown.cost)}</div>
-            <% end %>
+              </tbody>
+            </table>
+          <% else %>
+            <div class="empty">No missions yet.</div>
           <% end %>
         </div>
 
