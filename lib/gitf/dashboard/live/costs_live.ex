@@ -10,7 +10,7 @@ defmodule GiTF.Dashboard.CostsLive do
 
   @heartbeat_interval :timer.seconds(20)
 
-  @range_options ~w(1h 4h 8h 24h 7d 30d All)
+  @range_options ~w(1h 4h 8h Today 7d 30d All)
 
   @impl true
   def mount(_params, _session, socket) do
@@ -23,7 +23,7 @@ defmodule GiTF.Dashboard.CostsLive do
     {:ok,
      socket
      |> assign(:cost_sort, :spent)
-     |> assign(:trend_range, "24h")
+     |> assign(:trend_range, "Today")
      |> init_toasts()
      |> assign_data()}
   end
@@ -186,11 +186,18 @@ defmodule GiTF.Dashboard.CostsLive do
   defp range_config("1h"), do: {1, 12}
   defp range_config("4h"), do: {4, 16}
   defp range_config("8h"), do: {8, 16}
+  defp range_config("Today"), do: {hours_since_midnight(), max(hours_since_midnight(), 1)}
   defp range_config("24h"), do: {24, 24}
   defp range_config("7d"), do: {168, 28}
   defp range_config("30d"), do: {720, 30}
   defp range_config("All"), do: {nil, 24}
   defp range_config(_), do: {24, 24}
+
+  defp hours_since_midnight do
+    now = DateTime.utc_now()
+    midnight = DateTime.new!(Date.utc_today(), ~T[00:00:00], "Etc/UTC")
+    max(DateTime.diff(now, midnight, :hour), 1)
+  end
 
   defp build_trend(costs, nil, buckets) do
     # "All" time — find the earliest cost and span to now
