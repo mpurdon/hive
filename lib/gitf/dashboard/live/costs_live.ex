@@ -82,6 +82,9 @@ defmodule GiTF.Dashboard.CostsLive do
     active_hours = compute_active_hours(missions, hours)
     burn_rate = if active_hours > 0, do: Float.round(total_filtered_cost / active_hours, 4), else: 0.0
 
+    # Peak burn rate: highest hourly cost across all time (for gauge reference)
+    peak_burn = compute_peak_hourly_burn(all_costs_raw)
+
     # Per-mission cost breakdown — group filtered costs by mission_id
     costs_by_mission = Enum.group_by(all_costs, & &1[:mission_id])
 
@@ -138,6 +141,7 @@ defmodule GiTF.Dashboard.CostsLive do
     |> assign(:summary, summary)
     |> assign(:burn_rate, burn_rate)
     |> assign(:active_hours, active_hours)
+    |> assign(:peak_burn, peak_burn)
     |> assign(:mission_costs, mission_costs)
     |> assign(:trend, trend)
     |> assign(:total_records, length(all_costs))
@@ -206,6 +210,20 @@ defmodule GiTF.Dashboard.CostsLive do
 
     # Convert to hours (minimum 0.01 to avoid division by zero display)
     max(merged_seconds / 3600.0, 0.0)
+  end
+
+  # Find the highest single-hour cost across all time
+  defp compute_peak_hourly_burn(all_costs) do
+    all_costs
+    |> Enum.filter(& &1[:recorded_at])
+    |> Enum.group_by(fn c ->
+      dt = c.recorded_at
+      {dt.year, dt.month, dt.day, dt.hour}
+    end)
+    |> Enum.map(fn {_hour_key, costs} ->
+      costs |> Enum.map(&(&1[:cost_usd] || 0.0)) |> Enum.sum() |> to_float()
+    end)
+    |> Enum.max(fn -> 0.0 end)
   end
 
   defp compute_summary(costs) do
@@ -351,7 +369,7 @@ defmodule GiTF.Dashboard.CostsLive do
         <%!-- Burn Rate Gauge --%>
         <div class="card" style="display:flex; align-items:center; gap:1rem; padding:1rem">
           <div>
-            <% burn_pct = if @total_budget > 0, do: min(@burn_rate / max(0.01, @total_budget / 24) * 100, 100), else: 0.0 %>
+            <% burn_pct = if @peak_burn > 0, do: min(@burn_rate / @peak_burn * 100, 100), else: 0.0 %>
             <.gauge pct={burn_pct} color={burn_color(@burn_rate)} />
           </div>
           <div>
@@ -360,7 +378,8 @@ defmodule GiTF.Dashboard.CostsLive do
               {format_cost(@burn_rate, 2)}
             </div>
             <% hrs = Float.round(@active_hours, 1) %>
-            <div style="font-size:0.7rem; color:#8b949e">per active hour ({hrs}h runtime)</div>
+            <div style="font-size:0.7rem; color:#8b949e">per active hour ({hrs}h)</div>
+            <div style="font-size:0.65rem; color:#6e7681">peak: {format_cost(@peak_burn, 2)}/hr</div>
           </div>
         </div>
 
@@ -416,25 +435,25 @@ defmodule GiTF.Dashboard.CostsLive do
       <%!-- Two-column: Productive/Overhead + By Model --%>
       <div style="display:grid; grid-template-columns: 1fr 1fr; gap:0.75rem; margin-bottom:0.75rem">
         <%!-- Productive vs Overhead — horizontal stacked bar --%>
-        <div class="panel" style="margin-bottom:0">
+        <div class="panel" style="margin-bottom:0; display:flex; flex-direction:column">
           <div class="panel-title" style="margin-bottom:0.5rem">Productive vs Overhead</div>
           <%= if @summary.by_phase_type == %{} do %>
             <div class="empty">No cost data recorded yet.</div>
           <% else %>
-            <%!-- Stacked horizontal bar: productive (green) + overhead (yellow) + rework (red) --%>
-            <div style="display:flex; height:32px; overflow:hidden; margin: 0.25rem -1.25rem 0.75rem -1.25rem">
+            <%!-- Bar fills available vertical space --%>
+            <div style="display:flex; flex:1; border-radius:6px; overflow:hidden; min-height:40px">
               <%= if @prod_pct > 0 do %>
-                <div style={"width:#{@prod_pct}%; background:#3fb950; display:flex; align-items:center; justify-content:center; font-size:0.65rem; font-weight:600; color:#0d1117; min-width:#{if @prod_pct > 8, do: "0", else: "30px"}"}>
+                <div style={"width:#{@prod_pct}%; background:#3fb950; display:flex; align-items:center; justify-content:center; font-size:0.8rem; font-weight:600; color:#0d1117; min-width:#{if @prod_pct > 8, do: "0", else: "30px"}"}>
                   {if @prod_pct > 8, do: "#{@prod_pct}%", else: ""}
                 </div>
               <% end %>
               <%= if @overhead_pct > 0 do %>
-                <div style={"width:#{@overhead_pct}%; background:#d29922; display:flex; align-items:center; justify-content:center; font-size:0.65rem; font-weight:600; color:#0d1117; min-width:#{if @overhead_pct > 8, do: "0", else: "30px"}"}>
+                <div style={"width:#{@overhead_pct}%; background:#d29922; display:flex; align-items:center; justify-content:center; font-size:0.8rem; font-weight:600; color:#0d1117; min-width:#{if @overhead_pct > 8, do: "0", else: "30px"}"}>
                   {if @overhead_pct > 8, do: "#{@overhead_pct}%", else: ""}
                 </div>
               <% end %>
               <%= if @rework_pct > 0 do %>
-                <div style={"width:#{@rework_pct}%; background:#f85149; display:flex; align-items:center; justify-content:center; font-size:0.65rem; font-weight:600; color:#0d1117; min-width:#{if @rework_pct > 8, do: "0", else: "30px"}"}>
+                <div style={"width:#{@rework_pct}%; background:#f85149; display:flex; align-items:center; justify-content:center; font-size:0.8rem; font-weight:600; color:#0d1117; min-width:#{if @rework_pct > 8, do: "0", else: "30px"}"}>
                   {if @rework_pct > 8, do: "#{@rework_pct}%", else: ""}
                 </div>
               <% end %>
@@ -444,7 +463,7 @@ defmodule GiTF.Dashboard.CostsLive do
               <% end %>
             </div>
             <%!-- Legend --%>
-            <div style="display:flex; gap:1rem; font-size:0.75rem; flex-wrap:wrap">
+            <div style="display:flex; gap:1rem; font-size:0.75rem; flex-wrap:wrap; margin-top:0.5rem">
               <div style="display:flex; align-items:center; gap:0.3rem">
                 <div style="width:10px; height:10px; border-radius:2px; background:#3fb950"></div>
                 <span style="color:#3fb950; font-weight:600">Productive</span>
