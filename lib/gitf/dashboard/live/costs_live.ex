@@ -367,7 +367,7 @@ defmodule GiTF.Dashboard.CostsLive do
             <div class="empty">No cost data recorded yet.</div>
           <% else %>
             <%!-- Stacked horizontal bar: productive (green) + overhead (yellow) + rework (red) --%>
-            <div style="display:flex; height:28px; border-radius:6px; overflow:hidden; margin-bottom:0.5rem">
+            <div style="display:flex; height:32px; overflow:hidden; margin: 0.25rem -1.25rem 0.75rem -1.25rem">
               <%= if @prod_pct > 0 do %>
                 <div style={"width:#{@prod_pct}%; background:#3fb950; display:flex; align-items:center; justify-content:center; font-size:0.65rem; font-weight:600; color:#0d1117; min-width:#{if @prod_pct > 8, do: "0", else: "30px"}"}>
                   {if @prod_pct > 8, do: "#{@prod_pct}%", else: ""}
