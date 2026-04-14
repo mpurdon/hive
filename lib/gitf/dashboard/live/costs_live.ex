@@ -85,9 +85,9 @@ defmodule GiTF.Dashboard.CostsLive do
       |> Enum.filter(&(&1.status in ["active", "completed", "failed"]))
       |> Enum.map(fn m ->
         mission_costs_list = costs_by_mission[m.id] || []
-        spent = mission_costs_list |> Enum.map(&(&1[:cost_usd] || 0.0)) |> Enum.sum() |> Float.round(6)
+        spent = mission_costs_list |> Enum.map(&(&1[:cost_usd] || 0.0)) |> Enum.sum() |> to_float() |> Float.round(6)
         budget = GiTF.Budget.budget_for(m.id)
-        remaining = Float.round(budget - spent, 6)
+        remaining = Float.round(to_float(budget) - spent, 6)
         pct = if budget > 0, do: Float.round(spent / budget * 100, 1), else: 0.0
 
         %{
@@ -162,7 +162,7 @@ defmodule GiTF.Dashboard.CostsLive do
     by_phase_type = group_costs_by(costs, & &1[:phase_type])
 
     %{
-      total_cost: costs |> Enum.map(&(&1[:cost_usd] || 0.0)) |> Enum.sum(),
+      total_cost: costs |> Enum.map(&(&1[:cost_usd] || 0.0)) |> Enum.sum() |> to_float(),
       total_input_tokens: costs |> Enum.map(&(&1[:input_tokens] || 0)) |> Enum.sum(),
       total_output_tokens: costs |> Enum.map(&(&1[:output_tokens] || 0)) |> Enum.sum(),
       total_cache_read_tokens: costs |> Enum.map(&(&1[:cache_read_tokens] || 0)) |> Enum.sum(),
@@ -180,7 +180,7 @@ defmodule GiTF.Dashboard.CostsLive do
     |> Map.delete(nil)
     |> Map.new(fn {k, group} ->
       {k, %{
-        cost: group |> Enum.map(&(&1[:cost_usd] || 0.0)) |> Enum.sum(),
+        cost: group |> Enum.map(&(&1[:cost_usd] || 0.0)) |> Enum.sum() |> to_float(),
         input_tokens: group |> Enum.map(&(&1[:input_tokens] || 0)) |> Enum.sum(),
         output_tokens: group |> Enum.map(&(&1[:output_tokens] || 0)) |> Enum.sum()
       }}
@@ -622,4 +622,9 @@ defmodule GiTF.Dashboard.CostsLive do
   @overhead_phases ~w(review validation simplify scoring orchestration)
   defp phase_to_type(phase) when phase in @overhead_phases, do: "overhead"
   defp phase_to_type(_), do: "productive"
+
+  # Enum.sum([]) returns 0 (integer); Float.round requires a float
+  defp to_float(n) when is_float(n), do: n
+  defp to_float(n) when is_integer(n), do: n * 1.0
+  defp to_float(_), do: 0.0
 end
