@@ -68,14 +68,10 @@ defmodule GiTF.Dashboard.CostsLive do
     # Compute summary from filtered costs
     summary = compute_summary(all_costs)
 
-    # Burn rate: cost in last hour (always from raw, not filtered)
-    one_hour_ago = DateTime.shift(DateTime.utc_now(), hour: -1)
-
-    burn_rate =
-      all_costs_raw
-      |> Enum.filter(fn c -> c[:recorded_at] && DateTime.compare(c.recorded_at, one_hour_ago) != :lt end)
-      |> Enum.map(&(&1[:cost_usd] || 0.0))
-      |> Enum.sum()
+    # Burn rate: total filtered spend / hours in range
+    range_hours = to_float(hours || max(DateTime.diff(DateTime.utc_now(), DateTime.shift(DateTime.utc_now(), hour: -1), :hour), 1))
+    total_filtered_cost = all_costs |> Enum.map(&(&1[:cost_usd] || 0.0)) |> Enum.sum() |> to_float()
+    burn_rate = if range_hours > 0, do: Float.round(total_filtered_cost / range_hours, 4), else: 0.0
 
     # Per-mission cost breakdown — group filtered costs by mission_id
     costs_by_mission = Enum.group_by(all_costs, & &1[:mission_id])
@@ -297,7 +293,7 @@ defmodule GiTF.Dashboard.CostsLive do
         <%!-- Burn Rate Gauge --%>
         <div class="card" style="display:flex; align-items:center; gap:1rem; padding:1rem">
           <div>
-            <% burn_pct = min(@burn_rate / max(1.0, @total_budget / 24) * 100, 100) %>
+            <% burn_pct = if @total_budget > 0, do: min(@burn_rate / max(0.01, @total_budget / 24) * 100, 100), else: 0.0 %>
             <.gauge pct={burn_pct} color={burn_color(@burn_rate)} />
           </div>
           <div>
@@ -305,7 +301,7 @@ defmodule GiTF.Dashboard.CostsLive do
             <div class={"card-value #{if @burn_rate > 1.0, do: "red", else: "yellow"}"} style="font-size:1.4rem">
               {format_cost(@burn_rate, 2)}
             </div>
-            <div style="font-size:0.7rem; color:#8b949e">per hour | {@total_records} records</div>
+            <div style="font-size:0.7rem; color:#8b949e">avg/hour ({@total_records} records)</div>
           </div>
         </div>
 
