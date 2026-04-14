@@ -67,39 +67,34 @@ defmodule GiTF.Dashboard.AppLayout do
           <% end %>
         </div>
         <div class="nav-links">
-          <%!-- Core --%>
+          <%!-- Overview & Operations --%>
           <a href={@prefix} class={if @current_path == "/", do: "active"}>Overview</a>
           <a href={"#{@prefix}/missions"} class={if active?(@current_path, "/missions"), do: "active"}>Missions</a>
-          <a href={"#{@prefix}/ghosts"} class={if @current_path == "/ghosts", do: "active"}>Ghosts</a>
           <a href={"#{@prefix}/progress"} class={if @current_path == "/progress", do: "active"}>Activity</a>
-
-          <div class="nav-sep"></div>
-
-          <%!-- Pipeline --%>
           <a href={"#{@prefix}/costs"} class={if @current_path == "/costs", do: "active"}>Costs</a>
-          <a href={"#{@prefix}/models"} class={if @current_path == "/models", do: "active"}>Models</a>
+          <a href={"#{@prefix}/timeline"} class={if active?(@current_path, "/timeline"), do: "active"}>Timeline</a>
+          <a href={"#{@prefix}/health"} class={if @current_path == "/health", do: "active"}>Health</a>
           <a href={"#{@prefix}/approvals"} class={if active?(@current_path, "/approvals"), do: "active"}>
             Approvals
             <%= if @pending_approvals > 0 do %>
               <span class="nav-badge nav-badge-orange">{@pending_approvals}</span>
             <% end %>
           </a>
-          <a href={"#{@prefix}/merges"} class={if @current_path == "/merges", do: "active"}>Merges</a>
 
           <div class="nav-sep"></div>
 
-          <%!-- Infrastructure --%>
-          <a href={"#{@prefix}/sectors"} class={if @current_path == "/sectors", do: "active"}>Sectors</a>
+          <%!-- Infrastructure & Internals --%>
+          <a href={"#{@prefix}/ghosts"} class={if @current_path == "/ghosts", do: "active"}>Ghosts</a>
           <a href={"#{@prefix}/shells"} class={if @current_path == "/shells", do: "active"}>Shells</a>
-
-          <div class="nav-sep"></div>
-
-          <%!-- Observability --%>
-          <a href={"#{@prefix}/timeline"} class={if active?(@current_path, "/timeline"), do: "active"}>Timeline</a>
-          <a href={"#{@prefix}/health"} class={if @current_path == "/health", do: "active"}>Health</a>
+          <a href={"#{@prefix}/merges"} class={if @current_path == "/merges", do: "active"}>Merges</a>
           <a href={"#{@prefix}/links"} class={if @current_path == "/links", do: "active"}>Links</a>
           <a href={"#{@prefix}/rollback"} class={if @current_path == "/rollback", do: "active"}>Rollback</a>
+          <a href={"#{@prefix}/models"} class={if @current_path == "/models", do: "active"}>Models</a>
+
           <div class="nav-sep"></div>
+
+          <%!-- Configuration --%>
+          <a href={"#{@prefix}/sectors"} class={if @current_path == "/sectors", do: "active"}>Sectors</a>
           <a href={"#{@prefix}/providers"} class={if @current_path == "/providers", do: "active"}>Providers</a>
           <a href={"#{@prefix}/settings"} class={if active?(@current_path, "/settings"), do: "active"}>Settings</a>
           <span style="font-size:0.7rem; color:#484f58; cursor:help" title="Press ? for keyboard shortcuts">?</span>
