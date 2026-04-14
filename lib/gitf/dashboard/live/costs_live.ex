@@ -10,15 +10,7 @@ defmodule GiTF.Dashboard.CostsLive do
 
   @heartbeat_interval :timer.seconds(20)
 
-  @range_options [
-    {"1h", 1},
-    {"4h", 4},
-    {"8h", 8},
-    {"24h", 24},
-    {"7d", 168},
-    {"30d", 720},
-    {"All", nil}
-  ]
+  @range_options ~w(1h 4h 8h 24h 7d 30d All)
 
   @impl true
   def mount(_params, _session, socket) do
@@ -46,6 +38,8 @@ defmodule GiTF.Dashboard.CostsLive do
   end
 
   def handle_event("set_range", %{"range" => range}, socket) do
+    valid = @range_options
+    range = if range in valid, do: range, else: "24h"
     {:noreply, socket |> assign(:trend_range, range) |> assign_data()}
   end
 
@@ -77,15 +71,18 @@ defmodule GiTF.Dashboard.CostsLive do
 
     burn_rate = Enum.sum(Enum.map(recent_costs, &(&1[:cost_usd] || 0.0)))
 
-    # Per-mission cost breakdown
+    # Per-mission cost breakdown — group costs by mission_id in one pass
+    # instead of N calls to Costs.for_quest (which each scan all costs)
+    costs_by_mission = Enum.group_by(all_costs, & &1[:mission_id])
+
     mission_costs =
       missions
       |> Enum.filter(&(&1.status in ["active", "completed", "failed"]))
       |> Enum.map(fn m ->
-        costs = GiTF.Costs.for_quest(m.id)
-        spent = GiTF.Costs.total(costs)
+        mission_costs_list = costs_by_mission[m.id] || []
+        spent = mission_costs_list |> Enum.map(&(&1[:cost_usd] || 0.0)) |> Enum.sum() |> Float.round(6)
         budget = GiTF.Budget.budget_for(m.id)
-        remaining = GiTF.Budget.remaining(m.id)
+        remaining = Float.round(budget - spent, 6)
         pct = if budget > 0, do: Float.round(spent / budget * 100, 1), else: 0.0
 
         %{
@@ -157,32 +154,45 @@ defmodule GiTF.Dashboard.CostsLive do
 
   defp build_trend(costs, hours, buckets) do
     now = DateTime.utc_now()
+    bucket_seconds = max(div(hours * 3600, buckets), 1)
+    window_start = DateTime.shift(now, second: -(buckets * bucket_seconds))
+
+    # Single pass: bucket each cost by time offset from now
+    empty = Map.new(0..(buckets - 1), &{&1, {0.0, 0}})
+
+    filled =
+      Enum.reduce(costs, empty, fn c, acc ->
+        case c[:recorded_at] do
+          nil ->
+            acc
+
+          ts ->
+            diff = DateTime.diff(now, ts, :second)
+
+            if diff >= 0 and DateTime.compare(ts, window_start) != :lt do
+              idx = buckets - 1 - min(div(diff, bucket_seconds), buckets - 1)
+              {cost, tokens} = Map.get(acc, idx, {0.0, 0})
+              Map.put(acc, idx, {cost + (c[:cost_usd] || 0.0), tokens + (c[:input_tokens] || 0) + (c[:output_tokens] || 0)})
+            else
+              acc
+            end
+        end
+      end)
+
     bucket_hours = max(div(hours, buckets), 1)
 
-    0..(buckets - 1)
-    |> Enum.map(fn i ->
-      bucket_end = DateTime.shift(now, hour: -(i * bucket_hours))
-      bucket_start = DateTime.shift(now, hour: -((i + 1) * bucket_hours))
-
-      bucket_costs =
-        Enum.filter(costs, fn c ->
-          c[:recorded_at] &&
-            DateTime.compare(c.recorded_at, bucket_start) != :lt &&
-            DateTime.compare(c.recorded_at, bucket_end) == :lt
-        end)
-
-      cost = Enum.sum(Enum.map(bucket_costs, &(&1[:cost_usd] || 0.0)))
-      tokens = Enum.sum(Enum.map(bucket_costs, &((&1[:input_tokens] || 0) + (&1[:output_tokens] || 0))))
+    Enum.map(0..(buckets - 1), fn i ->
+      {cost, tokens} = Map.get(filled, i, {0.0, 0})
+      reverse_i = buckets - 1 - i
 
       label = cond do
-        i == 0 -> "now"
-        bucket_hours >= 24 -> "#{div(i * bucket_hours, 24)}d"
-        true -> "#{i * bucket_hours}h"
+        reverse_i == 0 -> "now"
+        bucket_hours >= 24 -> "#{div(reverse_i * bucket_hours, 24)}d"
+        true -> "#{reverse_i * bucket_hours}h"
       end
 
       %{label: label, cost: cost, tokens: tokens}
     end)
-    |> Enum.reverse()
   end
 
   @impl true
@@ -199,7 +209,7 @@ defmodule GiTF.Dashboard.CostsLive do
         <%!-- Total Spend Gauge --%>
         <div class="card" style="display:flex; align-items:center; gap:1rem; padding:1rem">
           <div>
-            {gauge_svg(@budget_pct, budget_gauge_color(@budget_pct))}
+            <.gauge pct={@budget_pct} color={budget_gauge_color(@budget_pct)} />
           </div>
           <div>
             <div class="card-label">Total Spend</div>
@@ -212,7 +222,7 @@ defmodule GiTF.Dashboard.CostsLive do
         <div class="card" style="display:flex; align-items:center; gap:1rem; padding:1rem">
           <div>
             <% burn_pct = min(@burn_rate / max(1.0, @total_budget / 24) * 100, 100) %>
-            {gauge_svg(burn_pct, burn_color(@burn_rate))}
+            <.gauge pct={burn_pct} color={burn_color(@burn_rate)} />
           </div>
           <div>
             <div class="card-label">Burn Rate</div>
@@ -226,7 +236,7 @@ defmodule GiTF.Dashboard.CostsLive do
         <%!-- Cache Hit Gauge --%>
         <div class="card" style="display:flex; align-items:center; gap:1rem; padding:1rem">
           <div>
-            {gauge_svg(@cache_hit_pct, cache_color(@cache_hit_pct))}
+            <.gauge pct={@cache_hit_pct} color={cache_color(@cache_hit_pct)} />
           </div>
           <div>
             <div class="card-label">Cache Hit Rate</div>
@@ -261,7 +271,7 @@ defmodule GiTF.Dashboard.CostsLive do
         <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:0.75rem; padding-bottom:0.5rem; border-bottom:1px solid #30363d">
           <span style="font-size:1rem; font-weight:600; color:#f0f6fc">Cost Trend</span>
           <div style="display:flex; gap:2px">
-            <%= for {label, _hours} <- @range_options do %>
+            <%= for label <- @range_options do %>
               <button
                 phx-click="set_range"
                 phx-value-range={label}
@@ -369,7 +379,7 @@ defmodule GiTF.Dashboard.CostsLive do
                 <%= if data = @summary.by_phase_type[type] do %>
                   <% pct = cost_pct(@summary.total_cost, data.cost) %>
                   <div style="flex:1; text-align:center">
-                    {gauge_svg(pct, phase_type_color(type))}
+                    <.gauge pct={pct} color={phase_type_color(type)} />
                     <div style={"font-size:0.8rem; font-weight:600; color:#{phase_type_color(type)}; margin-top:0.25rem"}>{String.capitalize(type)}</div>
                     <div style="font-size:0.75rem; color:#8b949e">{format_cost(data.cost)}</div>
                   </div>
@@ -452,28 +462,24 @@ defmodule GiTF.Dashboard.CostsLive do
     """
   end
 
-  # -- SVG Gauge ---------------------------------------------------------------
+  # -- SVG Gauge (function component) ------------------------------------------
 
-  defp gauge_svg(pct, color) do
-    # Semi-circle arc gauge (0-100%)
-    pct = min(max(pct, 0), 100)
+  attr :pct, :float, required: true
+  attr :color, :string, required: true
+
+  defp gauge(assigns) do
+    pct = min(max(assigns.pct, 0), 100)
     arc_pct = pct / 100.0
-
     angle = :math.pi * (1.0 - arc_pct)
-    ex = 60 + 45 * :math.cos(angle)
-    ey = 60 - 45 * :math.sin(angle)
-    large = if arc_pct > 0.5, do: "1", else: "0"
 
-    assigns = %{pct: pct, color: color, ex: Float.round(ex, 1), ey: Float.round(ey, 1), large: large, arc_pct: arc_pct}
+    assigns =
+      assigns
+      |> assign(:pct, pct)
+      |> assign(:arc_pct, arc_pct)
+      |> assign(:ex, Float.round(60 + 45 * :math.cos(angle), 1))
+      |> assign(:ey, Float.round(60 - 45 * :math.sin(angle), 1))
+      |> assign(:large, if(arc_pct > 0.5, do: "1", else: "0"))
 
-    Phoenix.LiveView.TagEngine.component(
-      &gauge_component/1,
-      assigns,
-      {__ENV__.module, __ENV__.function, __ENV__.file, __ENV__.line}
-    )
-  end
-
-  defp gauge_component(assigns) do
     ~H"""
     <svg viewBox="0 0 120 70" width="90" height="55">
       <path d="M 15 60 A 45 45 0 0 1 105 60" fill="none" stroke="#21262d" stroke-width="8" stroke-linecap="round" />
