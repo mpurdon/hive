@@ -10,6 +10,8 @@ defmodule GiTF.Missions do
   against the store.
   """
 
+  require Logger
+
   alias GiTF.Archive
 
   # Mission statuses considered "in flight" — mission is still actively being
@@ -343,7 +345,9 @@ defmodule GiTF.Missions do
   """
   # Phases where implementation ops are done but the mission isn't finished yet.
   # Only `complete_quest` (via `transition_phase`) should mark "completed".
-  @post_impl_phases ["validation", "awaiting_approval", "sync", "simplify", "scoring"]
+  # Include "implementation" — ops finishing doesn't mean the mission is done;
+  # validation, sync, simplify, and scoring still need to run.
+  @pipeline_phases ["implementation", "validation", "awaiting_approval", "sync", "simplify", "scoring"]
 
   @spec update_status!(String.t()) :: {:ok, map()} | {:error, term()}
   def update_status!(mission_id) do
@@ -372,7 +376,8 @@ defmodule GiTF.Missions do
         # Don't allow "completed" while still in post-implementation phases —
         # simplify/scoring/sync must finish first via complete_quest
         new_status =
-          if new_status == "completed" and Map.get(mission, :current_phase) in @post_impl_phases do
+          if new_status == "completed" and Map.get(mission, :current_phase) in @pipeline_phases do
+            Logger.debug("Mission #{mission_id}: suppressing premature 'completed' — still in #{mission.current_phase} phase")
             "active"
           else
             new_status
@@ -558,6 +563,13 @@ defmodule GiTF.Missions do
             to_phase: to_phase,
             reason: reason,
             seq: System.monotonic_time(:microsecond)
+          })
+
+          # Record in event store for timeline visibility
+          GiTF.EventStore.record(:phase_transition, mission_id, %{
+            from: from_phase,
+            to: to_phase,
+            reason: reason
           })
         end
 

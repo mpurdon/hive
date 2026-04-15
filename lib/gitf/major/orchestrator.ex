@@ -246,6 +246,7 @@ defmodule GiTF.Major.Orchestrator do
 
   defp advance_mission_phase(mission) do
     phase = Map.get(mission, :current_phase, "pending")
+    Logger.info("Orchestrator: advancing #{mission.id} from phase=#{phase} status=#{mission.status}")
 
     case phase do
       "pending" ->
