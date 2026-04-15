@@ -80,6 +80,17 @@ defmodule GiTF.MCPServer.Tools do
         inputSchema: %{type: "object", properties: %{}}
       },
       %{
+        name: "ledger_stats",
+        description:
+          "Orchestration stats by pipeline mode (fast/full): success rate, avg duration, avg cost, rework rate, phase durations.",
+        inputSchema: %{
+          type: "object",
+          properties: %{
+            mode: %{type: "string", description: "Filter by mode: 'fast' or 'full'. Omit for all."}
+          }
+        }
+      },
+      %{
         name: "list_links",
         description: "List inter-agent messages (links) between the Major and ghosts.",
         inputSchema: %{

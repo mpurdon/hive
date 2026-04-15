@@ -1699,6 +1699,12 @@ defmodule GiTF.Major.Orchestrator do
       "Quest #{mission_id} failed: #{reason}"
     )
 
+    # Record failure outcome in the Ledger
+    case GiTF.Missions.get(mission_id) do
+      {:ok, mission} -> GiTF.Ledger.record(mission)
+      _ -> :ok
+    end
+
     {:ok, "completed"}
   end
 
@@ -1832,6 +1838,12 @@ defmodule GiTF.Major.Orchestrator do
       end
 
       cleanup_mission_branch(mission)
+
+      # Record outcome in the Ledger for orchestration tracking
+      case GiTF.Missions.get(mission.id) do
+        {:ok, updated} -> GiTF.Ledger.record(updated)
+        _ -> :ok
+      end
 
       {:ok, "completed"}
     end

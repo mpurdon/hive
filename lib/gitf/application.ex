@@ -218,7 +218,8 @@ defmodule GiTF.Application do
         [
           {GiTF.Observability, []},
           {GiTF.Tachikoma, []},
-          {GiTF.Sync.Queue, []}
+          {GiTF.Sync.Queue, []},
+          {GiTF.Ledger, []}
         ]
       end
 

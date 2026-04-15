@@ -153,6 +153,12 @@ defmodule GiTF.MCPServer.Handlers do
     {:ok, json_text(result)}
   end
 
+  def call("ledger_stats", args) do
+    mode = args["mode"]
+    stats = GiTF.Ledger.stats(mode)
+    {:ok, json_text(stats)}
+  end
+
   def call("list_links", args) do
     opts =
       Enum.reduce(args, [], fn
