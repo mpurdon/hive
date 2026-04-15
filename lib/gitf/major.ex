@@ -192,11 +192,9 @@ defmodule GiTF.Major do
   end
 
   @impl true
-  def handle_cast({:phase_complete, ghost_id, op_id, mission_id}, state) do
-    # Direct notification from ghost worker — bypasses PubSub for reliability
-    Logger.info("Phase complete (direct): ghost=#{ghost_id} op=#{op_id} mission=#{mission_id}")
-    notify_run_job_completed(op_id)
-    state = advance_quest(ghost_id, state)
+  def handle_cast({:phase_complete, _ghost_id, _op_id, _mission_id}, state) do
+    # Deprecated: phase completion now uses Link.send exclusively (durable, deduplicated).
+    # Kept as a no-op to avoid crashing on stale casts from in-flight ghosts after deploy.
     {:noreply, state}
   end
 
