@@ -1745,7 +1745,7 @@ defmodule GiTF.Major.Orchestrator do
     # Feed the learning loop — analyze failed ops
     ingest_failure_outcome(mission_id)
 
-    GiTF.Missions.transition_phase(mission_id, "ghost_in_the_shell", reason)
+    GiTF.Missions.transition_phase(mission_id, "completed", reason)
     GiTF.Missions.update(mission_id, %{status: "failed"})
 
     GiTF.Observability.Alerts.dispatch_webhook(
